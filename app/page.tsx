@@ -32,37 +32,67 @@ export default function Home() {
   }, []);
 
   const syncGuild = async () => {
-    setStatus('Umgehe Vercel-Sperre: Lade Daten über Browser...');
+    setStatus('Lade Gilden-Webseite...');
     try {
-      // 1. Daten direkt über den Browser und einen Proxy von SWGOH.GG abrufen
-      const swgohRes = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(`https://swgoh.gg/api/guild/${guildId}/`));
+      // Akzeptiert sowohl die ID als auch den kompletten SWGOH.GG Link
+      let idToUse = guildId.trim();
+      if (idToUse.includes('/g/')) {
+        const parts = idToUse.split('/g/');
+        idToUse = parts[1].split('/')[0];
+      }
+
+      const swgohUrl = `https://swgoh.gg/g/${idToUse}/`;
+      const proxiedUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(swgohUrl);
       
-      if (!swgohRes.ok) {
-        setStatus(`Fehler: SWGOH.GG antwortet mit Status ${swgohRes.status}`);
+      const res = await fetch(proxiedUrl);
+      if (!res.ok) {
+        setStatus(`Fehler: Website antwortet mit Status ${res.status}`);
         return;
       }
       
-      const guildData = await swgohRes.json();
-      const players = guildData.players || (guildData.data && guildData.data.members) || guildData.data || [];
+      const html = await res.text();
+      
+      // HTML parsen und Spieler-Links suchen
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const links = doc.querySelectorAll('a[href^="/p/"]');
+      
+      const extractedMembers: {ally_code: string, name: string}[] = [];
+      
+      links.forEach(link => {
+        const match = link.getAttribute('href')?.match(/\/p\/(\d{9})/);
+        const name = link.textContent?.trim();
+        
+        // Vermeide leere Links oder Bilder-Links
+        if (match && match[1] && name && name.length > 0) {
+          extractedMembers.push({
+             ally_code: match[1],
+             name: name // 'name' wird vom Backend erwartet
+          });
+        }
+      });
 
-      if (!players || players.length === 0) {
-        setStatus('Gilde gefunden, aber keine Mitgliederliste erhalten.');
+      // Duplikate filtern, falls Spieler auf der Seite mehrfach verlinkt sind
+      const uniqueMembers = Array.from(new Map(extractedMembers.map(item => [item.ally_code, item])).values());
+
+      if (uniqueMembers.length === 0) {
+        setStatus('Webseite geladen, aber keine Spieler gefunden. Prüfe den Link.');
         return;
       }
 
-      setStatus('Daten empfangen. Speichere in Vercel Datenbank...');
+      setStatus(`${uniqueMembers.length} Spieler extrahiert. Speichere in Datenbank...`);
 
-      // 2. Die Liste an das eigene Vercel-Backend senden
-      const res = await fetch('/api/sync-guild', {
+      // Liste an das Vercel-Backend senden
+      const backendRes = await fetch('/api/sync-guild', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guild_id: guildId, members: players })
+        body: JSON.stringify({ guild_id: idToUse, members: uniqueMembers })
       });
       
-      const data = await res.json();
-      setStatus(res.ok ? data.message : `Datenbank-Fehler: ${data.error}`);
+      const data = await backendRes.json();
+      setStatus(backendRes.ok ? data.message : `Datenbank-Fehler: ${data.error}`);
       
-      if (res.ok) fetchMembers(); // Aktualisiert das Dropdown
+      if (backendRes.ok) fetchMembers();
     } catch (error) {
       setStatus('Netzwerkfehler beim Abruf der Daten.');
     }
@@ -93,10 +123,10 @@ export default function Home() {
         <h2>1. Gilde synchronisieren</h2>
         <input
           type="text"
-          placeholder="SWGOH.GG Gilden-ID"
+          placeholder="Kompletter SWGOH.GG Gilden-Link"
           value={guildId}
           onChange={(e) => setGuildId(e.target.value)}
-          style={{ padding: '0.5rem', marginRight: '0.5rem' }}
+          style={{ padding: '0.5rem', marginRight: '0.5rem', width: '70%' }}
         />
         <button onClick={syncGuild} style={{ padding: '0.5rem 1rem' }}>Abrufen</button>
         <p style={{ fontSize: '0.9rem', color: '#555', marginTop: '10px' }}>{status}</p>
