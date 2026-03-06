@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 
-// Typ-Definition für TypeScript
 type Member = { ally_code: string; player_name: string };
 
 export default function Home() {
@@ -10,14 +9,12 @@ export default function Home() {
   const [status, setStatus] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
   
-  // Formular-State
   const [phase, setPhase] = useState('4');
   const [zone, setZone] = useState('Zeffo');
   const [character, setCharacter] = useState('KIADIMUNDI');
   const [relic, setRelic] = useState('7');
   const [selectedAlly, setSelectedAlly] = useState('');
 
-  // Lädt die Mitglieder beim Start der Seite
   const fetchMembers = async () => {
     try {
       const res = await fetch('/api/members');
@@ -35,18 +32,39 @@ export default function Home() {
   }, []);
 
   const syncGuild = async () => {
-    setStatus('Synchronisiere Daten mit SWGOH.GG...');
+    setStatus('Umgehe Vercel-Sperre: Lade Daten über Browser...');
     try {
+      // 1. Daten direkt über den Browser und einen Proxy von SWGOH.GG abrufen
+      const swgohRes = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(`https://swgoh.gg/api/guild/${guildId}/`));
+      
+      if (!swgohRes.ok) {
+        setStatus(`Fehler: SWGOH.GG antwortet mit Status ${swgohRes.status}`);
+        return;
+      }
+      
+      const guildData = await swgohRes.json();
+      const players = guildData.players || (guildData.data && guildData.data.members) || guildData.data || [];
+
+      if (!players || players.length === 0) {
+        setStatus('Gilde gefunden, aber keine Mitgliederliste erhalten.');
+        return;
+      }
+
+      setStatus('Daten empfangen. Speichere in Vercel Datenbank...');
+
+      // 2. Die Liste an das eigene Vercel-Backend senden
       const res = await fetch('/api/sync-guild', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guild_id: guildId })
+        body: JSON.stringify({ guild_id: guildId, members: players })
       });
+      
       const data = await res.json();
-      setStatus(res.ok ? data.message : `Fehler: ${data.error}`);
-      if (res.ok) fetchMembers(); // Aktualisiert die Dropdown-Liste
+      setStatus(res.ok ? data.message : `Datenbank-Fehler: ${data.error}`);
+      
+      if (res.ok) fetchMembers(); // Aktualisiert das Dropdown
     } catch (error) {
-      setStatus('Verbindungsfehler zum Backend.');
+      setStatus('Netzwerkfehler beim Abruf der Daten.');
     }
   };
 
@@ -57,17 +75,13 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          phase,
-          zone,
-          character_base_id: character,
-          target_relic: parseInt(relic),
-          assigned_ally_code: selectedAlly
+          phase, zone, character_base_id: character, target_relic: parseInt(relic), assigned_ally_code: selectedAlly
         })
       });
       const data = await res.json();
       alert(res.ok ? data.message : `Fehler: ${data.error}`);
     } catch (error) {
-      alert('Verbindungsfehler');
+      alert('Verbindungsfehler zur Datenbank');
     }
   };
 
@@ -75,7 +89,6 @@ export default function Home() {
     <main style={{ padding: '2rem', fontFamily: 'sans-serif', maxWidth: '600px' }}>
       <h1>Gilden-Manager</h1>
       
-      {/* Sync Sektion */}
       <section style={{ marginBottom: '2rem', padding: '1rem', background: '#e9ecef', borderRadius: '8px' }}>
         <h2>1. Gilde synchronisieren</h2>
         <input
@@ -86,17 +99,16 @@ export default function Home() {
           style={{ padding: '0.5rem', marginRight: '0.5rem' }}
         />
         <button onClick={syncGuild} style={{ padding: '0.5rem 1rem' }}>Abrufen</button>
-        <p style={{ fontSize: '0.9rem', color: '#555' }}>{status}</p>
+        <p style={{ fontSize: '0.9rem', color: '#555', marginTop: '10px' }}>{status}</p>
       </section>
 
-      {/* Zuweisungs Sektion */}
       <section style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px', border: '1px solid #ddd' }}>
         <h2>2. TB-Zuweisung erstellen</h2>
         <form onSubmit={submitAssignment} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           
           <div style={{ display: 'flex', gap: '1rem' }}>
-            <label>Phase:<br/><input value={phase} onChange={e => setPhase(e.target.value)} style={{ padding: '0.5rem', width: '100%' }} /></label>
-            <label>Zone:<br/><input value={zone} onChange={e => setZone(e.target.value)} style={{ padding: '0.5rem', width: '100%' }} /></label>
+            <label style={{ width: '50%' }}>Phase:<br/><input value={phase} onChange={e => setPhase(e.target.value)} style={{ padding: '0.5rem', width: '100%' }} /></label>
+            <label style={{ width: '50%' }}>Zone:<br/><input value={zone} onChange={e => setZone(e.target.value)} style={{ padding: '0.5rem', width: '100%' }} /></label>
           </div>
 
           <label>Charakter (Base ID):<br/>
@@ -116,7 +128,7 @@ export default function Home() {
             </select>
           </label>
 
-          <button type="submit" style={{ padding: '0.5rem 1rem', background: '#0070f3', color: '#fff', border: 'none', cursor: 'pointer' }}>
+          <button type="submit" style={{ padding: '0.5rem 1rem', background: '#0070f3', color: '#fff', border: 'none', cursor: 'pointer', marginTop: '10px' }}>
             Zuweisung speichern
           </button>
         </form>
