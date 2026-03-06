@@ -21,7 +21,8 @@ export async function GET() {
       );
     `;
     return NextResponse.json({ message: "Datenbanktabellen erfolgreich erstellt" }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+	} catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Ein unbekannter Fehler ist aufgetreten";
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
