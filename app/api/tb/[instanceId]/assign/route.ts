@@ -13,11 +13,11 @@ export async function POST(
     const { instanceId } = await params;
 
     const session = await getServerSession(authOptions);
-    if (!(session?.user as any)?.id) {
+    const userId = (session?.user as any)?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = (session.user as any).id;
     const body = await request.json();
     const { requirementId, memberId } = body;
 
@@ -92,7 +92,8 @@ export async function DELETE(
     const { instanceId } = await params;
 
     const session = await getServerSession(authOptions);
-    if (!(session?.user as any)?.id) {
+    const userId = (session?.user as any)?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

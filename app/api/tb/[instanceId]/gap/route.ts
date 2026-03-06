@@ -13,15 +13,10 @@ export async function GET(
     const phase = parseInt(searchParams.get('phase') || '1');
     const zoneCode = searchParams.get('zone') || '';
 
-    // TB-Instanz laden
     const instanceResult = await sql`
       SELECT
-        ti.id as instance_id,
-        ti.guild_id,
-        ti.status,
-        td.id as definition_id,
-        td.name as tb_name,
-        td.short_code
+        ti.id as instance_id, ti.guild_id, ti.status,
+        td.id as definition_id, td.name as tb_name, td.short_code
       FROM tb_instances ti
       JOIN tb_definitions td ON td.id = ti.tb_definition_id
       WHERE ti.id = ${instanceId}
@@ -42,7 +37,6 @@ export async function GET(
           AND tr.phase = ${phase}
         ORDER BY tr.zone_code
       `;
-
       const analyses = [];
       for (const zone of zonesResult.rows) {
         const analysis = await analyzeZone(instanceId, instance, guildId, phase, zone.zone_code);
@@ -124,26 +118,34 @@ async function analyzeZone(
     assignmentCounts[row.ally_code] = parseInt(row.cnt);
   }
 
+  // ============================================
+  // FIX: Roster pro Unit einzeln laden statt ANY()
+  // ============================================
   const unitBaseIds = [...new Set(requirementsResult.rows.map((r: any) => r.unit_base_id))];
 
-  const rosterResult = unitBaseIds.length > 0
-    ? await sql`
-        SELECT rc.ally_code, rc.unit_base_id, rc.unit_name, rc.relic_tier,
-               rc.rarity, rc.gear_level, rc.galactic_power,
-               gm.player_name, gm.id as member_id
-        FROM roster_cache rc
-        JOIN guild_members gm ON gm.ally_code = rc.ally_code AND gm.guild_id = rc.guild_id
-        WHERE rc.guild_id = ${guildId} AND rc.unit_base_id = ANY(${unitBaseIds})
-        ORDER BY rc.relic_tier DESC, rc.rarity DESC
-      `
-    : { rows: [] };
-
   const rosterByUnit: Record<string, any[]> = {};
-  for (const r of rosterResult.rows) {
-    if (!rosterByUnit[r.unit_base_id]) rosterByUnit[r.unit_base_id] = [];
-    rosterByUnit[r.unit_base_id].push(r);
+
+  // Jede Unit einzeln abfragen (sicher mit @vercel/postgres)
+  for (const unitId of unitBaseIds) {
+    const rosterResult = await sql`
+      SELECT
+        rc.ally_code, rc.unit_base_id, rc.unit_name, rc.relic_tier,
+        rc.rarity, rc.gear_level, rc.galactic_power,
+        gm.player_name, gm.id as member_id
+      FROM roster_cache rc
+      JOIN guild_members gm 
+        ON gm.ally_code = rc.ally_code AND gm.guild_id = rc.guild_id
+      WHERE rc.guild_id = ${guildId}
+        AND rc.unit_base_id = ${unitId}
+      ORDER BY rc.relic_tier DESC, rc.rarity DESC
+    `;
+
+    rosterByUnit[unitId] = rosterResult.rows;
   }
 
+  // ============================================
+  // Gap-Analyse pro Requirement (unverändert)
+  // ============================================
   let totalSlots = 0, filledSlots = 0, readySlots = 0;
 
   const units = requirementsResult.rows.map((req: any) => {
@@ -160,7 +162,9 @@ async function analyzeZone(
       const rarityDeficit = Math.max(0, req.min_rarity - player.rarity);
       if (assigned.some((a: any) => a.allyCode === player.ally_code)) continue;
 
-      const isAssignedElsewhere = allAssignedKeys.has(`${player.ally_code}:${player.unit_base_id}`);
+      const isAssignedElsewhere = allAssignedKeys.has(
+        `${player.ally_code}:${player.unit_base_id}`
+      );
       const assignCount = assignmentCounts[player.ally_code] || 0;
       const score = relicDeficit * 100 + rarityDeficit * 50 +
         (isAssignedElsewhere ? 500 : 0) + assignCount * 10 - player.relic_tier;
@@ -195,7 +199,8 @@ async function analyzeZone(
         totalNeeded: req.total_needed, isPlatoon: req.is_platoon,
         isCombatMission: req.is_combat_mission, platoonPosition: req.platoon_position,
       },
-      totalNeeded: req.total_needed, fulfilledCount: Math.min(assigned.length, req.total_needed),
+      totalNeeded: req.total_needed,
+      fulfilledCount: Math.min(assigned.length, req.total_needed),
       assignedCount: assigned.length, gapCount, status,
       qualifiedPlayers: qualifiedPlayers.slice(0, 10),
       nearMissPlayers: nearMissPlayers.slice(0, 5),

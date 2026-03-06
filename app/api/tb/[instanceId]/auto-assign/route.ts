@@ -13,11 +13,11 @@ export async function POST(
     const { instanceId } = await params;
 
     const session = await getServerSession(authOptions);
-    if (!(session?.user as any)?.id) {
+    const userId = (session?.user as any)?.id;
+    if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = (session.user as any).id;
     const { phase, zoneCode } = await request.json();
 
     if (!phase || !zoneCode) {
@@ -27,7 +27,6 @@ export async function POST(
       );
     }
 
-    // Inline gap analysis statt interner fetch
     const instanceResult = await sql`
       SELECT ti.guild_id, td.id as definition_id
       FROM tb_instances ti
@@ -42,7 +41,6 @@ export async function POST(
     const guildId = instanceResult.rows[0].guild_id;
     const defId = instanceResult.rows[0].definition_id;
 
-    // Requirements laden
     const requirements = await sql`
       SELECT id, unit_base_id, unit_name, min_relic, min_rarity, total_needed
       FROM tb_requirements
@@ -54,7 +52,6 @@ export async function POST(
     const errors: string[] = [];
     const usedKeys = new Set<string>();
 
-    // Bestehende Zuweisungen tracken
     const existing = await sql`
       SELECT ta.ally_code, ta.unit_base_id
       FROM tb_assignments ta
@@ -66,17 +63,14 @@ export async function POST(
     }
 
     for (const req of requirements.rows) {
-      // Wie viele Slots noch offen?
       const filledResult = await sql`
         SELECT COUNT(*) as cnt FROM tb_assignments
         WHERE tb_instance_id = ${instanceId} AND tb_requirement_id = ${req.id}
       `;
       const filled = parseInt(filledResult.rows[0].cnt);
       const slotsOpen = req.total_needed - filled;
-
       if (slotsOpen <= 0) continue;
 
-      // Beste Kandidaten finden
       const candidates = await sql`
         SELECT rc.ally_code, rc.relic_tier, rc.rarity, gm.id as member_id, gm.player_name
         FROM roster_cache rc
@@ -91,7 +85,6 @@ export async function POST(
       let slotsAssigned = 0;
       for (const cand of candidates.rows) {
         if (slotsAssigned >= slotsOpen) break;
-
         const key = `${cand.ally_code}:${req.unit_base_id}`;
         if (usedKeys.has(key)) continue;
 
@@ -114,7 +107,6 @@ export async function POST(
           errors.push(`${req.unit_name}: ${err.message}`);
         }
       }
-
       skipped += slotsOpen - slotsAssigned;
     }
 
