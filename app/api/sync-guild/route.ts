@@ -9,11 +9,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "guild_id fehlt" }, { status: 400 });
     }
 
-    // SWGOH.GG API abrufen - Korrigierter Endpunkt
-    const response = await fetch(`https://swgoh.gg/api/guild/${guild_id}/`);
+    // SWGOH.GG API abrufen mit hinzugefügten Headern zur Umgehung von 403-Fehlern
+    const response = await fetch(`https://swgoh.gg/api/guild/${guild_id}/`, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    });
     
     if (!response.ok) {
-      return NextResponse.json({ error: `Gilde nicht gefunden. API antwortet mit Status ${response.status}` }, { status: 404 });
+      return NextResponse.json({ error: `API antwortet mit Status ${response.status}` }, { status: response.status });
     }
 
     const guildData = await response.json();
@@ -33,7 +39,7 @@ export async function POST(request: Request) {
       if (allyCode) {
           await sql`
             INSERT INTO members (ally_code, player_name, guild_id)
-            VALUES (${allyCode}, ${playerName}, ${guild_id})
+            VALUES (${String(allyCode)}, ${String(playerName)}, ${String(guild_id)})
             ON CONFLICT (ally_code) DO UPDATE
             SET player_name = EXCLUDED.player_name, guild_id = EXCLUDED.guild_id;
           `;
