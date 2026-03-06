@@ -1,43 +1,59 @@
-// lib/auth.ts
-// ... (Imports bleiben gleich)
+import { NextAuthOptions } from 'next-auth';
+import DiscordProvider from 'next-auth/providers/discord';
+import { sql } from '@vercel/postgres';
 
 export const authOptions: NextAuthOptions = {
   providers: [
     DiscordProvider({
       clientId: process.env.DISCORD_CLIENT_ID!,
       clientSecret: process.env.DISCORD_CLIENT_SECRET!,
-      // Erzwingt die E-Mail Abfrage bei Discord
-      authorization: { params: { scope: 'identify email' } },
     }),
   ],
   callbacks: {
     async signIn({ user }) {
-      // DEBUG: Schau in die Vercel-Logs, ob hier eine Email ankommt
-      console.log("Login Versuch für:", user.email);
-      
-      if (!user.email) {
-        console.error("Login abgelehnt: Keine Email von Discord erhalten.");
-        return false; 
-      }
+      if (!user.email) return false;
 
       try {
         await sql`
-          INSERT INTO users (id, name, email, image, updated_at)
-          VALUES (gen_random_uuid(), ${user.name || ''}, ${user.email}, ${user.image || ''}, NOW())
+          INSERT INTO users (name, email, image, updated_at)
+          VALUES (${user.name}, ${user.email}, ${user.image}, NOW())
           ON CONFLICT (email)
-          DO UPDATE SET name = EXCLUDED.name, image = EXCLUDED.image, updated_at = NOW()
+          DO UPDATE SET 
+            name = EXCLUDED.name, 
+            image = EXCLUDED.image, 
+            updated_at = NOW()
         `;
         return true;
       } catch (error) {
-        console.error('Datenbank-Fehler beim Login:', error);
-        // Wir lassen den User trotzdem rein, auch wenn das DB-Update fehlschlägt
-        // Er hat dann halt keine ID/AllyCode in der Session
+        console.error('Database error during signIn:', error);
         return true; 
       }
     },
-    // ... restliche Callbacks
+    async session({ session, token }) {
+      if (session.user && token.sub) {
+        try {
+          const result = await sql`
+            SELECT id, ally_code FROM users WHERE email = ${session.user.email}
+          `;
+          if (result.rows.length > 0) {
+            (session.user as any).id = result.rows[0].id;
+            (session.user as any).allyCode = result.rows[0].ally_code;
+          }
+        } catch (error) {
+          console.error('Session callback error:', error);
+        }
+      }
+      return session;
+    },
+    async jwt({ token }) {
+      return token;
+    },
   },
-  // Wichtig für Vercel Production
+  pages: {
+    signIn: '/login',
+  },
+  session: {
+    strategy: 'jwt',
+  },
   secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === 'development',
 };

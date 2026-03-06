@@ -1,0 +1,238 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================
+// AUTH (NextAuth)
+// ============================================
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  allyCode      String?   @map("ally_code")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+  permissions   Permission[]
+  ownedGuilds   Guild[]        @relation("GuildOwner")
+  assignedBy    TbAssignment[] @relation("AssignedBy")
+  grantedPerms  Permission[]   @relation("GrantedBy")
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refreshToken      String? @map("refresh_token") @db.Text
+  accessToken       String? @map("access_token") @db.Text
+  expiresAt         Int?    @map("expires_at")
+  tokenType         String? @map("token_type")
+  scope             String?
+  idToken           String? @map("id_token") @db.Text
+  sessionState      String? @map("session_state")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ============================================
+// GUILD SYSTEM
+// ============================================
+model Guild {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  swgohGgId String?  @unique @map("swgoh_gg_id")
+  ownerId   String   @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner       User          @relation("GuildOwner", fields: [ownerId], references: [id])
+  permissions Permission[]
+  members     GuildMember[]
+  rosterCache RosterCache[]
+  tbInstances TbInstance[]
+
+  @@map("guilds")
+}
+
+enum GuildRole {
+  owner
+  admin
+  officer
+  member
+
+  @@map("guild_role")
+}
+
+model Permission {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  guildId   String    @map("guild_id")
+  role      GuildRole @default(member)
+  grantedById String? @map("granted_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guild     Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("GrantedBy", fields: [grantedById], references: [id])
+
+  @@unique([userId, guildId])
+  @@map("permissions")
+}
+
+model GuildMember {
+  id            String    @id @default(uuid())
+  guildId       String    @map("guild_id")
+  playerName    String    @map("player_name")
+  allyCode      String    @map("ally_code")
+  galacticPower BigInt    @default(0) @map("galactic_power")
+  linkedUserId  String?   @map("linked_user_id")
+  lastSynced    DateTime? @map("last_synced")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  guild       Guild          @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  assignments TbAssignment[]
+
+  @@unique([guildId, allyCode])
+  @@map("guild_members")
+}
+
+// ============================================
+// ROSTER CACHE
+// ============================================
+model RosterCache {
+  id              String   @id @default(uuid())
+  allyCode        String   @map("ally_code")
+  guildId         String   @map("guild_id")
+  unitBaseId      String   @map("unit_base_id")
+  unitName        String   @map("unit_name")
+  rarity          Int      @default(0)
+  gearLevel       Int      @default(0) @map("gear_level")
+  relicTier       Int      @default(0) @map("relic_tier")
+  galacticPower   Int      @default(0) @map("galactic_power")
+  isGalacticLegend Boolean @default(false) @map("is_galactic_legend")
+  zetaCount       Int      @default(0) @map("zeta_count")
+  omicronCount    Int      @default(0) @map("omicron_count")
+  speed           Int      @default(0)
+  lastUpdated     DateTime @default(now()) @map("last_updated")
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([allyCode, unitBaseId])
+  @@index([guildId, unitBaseId, relicTier])
+  @@map("roster_cache")
+}
+
+// ============================================
+// TB SYSTEM
+// ============================================
+model TbDefinition {
+  id          String   @id @default(uuid())
+  name        String
+  shortCode   String   @unique @map("short_code")
+  alignment   String?
+  totalPhases Int      @default(6) @map("total_phases")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  requirements TbRequirement[]
+  instances    TbInstance[]
+
+  @@map("tb_definitions")
+}
+
+model TbRequirement {
+  id              String  @id @default(uuid())
+  tbDefinitionId  String  @map("tb_definition_id")
+  phase           Int
+  zoneName        String  @map("zone_name")
+  zoneCode        String  @map("zone_code")
+  platoonPosition Int?    @map("platoon_position")
+  unitBaseId      String  @map("unit_base_id")
+  unitName        String  @map("unit_name")
+  minRarity       Int     @default(7) @map("min_rarity")
+  minRelic        Int     @default(0) @map("min_relic")
+  totalNeeded     Int     @default(1) @map("total_needed")
+  isCombatMission Boolean @default(false) @map("is_combat_mission")
+  isPlatoon       Boolean @default(true) @map("is_platoon")
+  specialNotes    String? @map("special_notes")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tbDefinition TbDefinition   @relation(fields: [tbDefinitionId], references: [id], onDelete: Cascade)
+  assignments  TbAssignment[]
+
+  @@index([tbDefinitionId, phase, zoneCode])
+  @@map("tb_requirements")
+}
+
+model TbInstance {
+  id              String    @id @default(uuid())
+  guildId         String    @map("guild_id")
+  tbDefinitionId  String    @map("tb_definition_id")
+  name            String?
+  status          String    @default("planning")
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  guild        Guild          @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  tbDefinition TbDefinition   @relation(fields: [tbDefinitionId], references: [id])
+  assignments  TbAssignment[]
+
+  @@map("tb_instances")
+}
+
+model TbAssignment {
+  id                    String   @id @default(uuid())
+  tbInstanceId          String   @map("tb_instance_id")
+  tbRequirementId       String   @map("tb_requirement_id")
+  guildMemberId         String   @map("guild_member_id")
+  allyCode              String   @map("ally_code")
+  unitBaseId            String   @map("unit_base_id")
+  assignedById          String?  @map("assigned_by")
+  status                String   @default("assigned")
+  playerRelicAtAssignment Int    @default(0) @map("player_relic_at_assignment")
+  notes                 String?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  tbInstance    TbInstance    @relation(fields: [tbInstanceId], references: [id], onDelete: Cascade)
+  tbRequirement TbRequirement @relation(fields: [tbRequirementId], references: [id])
+  guildMember   GuildMember   @relation(fields: [guildMemberId], references: [id])
+  assignedBy    User?         @relation("AssignedBy", fields: [assignedById], references: [id])
+
+  @@unique([tbInstanceId, tbRequirementId, guildMemberId])
+  @@map("tb_assignments")
+}
