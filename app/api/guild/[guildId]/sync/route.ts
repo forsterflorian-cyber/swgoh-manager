@@ -23,12 +23,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (mode === 'player' && playerData && allyCode) {
       for (const unit of playerData.units) {
         const d = unit.data;
-        const relicTier = d.relic_tier ? Math.max(0, d.relic_tier - 2) : 0;
-        await sql`
-          INSERT INTO roster_cache (id, ally_code, guild_id, unit_base_id, unit_name, rarity, gear_level, relic_tier, galactic_power, is_galactic_legend, zeta_count, omicron_count, speed, last_updated)
-          VALUES (gen_random_uuid(), ${allyCode}, ${guildId}, ${d.base_id}, ${d.name}, ${d.rarity}, ${d.gear_level}, ${relicTier}, ${d.power}, ${d.is_galactic_legend || false}, ${d.zeta_abilities?.length || 0}, ${d.omicron_abilities?.length || 0}, 0, NOW())
-          ON CONFLICT (ally_code, unit_base_id) DO UPDATE SET gear_level = EXCLUDED.gear_level, relic_tier = EXCLUDED.relic_tier, last_updated = NOW();
-        `;
+const relicTier = d.relic_tier !== undefined ? Math.max(0, d.relic_tier - 2) : 0;
+const gp = d.power || d.galactic_power || 0;
+
+await sql`
+  INSERT INTO roster_cache (
+    id, ally_code, guild_id, unit_base_id, unit_name, 
+    rarity, gear_level, relic_tier, galactic_power, 
+    is_galactic_legend, zeta_count, omicron_count, speed, last_updated
+  )
+  VALUES (
+    gen_random_uuid(), ${allyCode}, ${guildId}, 
+    ${d.base_id}, ${d.name}, ${d.rarity || 0}, 
+    ${d.gear_level || 0}, ${relicTier}, ${gp}, 
+    ${d.is_galactic_legend || false}, 
+    ${d.zeta_abilities?.length || 0}, 
+    ${d.omicron_abilities?.length || 0}, 0, NOW()
+  )
+  ON CONFLICT (ally_code, unit_base_id) DO UPDATE SET 
+    gear_level = EXCLUDED.gear_level, 
+    relic_tier = EXCLUDED.relic_tier, 
+    galactic_power = EXCLUDED.galactic_power,
+    last_updated = NOW();
+`;
       }
       return NextResponse.json({ success: true });
     }

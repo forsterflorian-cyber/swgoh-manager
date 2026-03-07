@@ -63,11 +63,11 @@ export default function DashboardPage() {
             await fetch(`/api/guild/${guild.id}/sync`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                mode: 'player', 
-                allyCode: member.ally_code.toString(), 
-                playerData: pData 
-              })
+body: JSON.stringify({ 
+  mode: 'player', 
+  allyCode: member.ally_code.toString(), // Sicherstellen, dass es ein String ist
+  playerData: pData 
+})
             });
           }
         } catch (e) {
