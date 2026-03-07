@@ -56,8 +56,14 @@ export async function POST(request: NextRequest) {
       VALUES (gen_random_uuid(), ${name.trim()}, ${finalSlug}, ${swgohGgId || null}, ${userId})
       RETURNING id, name, slug
     `;
-
-    const guild = guildResult.rows[0];
+const guild = guildResult.rows[0];
+// 🚨 WICHTIG: Den User direkt mit der Gilde verknüpfen
+await sql`
+  UPDATE users 
+  SET guild_id = ${guild.id} 
+  WHERE id = ${userId}
+`;
+    
 
     // Owner-Permission setzen
     await sql`

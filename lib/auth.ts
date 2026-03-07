@@ -32,6 +32,7 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user && token.sub) {
         try {
+          // Wir holen die ID und den Ally-Code aus der Postgres DB
           const result = await sql`
             SELECT id, ally_code FROM users WHERE email = ${session.user.email}
           `;
