@@ -1,74 +1,92 @@
-// app/tb/[instanceId]/phase/[phase]/page.tsx
-
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ZoneGapSummary } from '@/lib/types/tb';
-import { ZoneCard } from '@/components/tb/ZoneCard';
+
 import { PhaseNavigation } from '@/components/tb/PhaseNavigation';
+import { ZoneCard } from '@/components/tb/ZoneCard';
+import type { ZoneGapSummary } from '@/lib/types/tb';
+import { toNumber } from '@/lib/utils/to-number';
+
+type ApiEnvelope<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string };
+
+async function loadAnalysis(
+  instanceId: string,
+  phase: number,
+  setZones: (zones: ZoneGapSummary[]) => void,
+  setLoading: (loading: boolean) => void,
+  setError: (error: string | null) => void
+) {
+  setLoading(true);
+  try {
+    const res = await fetch(`/api/tb/${instanceId}/gap?phase=${phase}`);
+    const json = (await res.json()) as ApiEnvelope<ZoneGapSummary[]>;
+
+    if (!res.ok || !json.ok) {
+      throw new Error(json.ok ? 'Gap analysis failed' : json.error);
+    }
+
+    setZones(json.data);
+    setError(null);
+  } catch (error: unknown) {
+    setZones([]);
+    setError(error instanceof Error ? error.message : 'Failed to fetch gap analysis');
+  } finally {
+    setLoading(false);
+  }
+}
 
 export default function PhaseDashboardPage() {
   const params = useParams();
   const instanceId = params.instanceId as string;
-  const phase = parseInt(params.phase as string);
+  const phase = toNumber(params.phase, 0);
+  const isValidPhase = Boolean(instanceId) && phase >= 1;
 
   const [zones, setZones] = useState<ZoneGapSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   const fetchAnalysis = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/tb/${instanceId}/gap?phase=${phase}`);
-      const json = await res.json();
-      if (json.success) {
-        setZones(json.data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch gap analysis:', error);
-    }
-    setLoading(false);
+    await loadAnalysis(instanceId, phase, setZones, setLoading, setError);
   };
 
   useEffect(() => {
-    fetchAnalysis();
-  }, [instanceId, phase]);
+    if (!isValidPhase) {
+      return;
+    }
+
+    void loadAnalysis(instanceId, phase, setZones, setLoading, setError);
+  }, [instanceId, isValidPhase, phase]);
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <header className="sticky top-0 z-50 border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
+        <div className="mx-auto max-w-7xl px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold">
-                {zones[0]?.tbName || 'Territory Battle'}
-              </h1>
-              <p className="text-gray-400 text-sm mt-1">
-                Phase {phase} – Gap Analysis
-              </p>
+              <h1 className="text-2xl font-bold">{zones[0]?.tbName || 'Territory Battle'}</h1>
+              <p className="mt-1 text-sm text-gray-400">Phase {phase} gap analysis</p>
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={fetchAnalysis}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg
-                           text-sm transition-colors"
+                onClick={() => void fetchAnalysis()}
+                className="rounded-lg bg-gray-800 px-4 py-2 text-sm transition-colors hover:bg-gray-700"
               >
-                ↻ Refresh
+                Refresh
               </button>
               <button
                 onClick={async () => {
                   setSyncing(true);
-                  // Trigger roster sync
+                  await fetchAnalysis();
                   setSyncing(false);
-                  fetchAnalysis();
                 }}
                 disabled={syncing}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg
-                           text-sm transition-colors disabled:opacity-50"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm transition-colors hover:bg-blue-500 disabled:opacity-50"
               >
-                {syncing ? '⟳ Syncing...' : '☁ Sync Roster'}
+                {syncing ? 'Refreshing...' : 'Refresh Analysis'}
               </button>
             </div>
           </div>
@@ -76,55 +94,63 @@ export default function PhaseDashboardPage() {
           <PhaseNavigation
             instanceId={instanceId}
             currentPhase={phase}
-            totalPhases={6}
+            totalPhases={zones[0]?.totalPhases || 6}
           />
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {loading ? (
+      <main className="mx-auto max-w-7xl px-4 py-6">
+        {!isValidPhase && (
+          <div className="mb-6 rounded-xl border border-red-800 bg-red-950/40 p-4 text-red-200">
+            Invalid Territory Battle phase
+          </div>
+        )}
+
+        {isValidPhase && error && !loading && (
+          <div className="mb-6 rounded-xl border border-red-800 bg-red-950/40 p-4 text-red-200">
+            {error}
+          </div>
+        )}
+
+        {!isValidPhase ? null : loading ? (
           <div className="flex items-center justify-center py-20">
-            <div className="animate-spin w-8 h-8 border-2 border-blue-500
-                            border-t-transparent rounded-full" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
             <span className="ml-3 text-gray-400">Analyzing roster data...</span>
           </div>
         ) : zones.length === 0 ? (
-          <div className="text-center py-20 text-gray-500">
-            <p className="text-xl">No requirements found for Phase {phase}</p>
-            <p className="mt-2">Make sure TB requirements are configured.</p>
+          <div className="py-20 text-center text-gray-500">
+            <p className="text-xl">No reference data found for phase {phase}</p>
+            <p className="mt-2">Import the current territory battle reference data first.</p>
           </div>
         ) : (
           <>
-            {/* Summary Bar */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
               <SummaryCard
                 label="Total Slots"
-                value={zones.reduce((s, z) => s + z.totalSlots, 0)}
+                value={zones.reduce((sum, zone) => sum + zone.totalSlots, 0)}
                 color="gray"
               />
               <SummaryCard
                 label="Filled"
-                value={zones.reduce((s, z) => s + z.filledSlots, 0)}
+                value={zones.reduce((sum, zone) => sum + zone.filledSlots, 0)}
                 color="green"
               />
               <SummaryCard
-                label="Ready (Unassigned)"
-                value={zones.reduce((s, z) => s + z.readySlots - z.filledSlots, 0)}
+                label="Ready"
+                value={zones.reduce((sum, zone) => sum + zone.readySlots - zone.filledSlots, 0)}
                 color="blue"
               />
               <SummaryCard
                 label="Gaps"
-                value={zones.reduce((s, z) => s + z.gapSlots, 0)}
+                value={zones.reduce((sum, zone) => sum + zone.gapSlots, 0)}
                 color="red"
               />
             </div>
 
-            {/* Zone Cards */}
             <div className="space-y-6">
               {zones.map((zone) => (
                 <ZoneCard
-                  key={zone.zoneCode}
+                  key={zone.zoneKey}
                   zone={zone}
                   instanceId={instanceId}
                   onAssignmentChange={fetchAnalysis}
@@ -148,16 +174,16 @@ function SummaryCard({
   color: 'gray' | 'green' | 'blue' | 'red';
 }) {
   const colors = {
-    gray: 'bg-gray-800 border-gray-700',
-    green: 'bg-emerald-900/30 border-emerald-700',
-    blue: 'bg-blue-900/30 border-blue-700',
-    red: 'bg-red-900/30 border-red-700',
+    gray: 'border-gray-700 bg-gray-800',
+    green: 'border-emerald-700 bg-emerald-900/30',
+    blue: 'border-blue-700 bg-blue-900/30',
+    red: 'border-red-700 bg-red-900/30',
   };
 
   return (
     <div className={`rounded-xl border p-4 ${colors[color]}`}>
       <p className="text-sm text-gray-400">{label}</p>
-      <p className="text-3xl font-bold mt-1">{value}</p>
+      <p className="mt-1 text-3xl font-bold">{value}</p>
     </div>
   );
 }

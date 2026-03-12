@@ -1,57 +1,59 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+
+import { GuildImportService } from '@/lib/services/guild-import';
+import { RosterSyncService } from '@/lib/services/roster-sync';
 import { sql } from '@vercel/postgres';
+import { getAuthenticatedUser, userCanAccessGuild } from '@/lib/api/auth';
+import { jsonError, jsonOk } from '@/lib/api/responses';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ guildId: string }> }) {
+export const runtime = 'nodejs';
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ guildId: string }> }
+) {
   try {
+    const user = await getAuthenticatedUser();
+    if (!user) {
+      return jsonError('Unauthorized', 401);
+    }
+
     const { guildId } = await params;
-    const body = await request.json();
-    const { mode, members, playerData, allyCode } = body;
-
-    // MODUS 1: Mitgliederliste speichern
-    if (mode === 'init' && members) {
-      for (const m of members) {
-        await sql`
-          INSERT INTO guild_members (id, guild_id, player_name, ally_code, galactic_power)
-          VALUES (gen_random_uuid(), ${guildId}, ${m.player_name}, ${m.ally_code.toString()}, ${m.galactic_power})
-          ON CONFLICT (guild_id, ally_code) DO UPDATE SET galactic_power = EXCLUDED.galactic_power;
-        `;
-      }
-      return NextResponse.json({ success: true });
+    if (!(await userCanAccessGuild(user.id, guildId))) {
+      return jsonError('Forbidden', 403);
     }
 
-    // MODUS 2: Einzel-Roster speichern
-    if (mode === 'player' && playerData && allyCode) {
-      for (const unit of playerData.units) {
-        const d = unit.data;
-const relicTier = d.relic_tier !== undefined ? Math.max(0, d.relic_tier - 2) : 0;
-const gp = d.power || d.galactic_power || 0;
+    const { searchParams } = new URL(request.url);
+    const allyCode = searchParams.get('allyCode');
 
-await sql`
-  INSERT INTO roster_cache (
-    id, ally_code, guild_id, unit_base_id, unit_name, 
-    rarity, gear_level, relic_tier, galactic_power, 
-    is_galactic_legend, zeta_count, omicron_count, speed, last_updated
-  )
-  VALUES (
-    gen_random_uuid(), ${allyCode}, ${guildId}, 
-    ${d.base_id}, ${d.name}, ${d.rarity || 0}, 
-    ${d.gear_level || 0}, ${relicTier}, ${gp}, 
-    ${d.is_galactic_legend || false}, 
-    ${d.zeta_abilities?.length || 0}, 
-    ${d.omicron_abilities?.length || 0}, 0, NOW()
-  )
-  ON CONFLICT (ally_code, unit_base_id) DO UPDATE SET 
-    gear_level = EXCLUDED.gear_level, 
-    relic_tier = EXCLUDED.relic_tier, 
-    galactic_power = EXCLUDED.galactic_power,
-    last_updated = NOW();
-`;
+    if (!allyCode) {
+      const guildResult = await sql<{
+        swgoh_gg_id: string | null;
+      }>`
+        SELECT swgoh_gg_id
+        FROM guilds
+        WHERE id = ${guildId}
+      `;
+
+      const swgohGgId = guildResult.rows[0]?.swgoh_gg_id;
+      if (!swgohGgId) {
+        return jsonError('This guild has no SWGOH.GG guild id configured', 400);
       }
-      return NextResponse.json({ success: true });
+
+      const result = await GuildImportService.importFromSwgohGG(guildId, swgohGgId);
+      return jsonOk({
+        imported: result.imported,
+        total: result.total,
+      });
     }
 
-    return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const syncedUnits = await RosterSyncService.syncPlayer(allyCode, guildId);
+    return jsonOk({ syncedUnits });
+  } catch (error: unknown) {
+    console.error('Guild sync failed:', error);
+    return jsonError(
+      error instanceof Error ? error.message : 'Guild sync failed',
+      500
+    );
   }
 }

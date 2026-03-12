@@ -1,12 +1,10 @@
-import { sql } from '@vercel/postgres';
-import { NextResponse } from 'next/server';
+import { jsonError } from '@/lib/api/responses';
+
+export const runtime = 'nodejs';
 
 export async function GET() {
-  try {
-    const { rows } = await sql`SELECT ally_code, player_name FROM members ORDER BY player_name ASC`;
-    return NextResponse.json({ members: rows }, { status: 200 });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unbekannter Fehler";
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
-  }
+  return jsonError(
+    'This legacy members endpoint is no longer supported. Use /api/guild/[guildId]/members instead.',
+    410
+  );
 }

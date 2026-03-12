@@ -1,31 +1,19 @@
-// lib/types/tb.ts
-
-export interface ZoneRequirement {
-  requirementId: string;
+export interface PlatoonSlotRequirement {
+  tbPlatoonSlotId: string;
+  tbPlatoonSlotKey: string;
+  tbPlatoonId: string;
+  tbPlatoonKey: string;
+  platoonNumber: number;
+  slotNumber: number;
   unitBaseId: string;
-  unitName: string;
+  unitName: string | null;
   minRelic: number;
   minRarity: number;
-  totalNeeded: number;
-  isPlatoon: boolean;
-  isCombatMission: boolean;
-  platoonPosition: number | null;
-}
-
-export interface PlayerUnit {
-  allyCode: string;
-  playerName: string;
-  memberId: string;
-  unitBaseId: string;
-  unitName: string;
-  relicTier: number;
-  rarity: number;
-  gearLevel: number;
-  galacticPower: number;
+  zoneKey: string;
 }
 
 export interface GapAnalysisUnit {
-  requirement: ZoneRequirement;
+  requirement: PlatoonSlotRequirement;
   totalNeeded: number;
   fulfilledCount: number;
   assignedCount: number;
@@ -42,11 +30,11 @@ export interface PlayerCandidate {
   memberId: string;
   relicTier: number;
   rarity: number;
-  relicDeficit: number;     // 0 = erfüllt, >0 = fehlt
+  relicDeficit: number;
   rarityDeficit: number;
   isAlreadyAssignedElsewhere: boolean;
-  assignmentCount: number;  // Wie viele Zuweisungen hat der Spieler in dieser Phase?
-  score: number;            // Bewertung: niedriger = besser
+  assignmentCount: number;
+  score: number;
 }
 
 export interface AssignedPlayer {
@@ -56,13 +44,15 @@ export interface AssignedPlayer {
   memberId: string;
   relicTier: number;
   status: string;
+  hasConflict: boolean;
 }
 
 export interface ZoneGapSummary {
   tbInstanceId: string;
   tbName: string;
+  totalPhases: number;
   phase: number;
-  zoneCode: string;
+  zoneKey: string;
   zoneName: string;
   totalSlots: number;
   filledSlots: number;

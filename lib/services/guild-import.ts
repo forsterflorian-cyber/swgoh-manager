@@ -1,23 +1,10 @@
-// lib/services/guild-import.ts
-
 import { sql } from '@vercel/postgres';
 
+import { fetchGuildMembers } from '@/lib/services/swgohgg-client';
+
 export class GuildImportService {
-  /**
-   * Gildenmitglieder von SWGOH.GG importieren
-   */
   static async importFromSwgohGG(guildId: string, swgohGgGuildId: string) {
-    const response = await fetch(
-      `https://swgoh.gg/api/guild-profile/${swgohGgGuildId}/`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-
-    if (!response.ok) {
-      throw new Error(`SWGOH.GG error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const members = data.data?.members || [];
+    const members = await fetchGuildMembers(swgohGgGuildId);
 
     let imported = 0;
 
@@ -28,9 +15,9 @@ export class GuildImportService {
           gen_random_uuid(),
           ${guildId},
           ${member.player_name},
-          ${member.ally_code.toString()},
-          ${member.galactic_power || 0},
-          NOW()
+          ${member.ally_code},
+          ${member.galactic_power},
+          NULL
         )
         ON CONFLICT (guild_id, ally_code)
         DO UPDATE SET
@@ -38,7 +25,8 @@ export class GuildImportService {
           galactic_power = EXCLUDED.galactic_power,
           updated_at = NOW()
       `;
-      imported++;
+
+      imported += 1;
     }
 
     return { imported, total: members.length };

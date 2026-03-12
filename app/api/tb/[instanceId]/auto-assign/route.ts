@@ -1,9 +1,16 @@
-// app/api/tb/[instanceId]/auto-assign/route.ts
+import { NextRequest } from 'next/server';
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { sql } from '@vercel/postgres';
+import { getAuthenticatedUser, userCanAccessTbInstance } from '@/lib/api/auth';
+import { jsonError, jsonOk, readJsonObject } from '@/lib/api/responses';
+import { TbPlanningService } from '@/lib/services/tb-planning';
+import { toNumber } from '@/lib/utils/to-number';
+
+export const runtime = 'nodejs';
+
+type AutoAssignBody = {
+  phase?: unknown;
+  zoneKey?: unknown;
+};
 
 export async function POST(
   request: NextRequest,
@@ -11,110 +18,44 @@ export async function POST(
 ) {
   try {
     const { instanceId } = await params;
+    const user = await getAuthenticatedUser();
 
-    const session = await getServerSession(authOptions);
-    const userId = (session?.user as any)?.id;
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) {
+      return jsonError('Unauthorized', 401);
     }
 
-    const { phase, zoneCode } = await request.json();
-
-    if (!phase || !zoneCode) {
-      return NextResponse.json(
-        { error: 'phase and zoneCode are required' },
-        { status: 400 }
-      );
+    if (!(await userCanAccessTbInstance(user.id, instanceId))) {
+      return jsonError('Forbidden', 403);
     }
 
-    const instanceResult = await sql`
-      SELECT ti.guild_id, td.id as definition_id
-      FROM tb_instances ti
-      JOIN tb_definitions td ON td.id = ti.tb_definition_id
-      WHERE ti.id = ${instanceId}
-    `;
-
-    if (instanceResult.rows.length === 0) {
-      return NextResponse.json({ error: 'Instance not found' }, { status: 404 });
+    const body = await readJsonObject<AutoAssignBody>(request);
+    if (!body) {
+      return jsonError('Request body must be a JSON object', 400);
     }
 
-    const guildId = instanceResult.rows[0].guild_id;
-    const defId = instanceResult.rows[0].definition_id;
+    const phase = toNumber(body.phase || '');
+    const zoneKey = typeof body.zoneKey === 'string' ? body.zoneKey : '';
 
-    const requirements = await sql`
-      SELECT id, unit_base_id, unit_name, min_relic, min_rarity, total_needed
-      FROM tb_requirements
-      WHERE tb_definition_id = ${defId} AND phase = ${phase} AND zone_code = ${zoneCode}
-    `;
-
-    let assigned = 0;
-    let skipped = 0;
-    const errors: string[] = [];
-    const usedKeys = new Set<string>();
-
-    const existing = await sql`
-      SELECT ta.ally_code, ta.unit_base_id
-      FROM tb_assignments ta
-      JOIN tb_requirements tr ON tr.id = ta.tb_requirement_id
-      WHERE ta.tb_instance_id = ${instanceId} AND tr.phase = ${phase}
-    `;
-    for (const e of existing.rows) {
-      usedKeys.add(`${e.ally_code}:${e.unit_base_id}`);
+    if (!phase || !zoneKey) {
+      return jsonError('phase and zoneKey are required', 400);
     }
 
-    for (const req of requirements.rows) {
-      const filledResult = await sql`
-        SELECT COUNT(*) as cnt FROM tb_assignments
-        WHERE tb_instance_id = ${instanceId} AND tb_requirement_id = ${req.id}
-      `;
-      const filled = parseInt(filledResult.rows[0].cnt);
-      const slotsOpen = req.total_needed - filled;
-      if (slotsOpen <= 0) continue;
+    const result = await TbPlanningService.autoAssignZone(
+      instanceId,
+      phase,
+      zoneKey,
+      user.id
+    );
 
-      const candidates = await sql`
-        SELECT rc.ally_code, rc.relic_tier, rc.rarity, gm.id as member_id, gm.player_name
-        FROM roster_cache rc
-        JOIN guild_members gm ON gm.ally_code = rc.ally_code AND gm.guild_id = rc.guild_id
-        WHERE rc.guild_id = ${guildId}
-          AND rc.unit_base_id = ${req.unit_base_id}
-          AND rc.relic_tier >= ${req.min_relic}
-          AND rc.rarity >= ${req.min_rarity}
-        ORDER BY rc.relic_tier ASC
-      `;
-
-      let slotsAssigned = 0;
-      for (const cand of candidates.rows) {
-        if (slotsAssigned >= slotsOpen) break;
-        const key = `${cand.ally_code}:${req.unit_base_id}`;
-        if (usedKeys.has(key)) continue;
-
-        try {
-          await sql`
-            INSERT INTO tb_assignments (
-              id, tb_instance_id, tb_requirement_id, guild_member_id,
-              ally_code, unit_base_id, assigned_by, status, player_relic_at_assignment
-            ) VALUES (
-              gen_random_uuid(), ${instanceId}, ${req.id}, ${cand.member_id},
-              ${cand.ally_code}, ${req.unit_base_id}, ${userId},
-              'assigned', ${cand.relic_tier}
-            )
-            ON CONFLICT DO NOTHING
-          `;
-          usedKeys.add(key);
-          slotsAssigned++;
-          assigned++;
-        } catch (err: any) {
-          errors.push(`${req.unit_name}: ${err.message}`);
-        }
-      }
-      skipped += slotsOpen - slotsAssigned;
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: { assigned, skipped, errors },
+    return jsonOk({
+      assigned: result.assigned,
+      skipped: result.skipped,
+      errors: result.errors,
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return jsonError(
+      error instanceof Error ? error.message : 'Auto assign failed',
+      500
+    );
   }
 }

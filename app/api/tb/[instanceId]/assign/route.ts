@@ -1,9 +1,19 @@
-// app/api/tb/[instanceId]/assign/route.ts
+import { NextRequest } from 'next/server';
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { sql } from '@vercel/postgres';
+import { getAuthenticatedUser, userCanAccessTbInstance } from '@/lib/api/auth';
+import { jsonError, jsonOk, readJsonObject } from '@/lib/api/responses';
+import { TbPlanningService } from '@/lib/services/tb-planning';
+
+export const runtime = 'nodejs';
+
+type AssignBody = {
+  tbPlatoonSlotId?: unknown;
+  memberId?: unknown;
+};
+
+type UnassignBody = {
+  assignmentId?: unknown;
+};
 
 export async function POST(
   request: NextRequest,
@@ -11,76 +21,46 @@ export async function POST(
 ) {
   try {
     const { instanceId } = await params;
+    const user = await getAuthenticatedUser();
 
-    const session = await getServerSession(authOptions);
-    const userId = (session?.user as any)?.id;
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) {
+      return jsonError('Unauthorized', 401);
     }
 
-    const body = await request.json();
-    const { requirementId, memberId } = body;
-
-    if (!requirementId || !memberId) {
-      return NextResponse.json(
-        { error: 'requirementId and memberId are required' },
-        { status: 400 }
-      );
+    if (!(await userCanAccessTbInstance(user.id, instanceId))) {
+      return jsonError('Forbidden', 403);
     }
 
-    const memberResult = await sql`
-      SELECT gm.id, gm.ally_code, gm.player_name, gm.guild_id
-      FROM guild_members gm WHERE gm.id = ${memberId}
-    `;
-    if (memberResult.rows.length === 0) {
-      return NextResponse.json({ error: 'Member not found' }, { status: 404 });
-    }
-    const member = memberResult.rows[0];
-
-    const reqResult = await sql`
-      SELECT tr.unit_base_id, tr.min_relic, tr.total_needed
-      FROM tb_requirements tr WHERE tr.id = ${requirementId}
-    `;
-    if (reqResult.rows.length === 0) {
-      return NextResponse.json({ error: 'Requirement not found' }, { status: 404 });
-    }
-    const req = reqResult.rows[0];
-
-    const existingCount = await sql`
-      SELECT COUNT(*) as cnt FROM tb_assignments
-      WHERE tb_instance_id = ${instanceId} AND tb_requirement_id = ${requirementId}
-    `;
-    if (parseInt(existingCount.rows[0].cnt) >= req.total_needed) {
-      return NextResponse.json({ error: 'All slots filled' }, { status: 400 });
+    const body = await readJsonObject<AssignBody>(request);
+    if (!body) {
+      return jsonError('Request body must be a JSON object', 400);
     }
 
-    const rosterResult = await sql`
-      SELECT relic_tier FROM roster_cache
-      WHERE ally_code = ${member.ally_code}
-        AND unit_base_id = ${req.unit_base_id}
-        AND guild_id = ${member.guild_id}
-    `;
-    const relicTier = rosterResult.rows[0]?.relic_tier || 0;
+    const tbPlatoonSlotId =
+      typeof body.tbPlatoonSlotId === 'string' ? body.tbPlatoonSlotId : '';
+    const memberId = typeof body.memberId === 'string' ? body.memberId : '';
 
-    await sql`
-      INSERT INTO tb_assignments (
-        id, tb_instance_id, tb_requirement_id, guild_member_id,
-        ally_code, unit_base_id, assigned_by, status, player_relic_at_assignment
-      ) VALUES (
-        gen_random_uuid(), ${instanceId}, ${requirementId}, ${memberId},
-        ${member.ally_code}, ${req.unit_base_id}, ${userId}, 'assigned', ${relicTier}
-      )
-      ON CONFLICT (tb_instance_id, tb_requirement_id, guild_member_id)
-      DO UPDATE SET
-        status = 'assigned',
-        player_relic_at_assignment = ${relicTier},
-        assigned_by = ${userId},
-        updated_at = NOW()
-    `;
+    if (!tbPlatoonSlotId || !memberId) {
+      return jsonError('tbPlatoonSlotId and memberId are required', 400);
+    }
 
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const result = await TbPlanningService.assignPlayer(
+      instanceId,
+      tbPlatoonSlotId,
+      memberId,
+      user.id
+    );
+
+    if (!result.success) {
+      return jsonError(result.error || 'Assignment failed', 400);
+    }
+
+    return jsonOk({ assigned: true });
+  } catch (error: unknown) {
+    return jsonError(
+      error instanceof Error ? error.message : 'Assignment failed',
+      500
+    );
   }
 }
 
@@ -90,27 +70,37 @@ export async function DELETE(
 ) {
   try {
     const { instanceId } = await params;
+    const user = await getAuthenticatedUser();
 
-    const session = await getServerSession(authOptions);
-    const userId = (session?.user as any)?.id;
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user) {
+      return jsonError('Unauthorized', 401);
     }
 
-    const body = await request.json();
-    const { assignmentId } = body;
+    if (!(await userCanAccessTbInstance(user.id, instanceId))) {
+      return jsonError('Forbidden', 403);
+    }
+
+    const body = await readJsonObject<UnassignBody>(request);
+    if (!body) {
+      return jsonError('Request body must be a JSON object', 400);
+    }
+
+    const assignmentId = typeof body.assignmentId === 'string' ? body.assignmentId : '';
 
     if (!assignmentId) {
-      return NextResponse.json({ error: 'assignmentId required' }, { status: 400 });
+      return jsonError('assignmentId is required', 400);
     }
 
-    await sql`
-      DELETE FROM tb_assignments
-      WHERE id = ${assignmentId} AND tb_instance_id = ${instanceId}
-    `;
+    const result = await TbPlanningService.unassignPlayer(instanceId, assignmentId);
+    if (!result.success) {
+      return jsonError('Assignment not found', 404);
+    }
 
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonOk({ removed: true });
+  } catch (error: unknown) {
+    return jsonError(
+      error instanceof Error ? error.message : 'Unassign failed',
+      500
+    );
   }
 }

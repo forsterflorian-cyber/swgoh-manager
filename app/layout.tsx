@@ -1,5 +1,3 @@
-// app/layout.tsx – Erweitern mit SessionProvider
-
 import { SessionProvider } from '@/components/layout/SessionProvider';
 import './globals.css';
 
@@ -11,9 +9,7 @@ export default function RootLayout({
   return (
     <html lang="de">
       <body className="bg-gray-950 text-white">
-        <SessionProvider>
-          {children}
-        </SessionProvider>
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   );

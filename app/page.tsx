@@ -1,5 +1,3 @@
-// app/page.tsx
-
 import Link from 'next/link';
 
 export default function HomePage() {
@@ -7,10 +5,10 @@ export default function HomePage() {
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <div className="text-center">
         <h1 className="text-4xl font-bold text-white mb-4">
-          ⚔️ SWGoH TB Manager
+          âš”ï¸ SWGoH TB Manager
         </h1>
         <p className="text-gray-400 mb-8">
-          Territory Battle Planung für deine Gilde
+          Territory Battle Planung fÃ¼r deine Gilde
         </p>
         <div className="flex gap-4 justify-center">
           <Link
