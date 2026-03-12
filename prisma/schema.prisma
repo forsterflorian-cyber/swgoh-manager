@@ -119,6 +119,7 @@ model GuildMember {
   assignments TbAssignment[]
   upgradeAssignments GuildUpgradeAssignment[]
 
+  @@unique([id, guildId], map: "guild_members_id_guild_id_unique")
   @@unique([guildId, allyCode])
   @@map("guild_members")
 }
@@ -297,10 +298,10 @@ model GuildUpgradeAssignment {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   guild         Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  guildMember   GuildMember @relation(fields: [guildMemberId], references: [id], onDelete: Cascade)
+  guildMember   GuildMember @relation(fields: [guildMemberId, guildId], references: [id, guildId], onDelete: Cascade)
   createdByUser User?       @relation("GuildUpgradeAssignmentCreatedBy", fields: [createdByUserId], references: [id])
 
-  @@unique([guildId, guildMemberId, unitBaseId])
+  @@unique([guildId, guildMemberId, unitBaseId], map: "guild_upgrade_assignments_unique_member_unit")
   @@index([guildId, unitBaseId])
   @@index([guildId, guildMemberId])
   @@map("guild_upgrade_assignments")

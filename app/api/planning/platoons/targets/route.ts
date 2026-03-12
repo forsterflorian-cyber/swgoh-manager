@@ -1,19 +1,17 @@
 import { NextRequest } from 'next/server';
 
-import { getAuthenticatedUser, userCanAccessGuild, userCanManageGuild } from '@/lib/api/auth';
+import { getAuthenticatedUser, userCanAccessGuild } from '@/lib/api/auth';
 import { jsonError, jsonOk, readJsonObject } from '@/lib/api/responses';
 import {
-  createGuildUpgradeAssignment,
-  getGuildIdForUpgradeAssignment,
+  deleteGuildUpgradeAssignment,
   normalizePlanetCategory,
-  removeGuildUpgradeAssignment,
+  saveGuildUpgradeAssignment,
 } from '@/lib/services/strategic-targets';
 import { PlatoonReadinessService } from '@/lib/services/platoon-readiness';
 
 export const runtime = 'nodejs';
 
 type CreateTargetBody = {
-  guildId?: unknown;
   guildMemberId?: unknown;
   unitBaseId?: unknown;
   planetCategory?: unknown;
@@ -23,6 +21,55 @@ type CreateTargetBody = {
 type DeleteTargetBody = {
   assignmentId?: unknown;
 };
+
+type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function parseRequiredString(value: unknown, fieldName: string): ParseResult<string> {
+  if (typeof value !== 'string') {
+    return { ok: false, error: `${fieldName} is required` };
+  }
+
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    return { ok: false, error: `${fieldName} is required` };
+  }
+
+  return { ok: true, value: normalizedValue };
+}
+
+function parseOptionalNote(value: unknown): ParseResult<string | null> {
+  if (value === undefined || value === null) {
+    return { ok: true, value: null };
+  }
+
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'note must be a string or null' };
+  }
+
+  const normalizedValue = value.trim();
+  if (!normalizedValue) {
+    return { ok: false, error: 'note must not be empty' };
+  }
+
+  return { ok: true, value: normalizedValue };
+}
+
+function parsePlanetCategory(value: unknown): ParseResult<ReturnType<typeof normalizePlanetCategory>> {
+  if (value === undefined || value === null) {
+    return { ok: true, value: null };
+  }
+
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'planetCategory must be LS, DS, MIX, SPECIAL, or null' };
+  }
+
+  const normalizedValue = normalizePlanetCategory(value);
+  if (!normalizedValue) {
+    return { ok: false, error: 'planetCategory must be LS, DS, MIX, SPECIAL, or null' };
+  }
+
+  return { ok: true, value: normalizedValue };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -83,7 +130,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser();
     if (!user) {
-      return jsonError('Unauthorized', 401);
+      return jsonError('Not authorized', 401);
     }
 
     const body = await readJsonObject<CreateTargetBody>(request);
@@ -91,39 +138,32 @@ export async function POST(request: NextRequest) {
       return jsonError('Request body must be a JSON object', 400);
     }
 
-    const guildId = typeof body.guildId === 'string' ? body.guildId.trim() : '';
-    const guildMemberId =
-      typeof body.guildMemberId === 'string' ? body.guildMemberId.trim() : '';
-    const unitBaseId = typeof body.unitBaseId === 'string' ? body.unitBaseId.trim() : '';
-    const note = typeof body.note === 'string' ? body.note : null;
-    const hasPlanetCategory =
-      body.planetCategory === undefined ||
-      body.planetCategory === null ||
-      typeof body.planetCategory === 'string';
-    const planetCategory =
-      typeof body.planetCategory === 'string'
-        ? normalizePlanetCategory(body.planetCategory)
-        : null;
-
-    if (!guildId || !guildMemberId || !unitBaseId) {
-      return jsonError('guildId, guildMemberId, and unitBaseId are required', 400);
+    const guildMemberIdResult = parseRequiredString(body.guildMemberId, 'guildMemberId');
+    if (!guildMemberIdResult.ok) {
+      return jsonError(guildMemberIdResult.error, 400);
     }
 
-    if (!hasPlanetCategory || (typeof body.planetCategory === 'string' && !planetCategory)) {
-      return jsonError('planetCategory must be LS, DS, MIX, SPECIAL, or null', 400);
+    const unitBaseIdResult = parseRequiredString(body.unitBaseId, 'unitBaseId');
+    if (!unitBaseIdResult.ok) {
+      return jsonError(unitBaseIdResult.error, 400);
     }
 
-    if (!(await userCanManageGuild(user.id, guildId))) {
-      return jsonError('Forbidden', 403);
+    const planetCategoryResult = parsePlanetCategory(body.planetCategory);
+    if (!planetCategoryResult.ok) {
+      return jsonError(planetCategoryResult.error, 400);
     }
 
-    const result = await createGuildUpgradeAssignment({
-      guildId,
-      guildMemberId,
-      unitBaseId,
-      createdByUserId: user.id,
-      planetCategory,
-      note,
+    const noteResult = parseOptionalNote(body.note);
+    if (!noteResult.ok) {
+      return jsonError(noteResult.error, 400);
+    }
+
+    const result = await saveGuildUpgradeAssignment({
+      actorUserId: user.id,
+      guildMemberId: guildMemberIdResult.value,
+      unitBaseId: unitBaseIdResult.value,
+      planetCategory: planetCategoryResult.value,
+      note: noteResult.value,
     });
 
     if (!result.success) {
@@ -134,11 +174,8 @@ export async function POST(request: NextRequest) {
       assigned: true,
       assignmentId: result.assignmentId,
     });
-  } catch (error: unknown) {
-    return jsonError(
-      error instanceof Error ? error.message : 'Strategic target assignment failed',
-      500
-    );
+  } catch {
+    return jsonError('Strategic target assignment failed', 500);
   }
 }
 
@@ -146,7 +183,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const user = await getAuthenticatedUser();
     if (!user) {
-      return jsonError('Unauthorized', 401);
+      return jsonError('Not authorized', 401);
     }
 
     const body = await readJsonObject<DeleteTargetBody>(request);
@@ -154,30 +191,22 @@ export async function DELETE(request: NextRequest) {
       return jsonError('Request body must be a JSON object', 400);
     }
 
-    const assignmentId = typeof body.assignmentId === 'string' ? body.assignmentId.trim() : '';
-    if (!assignmentId) {
-      return jsonError('assignmentId is required', 400);
+    const assignmentIdResult = parseRequiredString(body.assignmentId, 'assignmentId');
+    if (!assignmentIdResult.ok) {
+      return jsonError(assignmentIdResult.error, 400);
     }
 
-    const guildId = await getGuildIdForUpgradeAssignment(assignmentId);
-    if (!guildId) {
-      return jsonError('Strategic target not found', 404);
-    }
+    const result = await deleteGuildUpgradeAssignment({
+      actorUserId: user.id,
+      assignmentId: assignmentIdResult.value,
+    });
 
-    if (!(await userCanManageGuild(user.id, guildId))) {
-      return jsonError('Forbidden', 403);
-    }
-
-    const removed = await removeGuildUpgradeAssignment(assignmentId);
-    if (!removed) {
-      return jsonError('Strategic target not found', 404);
+    if (!result.success) {
+      return jsonError(result.error, result.status);
     }
 
     return jsonOk({ removed: true });
-  } catch (error: unknown) {
-    return jsonError(
-      error instanceof Error ? error.message : 'Strategic target removal failed',
-      500
-    );
+  } catch {
+    return jsonError('Strategic target removal failed', 500);
   }
 }

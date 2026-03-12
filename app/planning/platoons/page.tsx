@@ -234,7 +234,6 @@ function PlatoonReadinessContent() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          guildId: planner.guild.id,
           guildMemberId,
           unitBaseId,
           planetCategory,
