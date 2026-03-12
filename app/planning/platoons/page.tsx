@@ -240,7 +240,7 @@ function PlatoonReadinessContent() {
                 value={topBlocker ? topBlocker.unitName : 'None'}
                 detail={
                   topBlocker
-                    ? `${topBlocker.missingSlots} missing slots across ${topBlocker.blockedZones} zones`
+                    ? `${topBlocker.blockedSlots} blocked slots and ${topBlocker.limitingZones} primary zone bottlenecks`
                     : 'No guild-wide bottleneck detected'
                 }
                 tone={topBlocker ? 'danger' : 'positive'}
@@ -259,13 +259,13 @@ function PlatoonReadinessContent() {
                     </h2>
                   </div>
                   <p className="text-sm text-gray-400">
-                    Ranked by blocked slots, blocked zones, blocked platoons, and upgrade leverage.
+                    Ranked by blocked demand, limiting zones and platoons, shortage depth, and upgrade leverage.
                   </p>
                 </div>
 
                 <div className="mt-5 space-y-4">
-                  {planner?.topMissingUnits.slice(0, 8).map((unit) => (
-                    <MissingUnitCard key={unit.unitBaseId} unit={unit} />
+                  {planner?.topMissingUnits.slice(0, 8).map((unit, index) => (
+                    <MissingUnitCard key={unit.unitBaseId} unit={unit} rank={index + 1} />
                   ))}
                   {planner?.topMissingUnits.length === 0 && (
                     <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
@@ -486,38 +486,42 @@ function MetricCard({
   );
 }
 
-function MissingUnitCard({ unit }: { unit: StrategicUnitImpact }) {
-  const upgradePotential = Math.min(unit.nearMissOwners, unit.missingSlots);
+function MissingUnitCard({
+  unit,
+  rank,
+}: {
+  unit: StrategicUnitImpact;
+  rank: number;
+}) {
+  const shortagePercent = Math.round(unit.shortageRatio * 100);
 
   return (
     <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-white">{unit.unitName}</h3>
-          <p className="mt-1 text-sm text-gray-400">
-            Missing {unit.missingSlots} of {unit.totalRequiredSlots} required slots. Blocks{' '}
-            {unit.blockedZones} zone{unit.blockedZones === 1 ? '' : 's'} and {unit.blockedPlatoons}{' '}
-            platoon{unit.blockedPlatoons === 1 ? '' : 's'}.
-          </p>
+        <div className="flex items-start gap-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-blue-900 bg-blue-950/50 text-sm font-semibold text-blue-200">
+            #{rank}
+          </span>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-semibold text-white">{unit.unitName}</h3>
+              <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+                {formatConstraintLabel(unit.primaryConstraint)}
+              </span>
+            </div>
+            <p className="mt-2 text-sm text-gray-400">{unit.reasonSummary}</p>
+          </div>
         </div>
         <span className="rounded-full border border-red-900 bg-red-950/50 px-3 py-1 text-sm text-red-200">
           Impact {unit.impactScore}
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <StatChip
-          label="Coverage"
-          value={`${unit.coverableSlots}/${unit.totalRequiredSlots}`}
-        />
-        <StatChip
-          label="Qualified owners"
-          value={`${unit.uniqueOwners}`}
-        />
-        <StatChip
-          label="Near misses"
-          value={`${unit.nearMissOwners}`}
-        />
+      <div className="mt-4 grid gap-3 sm:grid-cols-4">
+        <StatChip label="Blocked slots" value={`${unit.blockedSlots}`} />
+        <StatChip label="Primary zones" value={`${unit.limitingZones}`} />
+        <StatChip label="Upgradeable" value={`${unit.estimatedUnlockSlots}`} />
+        <StatChip label="Hard missing" value={`${unit.hardMissingSlots}`} />
       </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-900">
@@ -530,14 +534,26 @@ function MissingUnitCard({ unit }: { unit: StrategicUnitImpact }) {
       </div>
 
       <p className="mt-3 text-sm text-gray-500">
-        Strictest requirement: R{unit.strictestRequirement.minRelic} and{' '}
-        {unit.strictestRequirement.minRarity} stars.{' '}
-        {upgradePotential > 0
-          ? `${upgradePotential} slot${upgradePotential === 1 ? '' : 's'} could be unlocked through nearby upgrades.`
-          : 'New ownership is likely required to close this gap.'}
+        Shortage depth {shortagePercent}%. Strictest requirement: R
+        {unit.strictestRequirement.minRelic} and {unit.strictestRequirement.minRarity} stars. Near
+        miss pressure affects {unit.nearMissSlots} blocked slot
+        {unit.nearMissSlots === 1 ? '' : 's'}.
       </p>
     </div>
   );
+}
+
+function formatConstraintLabel(constraint: StrategicUnitImpact['primaryConstraint']) {
+  switch (constraint) {
+    case 'near_miss':
+      return 'Upgrade target';
+    case 'ownership_shortage':
+      return 'Copy shortage';
+    case 'hard_missing':
+      return 'Hard missing';
+    default:
+      return 'Mixed pressure';
+  }
 }
 
 function StatChip({ label, value }: { label: string; value: string }) {

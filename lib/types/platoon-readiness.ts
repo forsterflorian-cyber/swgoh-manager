@@ -77,8 +77,10 @@ export interface StrategicRequirementSummary {
   minRelic: number;
   minRarity: number;
   satisfyingMembers: number;
+  availableMembers: number;
   ownedMembers: number;
   nearMissMembers: number;
+  status: 'covered' | 'ownership_shortage' | 'near_miss' | 'hard_missing';
   blocked: boolean;
 }
 
@@ -88,10 +90,20 @@ export interface StrategicUnitImpact {
   totalRequiredSlots: number;
   coverableSlots: number;
   missingSlots: number;
+  blockedSlots: number;
+  shortageRatio: number;
   uniqueOwners: number;
   nearMissOwners: number;
+  nearMissSlots: number;
+  hardMissingSlots: number;
+  ownershipShortageSlots: number;
+  estimatedUnlockSlots: number;
   blockedZones: number;
   blockedPlatoons: number;
+  limitingZones: number;
+  limitingPlatoons: number;
+  primaryConstraint: 'near_miss' | 'ownership_shortage' | 'hard_missing' | 'mixed';
+  reasonSummary: string;
   impactScore: number;
   strictestRequirement: {
     minRelic: number;

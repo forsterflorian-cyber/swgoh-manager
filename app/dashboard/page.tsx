@@ -42,8 +42,18 @@ type DashboardStrategicReadiness = {
   topMissingUnits: Array<{
     unitName: string;
     missingSlots: number;
+    blockedSlots: number;
     blockedZones: number;
+    blockedPlatoons: number;
+    limitingZones: number;
+    limitingPlatoons: number;
     nearMissOwners: number;
+    nearMissSlots: number;
+    hardMissingSlots: number;
+    estimatedUnlockSlots: number;
+    primaryConstraint: 'near_miss' | 'ownership_shortage' | 'hard_missing' | 'mixed';
+    reasonSummary: string;
+    impactScore: number;
   }>;
   zones: Array<{
     phase: number;
@@ -402,7 +412,7 @@ export default function DashboardPage() {
             value={topBlocker ? topBlocker.unitName : 'None'}
             detail={
               topBlocker
-                ? `${topBlocker.missingSlots} missing slots across ${topBlocker.blockedZones} zones`
+                ? `${topBlocker.blockedSlots} blocked slots, ${topBlocker.limitingZones} primary zones`
                 : 'No guild-wide blocker detected'
             }
             tone={topBlocker ? 'danger' : 'positive'}
@@ -434,14 +444,19 @@ export default function DashboardPage() {
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm font-medium text-white">{unit.unitName}</p>
-                          <p className="mt-1 text-sm text-gray-400">
-                            Missing {unit.missingSlots} slot{unit.missingSlots === 1 ? '' : 's'}{' '}
-                            across {unit.blockedZones} zone{unit.blockedZones === 1 ? '' : 's'}
-                          </p>
+                          <p className="mt-1 text-sm text-gray-400">{unit.reasonSummary}</p>
                         </div>
-                        <span className="rounded-full border border-amber-900 bg-amber-950/50 px-3 py-1 text-xs text-amber-200">
-                          Near misses {unit.nearMissOwners}
-                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs text-blue-200">
+                            Impact {unit.impactScore}
+                          </span>
+                          <span className="rounded-full border border-amber-900 bg-amber-950/50 px-3 py-1 text-xs text-amber-200">
+                            Upgradeable {unit.estimatedUnlockSlots}
+                          </span>
+                          <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+                            {formatConstraintLabel(unit.primaryConstraint)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -652,6 +667,21 @@ function formatSyncDisplay(lastRosterSync: string | null) {
 
 function formatStatus(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function formatConstraintLabel(
+  constraint: DashboardStrategicReadiness['topMissingUnits'][number]['primaryConstraint']
+) {
+  switch (constraint) {
+    case 'near_miss':
+      return 'Upgrade target';
+    case 'ownership_shortage':
+      return 'Copy shortage';
+    case 'hard_missing':
+      return 'Hard missing';
+    default:
+      return 'Mixed pressure';
+  }
 }
 
 function Banner({

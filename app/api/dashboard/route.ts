@@ -78,8 +78,18 @@ export async function GET() {
               topMissingUnits: planning.topMissingUnits.slice(0, 5).map((unit) => ({
                 unitName: unit.unitName,
                 missingSlots: unit.missingSlots,
+                blockedSlots: unit.blockedSlots,
                 blockedZones: unit.blockedZones,
+                blockedPlatoons: unit.blockedPlatoons,
+                limitingZones: unit.limitingZones,
+                limitingPlatoons: unit.limitingPlatoons,
                 nearMissOwners: unit.nearMissOwners,
+                nearMissSlots: unit.nearMissSlots,
+                hardMissingSlots: unit.hardMissingSlots,
+                estimatedUnlockSlots: unit.estimatedUnlockSlots,
+                primaryConstraint: unit.primaryConstraint,
+                reasonSummary: unit.reasonSummary,
+                impactScore: unit.impactScore,
               })),
               zones: [...planning.zones]
                 .sort((left, right) => {

@@ -68,8 +68,13 @@ type UnitAllocation = {
   totalRequiredSlots: number;
   coverableSlots: number;
   missingSlots: number;
+  blockedSlots: number;
   uniqueOwners: number;
   nearMissOwners: number;
+  nearMissSlots: number;
+  hardMissingSlots: number;
+  ownershipShortageSlots: number;
+  estimatedUnlockSlots: number;
   blockedZoneKeys: Set<string>;
   blockedPlatoonKeys: Set<string>;
   strictestRequirement: {
@@ -78,6 +83,11 @@ type UnitAllocation = {
   };
   slotSummaries: StrategicRequirementSummary[];
   usedOwnerKeys: string[];
+};
+
+type LimitingCounts = {
+  zones: number;
+  platoons: number;
 };
 
 type PlatoonGroup = {
@@ -219,11 +229,47 @@ function allocateRequirements(
   const nearMissOwnerKeys = new Set<string>();
   const usedOwnerKeys: string[] = [];
 
-  const slotSummaries = sortedRequirements.map<StrategicRequirementSummary>((requirement) => {
-    const satisfyingOwners = sortedOwners.filter((owner) => qualifies(owner, requirement));
-    const nearMissOwners = sortedOwners.filter((owner) => isNearMiss(owner, requirement));
+  let coverableSlots = 0;
+  let blockedSlots = 0;
+  let nearMissSlots = 0;
+  let hardMissingSlots = 0;
+  let ownershipShortageSlots = 0;
+  const slotSummaries: StrategicRequirementSummary[] = [];
 
-    return {
+  for (const requirement of sortedRequirements) {
+    const satisfyingOwners = sortedOwners.filter((owner) => qualifies(owner, requirement));
+    const availableOwners = satisfyingOwners
+      .filter((owner) => remainingOwnerKeys.has(ownerKey(owner)))
+      .sort(compareOwnersForAssignment);
+    const nearMissOwners = sortedOwners.filter((owner) => isNearMiss(owner, requirement));
+    const candidate = availableOwners[0];
+    let status: StrategicRequirementSummary['status'] = 'covered';
+
+    if (candidate) {
+      remainingOwnerKeys.delete(ownerKey(candidate));
+      usedOwnerKeys.push(ownerKey(candidate));
+      coverableSlots += 1;
+    } else {
+      blockedSlots += 1;
+      blockedZoneKeys.add(requirement.zoneKey);
+      blockedPlatoonKeys.add(requirement.platoonKey);
+
+      if (satisfyingOwners.length > 0) {
+        status = 'ownership_shortage';
+        ownershipShortageSlots += 1;
+      } else if (nearMissOwners.length > 0) {
+        status = 'near_miss';
+        nearMissSlots += 1;
+        for (const owner of nearMissOwners) {
+          nearMissOwnerKeys.add(ownerKey(owner));
+        }
+      } else {
+        status = 'hard_missing';
+        hardMissingSlots += 1;
+      }
+    }
+
+    slotSummaries.push({
       phase: requirement.phase,
       zoneKey: requirement.zoneKey,
       zoneName: requirement.zoneName,
@@ -236,46 +282,30 @@ function allocateRequirements(
       minRelic: requirement.requiredRelicTier,
       minRarity: requirement.requiredRarity,
       satisfyingMembers: satisfyingOwners.length,
+      availableMembers: availableOwners.length,
       ownedMembers: sortedOwners.length,
       nearMissMembers: nearMissOwners.length,
-      blocked: satisfyingOwners.length === 0,
-    };
-  });
-
-  let coverableSlots = 0;
-
-  for (const requirement of sortedRequirements) {
-    const candidate = sortedOwners
-      .filter((owner) => remainingOwnerKeys.has(ownerKey(owner)) && qualifies(owner, requirement))
-      .sort(compareOwnersForAssignment)[0];
-
-    if (candidate) {
-      remainingOwnerKeys.delete(ownerKey(candidate));
-      usedOwnerKeys.push(ownerKey(candidate));
-      coverableSlots += 1;
-      continue;
-    }
-
-    blockedZoneKeys.add(requirement.zoneKey);
-    blockedPlatoonKeys.add(requirement.platoonKey);
-
-    for (const owner of sortedOwners) {
-      if (isNearMiss(owner, requirement)) {
-        nearMissOwnerKeys.add(ownerKey(owner));
-      }
-    }
+      status,
+      blocked: status !== 'covered',
+    });
   }
 
   const firstRequirement = sortedRequirements[0];
+  const missingSlots = Math.max(sortedRequirements.length - coverableSlots, 0);
 
   return {
     unitBaseId: firstRequirement?.unitBaseId ?? 'UNKNOWN',
     unitName: firstRequirement?.unitName ?? firstRequirement?.unitBaseId ?? 'Unknown Unit',
     totalRequiredSlots: sortedRequirements.length,
     coverableSlots,
-    missingSlots: Math.max(sortedRequirements.length - coverableSlots, 0),
+    missingSlots,
+    blockedSlots,
     uniqueOwners: sortedOwners.length,
     nearMissOwners: nearMissOwnerKeys.size,
+    nearMissSlots,
+    hardMissingSlots: hardMissingSlots + ownershipShortageSlots,
+    ownershipShortageSlots,
+    estimatedUnlockSlots: Math.min(missingSlots, nearMissOwnerKeys.size),
     blockedZoneKeys,
     blockedPlatoonKeys,
     strictestRequirement: {
@@ -388,28 +418,138 @@ function toOwnerMap(roster: StrategicPlannerRosterInput[]) {
   return ownersByUnit;
 }
 
-function toImpact(allocation: UnitAllocation): StrategicUnitImpact {
-  const upgradePotential = Math.min(allocation.nearMissOwners, allocation.missingSlots);
-  const impactScore =
-    allocation.missingSlots * 100 +
-    allocation.blockedZoneKeys.size * 70 +
-    allocation.blockedPlatoonKeys.size * 45 +
-    upgradePotential * 15 +
-    allocation.strictestRequirement.minRelic * 3 +
-    allocation.strictestRequirement.minRarity;
+function getPrimaryConstraint(
+  allocation: UnitAllocation
+): StrategicUnitImpact['primaryConstraint'] {
+  const structuralHardMissingSlots = Math.max(
+    allocation.hardMissingSlots - allocation.ownershipShortageSlots,
+    0
+  );
+  const highestPressure = Math.max(
+    allocation.nearMissSlots,
+    allocation.ownershipShortageSlots,
+    structuralHardMissingSlots
+  );
 
-  return {
+  const matchingConstraints: StrategicUnitImpact['primaryConstraint'][] = [
+    allocation.nearMissSlots === highestPressure && highestPressure > 0 ? 'near_miss' : null,
+    allocation.ownershipShortageSlots === highestPressure && highestPressure > 0
+      ? 'ownership_shortage'
+      : null,
+    structuralHardMissingSlots === highestPressure && highestPressure > 0
+      ? 'hard_missing'
+      : null,
+  ].filter(
+    (
+      constraint
+    ): constraint is Exclude<StrategicUnitImpact['primaryConstraint'], 'mixed'> =>
+      constraint !== null
+  );
+
+  if (matchingConstraints.length !== 1) {
+    return 'mixed';
+  }
+
+  return matchingConstraints[0];
+}
+
+function calculateBaseImpactScore(
+  impact: Omit<StrategicUnitImpact, 'impactScore' | 'reasonSummary'>
+) {
+  return (
+    impact.blockedSlots * 100 +
+    impact.blockedPlatoons * 65 +
+    impact.blockedZones * 90 +
+    Math.round(impact.shortageRatio * 100) +
+    impact.hardMissingSlots * 18 +
+    impact.ownershipShortageSlots * 22 +
+    impact.nearMissSlots * 16 +
+    impact.estimatedUnlockSlots * 28 +
+    impact.strictestRequirement.minRelic * 3 +
+    impact.strictestRequirement.minRarity
+  );
+}
+
+function buildReasonSummary(
+  impact: Omit<StrategicUnitImpact, 'impactScore' | 'reasonSummary'>
+): string {
+  const parts: string[] = [
+    `Blocks ${impact.blockedSlots} slot${impact.blockedSlots === 1 ? '' : 's'} across ${impact.blockedZones} zone${
+      impact.blockedZones === 1 ? '' : 's'
+    } and ${impact.blockedPlatoons} platoon${impact.blockedPlatoons === 1 ? '' : 's'}.`,
+  ];
+
+  if (impact.limitingZones > 0 || impact.limitingPlatoons > 0) {
+    parts.push(
+      `Primary bottleneck in ${impact.limitingZones} zone${
+        impact.limitingZones === 1 ? '' : 's'
+      } and ${impact.limitingPlatoons} platoon${impact.limitingPlatoons === 1 ? '' : 's'}.`
+    );
+  }
+
+  if (impact.nearMissSlots > 0 && impact.hardMissingSlots > 0) {
+    parts.push(
+      `${impact.estimatedUnlockSlots} slot${impact.estimatedUnlockSlots === 1 ? '' : 's'} look upgradeable from near-miss owners, while ${impact.hardMissingSlots} still need more qualified copies.`
+    );
+  } else if (impact.nearMissSlots > 0) {
+    parts.push(
+      `Mostly a near-miss upgrade target: ${impact.estimatedUnlockSlots} slot${
+        impact.estimatedUnlockSlots === 1 ? '' : 's'
+      } could open through relic or rarity upgrades.`
+    );
+  } else if (impact.ownershipShortageSlots > 0) {
+    parts.push(
+      'Capacity issue: some members already qualify, but the guild does not have enough copies to satisfy repeated platoon demand.'
+    );
+  } else {
+    parts.push(
+      'Mostly hard missing: the guild lacks enough realistic qualifying copies for these requirements.'
+    );
+  }
+
+  return parts.join(' ');
+}
+
+function toImpact(
+  allocation: UnitAllocation,
+  limitingCounts: LimitingCounts = { zones: 0, platoons: 0 }
+): StrategicUnitImpact {
+  const shortageRatio =
+    allocation.totalRequiredSlots > 0
+      ? allocation.missingSlots / allocation.totalRequiredSlots
+      : 0;
+  const primaryConstraint = getPrimaryConstraint(allocation);
+
+  const impactWithoutScore = {
     unitBaseId: allocation.unitBaseId,
     unitName: allocation.unitName,
     totalRequiredSlots: allocation.totalRequiredSlots,
     coverableSlots: allocation.coverableSlots,
     missingSlots: allocation.missingSlots,
+    blockedSlots: allocation.blockedSlots,
+    shortageRatio,
     uniqueOwners: allocation.uniqueOwners,
     nearMissOwners: allocation.nearMissOwners,
+    nearMissSlots: allocation.nearMissSlots,
+    hardMissingSlots: allocation.hardMissingSlots,
+    ownershipShortageSlots: allocation.ownershipShortageSlots,
+    estimatedUnlockSlots: allocation.estimatedUnlockSlots,
     blockedZones: allocation.blockedZoneKeys.size,
     blockedPlatoons: allocation.blockedPlatoonKeys.size,
-    impactScore,
+    limitingZones: limitingCounts.zones,
+    limitingPlatoons: limitingCounts.platoons,
+    primaryConstraint,
     strictestRequirement: allocation.strictestRequirement,
+  };
+  const impactScore =
+    calculateBaseImpactScore(impactWithoutScore) +
+    limitingCounts.platoons * 45 +
+    limitingCounts.zones * 70;
+
+  return {
+    ...impactWithoutScore,
+    reasonSummary: buildReasonSummary(impactWithoutScore),
+    impactScore,
   };
 }
 
@@ -427,6 +567,35 @@ function sortImpacts(left: StrategicUnitImpact, right: StrategicUnitImpact) {
   }
 
   return left.unitName.localeCompare(right.unitName);
+}
+
+function countLimitingFactors(
+  groups: Array<{ slots: StrategicPlannerSlotInput[] }>,
+  ownersByUnit: Map<string, StrategicPlannerRosterInput[]>
+): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const group of groups) {
+    const impacts = [...groupSlotsByUnit(group.slots).entries()]
+      .map(([unitBaseId, requirements]) =>
+        toImpact(allocateRequirements(requirements, ownersByUnit.get(unitBaseId) ?? []))
+      )
+      .filter((impact) => impact.blockedSlots > 0)
+      .sort(sortImpacts);
+
+    if (impacts.length === 0) {
+      continue;
+    }
+
+    const topScore = impacts[0].impactScore;
+    const topImpacts = impacts.filter((impact) => impact.impactScore === topScore);
+
+    for (const impact of topImpacts) {
+      counts.set(impact.unitBaseId, (counts.get(impact.unitBaseId) ?? 0) + 1);
+    }
+  }
+
+  return counts;
 }
 
 function buildPlatoonStatuses(
@@ -572,18 +741,7 @@ function buildRecommendedActions(input: {
   })[0];
 
   if (topUnit) {
-    const upgradeText =
-      topUnit.nearMissOwners > 0
-        ? `${Math.min(topUnit.nearMissOwners, topUnit.missingSlots)} nearby upgrade path${
-            Math.min(topUnit.nearMissOwners, topUnit.missingSlots) === 1 ? '' : 's'
-          } exist`
-        : 'new ownership is required';
-
-    actions.push(
-      `${topUnit.unitName} is the biggest blocker with ${topUnit.missingSlots} missing slot${
-        topUnit.missingSlots === 1 ? '' : 's'
-      } across ${topUnit.blockedZones} zone${topUnit.blockedZones === 1 ? '' : 's'}; ${upgradeText}.`
-    );
+    actions.push(`${topUnit.unitName} is the biggest blocker. ${topUnit.reasonSummary}`);
   }
 
   if (topZone) {
@@ -652,27 +810,36 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     rosterUnitCount: dataset.roster.length,
   };
   const ownersByUnit = toOwnerMap(dataset.roster);
+  const zoneGroups = groupSlotsByZone(dataset.slots);
+  const allPlatoons = groupSlotsByPlatoon(dataset.slots);
   const overallUnitAllocations = [...groupSlotsByUnit(dataset.slots).entries()].map(
     ([unitBaseId, requirements]) =>
       allocateRequirements(requirements, ownersByUnit.get(unitBaseId) ?? [])
   );
+  const limitingZoneCounts = countLimitingFactors(zoneGroups, ownersByUnit);
+  const limitingPlatoonCounts = countLimitingFactors(allPlatoons, ownersByUnit);
   const slotSummaries = overallUnitAllocations
     .flatMap((allocation) => allocation.slotSummaries)
     .sort(sortSlotSummaries);
   const slotSummaryByKey = new Map(slotSummaries.map((summary) => [summary.slotKey, summary]));
   const topMissingUnits = overallUnitAllocations
-    .map(toImpact)
+    .map((allocation) =>
+      toImpact(allocation, {
+        zones: limitingZoneCounts.get(allocation.unitBaseId) ?? 0,
+        platoons: limitingPlatoonCounts.get(allocation.unitBaseId) ?? 0,
+      })
+    )
     .filter((impact) => impact.missingSlots > 0)
     .sort(sortImpacts);
 
-  const zones = groupSlotsByZone(dataset.slots).map<StrategicZoneReadiness>((zone) => {
+  const zones = zoneGroups.map<StrategicZoneReadiness>((zone) => {
     const zoneOwners = toOwnerMap(dataset.roster);
     const zoneUnitAllocations = [...groupSlotsByUnit(zone.slots).entries()].map(
       ([unitBaseId, requirements]) =>
         allocateRequirements(requirements, zoneOwners.get(unitBaseId) ?? [])
     );
     const zoneImpact = zoneUnitAllocations
-      .map(toImpact)
+      .map((allocation) => toImpact(allocation))
       .filter((impact) => impact.missingSlots > 0)
       .sort(sortImpacts);
     const platoons = groupSlotsByPlatoon(zone.slots);
@@ -726,7 +893,6 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     };
   });
 
-  const allPlatoons = groupSlotsByPlatoon(dataset.slots);
   const estimatedCoverablePlatoons = estimateCoverablePlatoons(
     allPlatoons,
     ownersByUnit,
