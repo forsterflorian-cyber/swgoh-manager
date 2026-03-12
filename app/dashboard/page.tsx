@@ -97,6 +97,21 @@ type Notice = {
   message: string;
 };
 
+function buildPlannerHref(view: 'overview' | 'priorities' | 'targets', fixture?: 'demo') {
+  const params = new URLSearchParams();
+
+  if (fixture === 'demo') {
+    params.set('fixture', 'demo');
+  }
+
+  if (view !== 'overview') {
+    params.set('view', view);
+  }
+
+  const query = params.toString();
+  return query ? `/planning/platoons?${query}` : '/planning/platoons';
+}
+
 export default function DashboardPage() {
   const [guild, setGuild] = useState<DashboardGuild | null>(null);
   const [activeTb, setActiveTb] = useState<DashboardTb | null>(null);
@@ -263,7 +278,8 @@ export default function DashboardPage() {
             </h1>
             <p className="mt-3 text-base text-gray-400">
               Strategic platoon planning starts with a guild roster. Connect a guild to analyze
-              bottlenecks, or use the demo planner to review the new readiness workflow.
+              bottlenecks, or use the demo planner to review overview, priorities, and member
+              targets.
             </p>
             {error && (
               <div className="mx-auto mt-6 max-w-xl rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-left text-sm text-red-200">
@@ -272,10 +288,10 @@ export default function DashboardPage() {
             )}
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Link
-                href="/planning/platoons?fixture=demo"
+                href={buildPlannerHref('overview', 'demo')}
                 className="inline-flex rounded-xl border border-blue-500 bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
               >
-                Open demo planner
+                Open demo overview
               </Link>
               <Link
                 href="/login"
@@ -313,8 +329,9 @@ export default function DashboardPage() {
                 )}
               </div>
               <p className="mt-4 max-w-3xl text-sm text-gray-300">
-                Focus the guild on the units that unlock the most platoon coverage. This dashboard
-                stays useful even without an active Territory Battle instance.
+                Use the planner&apos;s Overview, Missing Units, and Member Targets views to focus the
+                guild on the units that unlock the most platoon coverage. This dashboard stays
+                useful even without an active Territory Battle instance.
               </p>
             </div>
 
@@ -327,10 +344,10 @@ export default function DashboardPage() {
                 {syncStatus ? 'Syncing...' : 'Sync roster'}
               </button>
               <Link
-                href="/planning/platoons"
+                href={buildPlannerHref('overview')}
                 className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
               >
-                Open strategic planner
+                Open planner overview
               </Link>
               {activeTb && (
                 <Link
@@ -422,7 +439,7 @@ export default function DashboardPage() {
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Strategic snapshot
+              Overview preview
             </p>
 
             {summary ? (
@@ -536,12 +553,14 @@ export default function DashboardPage() {
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Recommended actions
+              Planner workflow
             </p>
             <div className="mt-4 space-y-3">
               {(strategicReadiness?.recommendedActions.length
                 ? strategicReadiness.recommendedActions
-                : ['Open the strategic planner to review guild-level platoon readiness.']
+                : [
+                    'Open the planner overview to review guild readiness, then move into missing-unit priorities and member targets.',
+                  ]
               ).map((action, index) => (
                 <div
                   key={`${action}-${index}`}
@@ -552,15 +571,29 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-3">
+            <p className="mt-5 text-sm text-gray-400">Jump directly into the right workspace.</p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <Link
-                href="/planning/platoons"
+                href={buildPlannerHref('overview')}
                 className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
               >
-                Open strategic planner
+                Open overview
               </Link>
               <Link
-                href="/planning/platoons?fixture=demo"
+                href={buildPlannerHref('priorities')}
+                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
+              >
+                Missing units
+              </Link>
+              <Link
+                href={buildPlannerHref('targets')}
+                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
+              >
+                Member targets
+              </Link>
+              <Link
+                href={buildPlannerHref('overview', 'demo')}
                 className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
               >
                 Review demo mode

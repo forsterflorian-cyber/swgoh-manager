@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 
 import type {
   StrategicPlannerData,
+  StrategicPlannerSummary,
   StrategicTargetAssignment,
   StrategicTargetCandidate,
   StrategicUnitImpact,
@@ -21,6 +22,49 @@ type Notice = {
   message: string;
 };
 
+type PlannerViewKey = 'overview' | 'priorities' | 'targets';
+
+const PLANNER_VIEW_ITEMS: Array<{
+  key: PlannerViewKey;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: 'overview',
+    label: 'Overview',
+    description: 'Guild health, top blockers, and immediate next actions.',
+  },
+  {
+    key: 'priorities',
+    label: 'Missing Units',
+    description: 'Ranked bottlenecks with zone pressure and upgrade leverage.',
+  },
+  {
+    key: 'targets',
+    label: 'Member Targets',
+    description: 'Assignments, candidate workflow, and ownership planning.',
+  },
+];
+
+function isPlannerViewKey(value: string | null): value is PlannerViewKey {
+  return value === 'overview' || value === 'priorities' || value === 'targets';
+}
+
+function buildPlannerViewHref(view: PlannerViewKey, fixture: string | null) {
+  const params = new URLSearchParams();
+
+  if (fixture === 'demo') {
+    params.set('fixture', 'demo');
+  }
+
+  if (view !== 'overview') {
+    params.set('view', view);
+  }
+
+  const query = params.toString();
+  return query ? `/planning/platoons?${query}` : '/planning/platoons';
+}
+
 export default function PlatoonReadinessPage() {
   return (
     <Suspense fallback={<PlannerLoadingShell />}>
@@ -32,6 +76,8 @@ export default function PlatoonReadinessPage() {
 function PlatoonReadinessContent() {
   const searchParams = useSearchParams();
   const fixture = searchParams.get('fixture');
+  const requestedView = searchParams.get('view');
+  const plannerView = isPlannerViewKey(requestedView) ? requestedView : 'overview';
   const [data, setData] = useState<StrategicPlannerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +153,7 @@ function PlatoonReadinessContent() {
                 href="/planning/platoons?fixture=demo"
                 className="rounded-xl border border-gray-700 bg-gray-900 px-5 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
               >
-                Open demo planner
+                Open demo overview
               </Link>
             </div>
           </div>
@@ -117,11 +163,37 @@ function PlatoonReadinessContent() {
   }
 
   const planner = data;
-  const summary = planner?.summary;
+  const summary = planner?.summary ?? null;
   const groupedZones = groupZonesByPhase(planner?.zones ?? []);
   const fixtureMode = planner?.dataState.isFixture ?? false;
   const topBlocker = planner?.topMissingUnits[0] ?? null;
   const canManageTargets = planner?.permissions.canManageTargets ?? false;
+  const rosterCoveragePercent = Math.round((planner?.dataState.rosterCoverageRatio ?? 0) * 100);
+  const priorityUnits = planner?.topMissingUnits ?? [];
+  const strategicTargets = planner?.strategicTargets ?? [];
+  const recommendedActions = planner?.recommendedActions ?? [];
+  const overviewMissingUnits = priorityUnits.slice(0, 4);
+  const overviewBlockedZones = [...(planner?.zones ?? [])]
+    .filter((zone) => zone.status !== 'ready')
+    .sort((left, right) => {
+      if (left.missingSlots !== right.missingSlots) {
+        return right.missingSlots - left.missingSlots;
+      }
+
+      if (left.blockedPlatoons !== right.blockedPlatoons) {
+        return right.blockedPlatoons - left.blockedPlatoons;
+      }
+
+      return left.phase - right.phase;
+    })
+    .slice(0, 4);
+  const targetOpportunities = priorityUnits.filter((unit) => unit.bestCandidates.length > 0).slice(0, 4);
+  const assignedMemberCount = new Set(strategicTargets.map((assignment) => assignment.guildMemberId))
+    .size;
+  const unassignedPriorityCount = priorityUnits.filter((unit) => unit.assignmentCount === 0).length;
+  const overviewHref = buildPlannerViewHref('overview', fixture);
+  const prioritiesHref = buildPlannerViewHref('priorities', fixture);
+  const targetsHref = buildPlannerViewHref('targets', fixture);
 
   async function handleAssignTarget(
     guildMemberId: string,
@@ -233,8 +305,8 @@ function PlatoonReadinessContent() {
               </h1>
               <p className="mt-3 max-w-3xl text-sm text-gray-300">
                 Based on current guild roster ownership and imported Territory Battle reference
-                data. This view highlights which units are structurally missing across the guild
-                for platoons.
+                data. Work through the planner in three steps: overview, missing-unit priorities,
+                and member targets.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-sm">
                 {planner?.reference && (
@@ -272,14 +344,14 @@ function PlatoonReadinessContent() {
               )}
               {fixtureMode ? (
                 <Link
-                  href="/planning/platoons"
+                  href={buildPlannerViewHref(plannerView, null)}
                   className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
                 >
                   Use live guild data
                 </Link>
               ) : (
                 <Link
-                  href="/planning/platoons?fixture=demo"
+                  href={buildPlannerViewHref(plannerView, 'demo')}
                   className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
                 >
                   Open demo mode
@@ -334,213 +406,694 @@ function PlatoonReadinessContent() {
           />
         )}
 
-        {summary ? (
-          <>
-            <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <MetricCard
-                title="Coverable slots"
-                value={`${summary.coverableSlots}/${summary.totalSlots}`}
-                detail={`${summary.coveragePercent}% of all reference platoon slots`}
-                tone={summary.coveragePercent >= 80 ? 'positive' : 'info'}
-              />
-              <MetricCard
-                title="Missing slots"
-                value={`${summary.missingSlots}`}
-                detail="Slots still blocked by missing ownership or insufficient relic and rarity"
-                tone={summary.missingSlots > 0 ? 'danger' : 'positive'}
-              />
-              <MetricCard
-                title="Platoon coverage"
-                value={`${summary.estimatedCoverablePlatoons}/${summary.totalPlatoons}`}
-                detail="Greedy estimate of complete platoons with current guild inventory"
-                tone={summary.blockedPlatoons > 0 ? 'warning' : 'positive'}
-              />
-              <MetricCard
-                title="Blocked zones"
-                value={`${summary.blockedZones}/${summary.totalZones}`}
-                detail="Zones that still have unresolved strategic blockers"
-                tone={summary.blockedZones > 0 ? 'warning' : 'positive'}
-              />
-              <MetricCard
-                title="Top bottleneck"
-                value={topBlocker ? topBlocker.unitName : 'None'}
-                detail={
-                  topBlocker
-                    ? `${topBlocker.blockedSlots} blocked slots and ${topBlocker.limitingZones} primary zone bottlenecks`
-                    : 'No guild-wide bottleneck detected'
-                }
-                tone={topBlocker ? 'danger' : 'positive'}
-              />
-            </section>
+        <PlannerViewNavigation
+          currentView={plannerView}
+          fixture={fixture}
+          summary={summary}
+          missingUnitCount={priorityUnits.length}
+          strategicTargetCount={strategicTargets.length}
+        />
 
-            <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.85fr)]">
-              <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                      Top Missing Units
-                    </p>
-                    <h2 className="mt-2 text-2xl font-semibold text-white">
-                      Highest strategic impact
-                    </h2>
-                  </div>
-                  <p className="text-sm text-gray-400">
-                    Ranked by blocked demand, limiting zones and platoons, shortage depth, and upgrade leverage.
-                  </p>
-                </div>
-
-                <div className="mt-5 space-y-4">
-                  {planner?.topMissingUnits.slice(0, 8).map((unit, index) => (
-                    <MissingUnitCard
-                      key={unit.unitBaseId}
-                      unit={unit}
-                      rank={index + 1}
-                      canManageTargets={canManageTargets}
-                      fixtureMode={fixtureMode}
-                      busyActionKey={busyActionKey}
-                      onAssignTarget={handleAssignTarget}
-                    />
-                  ))}
-                  {planner?.topMissingUnits.length === 0 && (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
-                      Current roster data covers every imported platoon slot.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                        Current Strategic Targets
-                      </p>
-                      <h2 className="mt-2 text-2xl font-semibold text-white">
-                        Assigned build targets
-                      </h2>
-                    </div>
-                    <p className="text-sm text-gray-400">
-                      Guild-level ownership and upgrade commitments for future platoon readiness.
-                    </p>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {planner?.strategicTargets.length ? (
-                      planner.strategicTargets.slice(0, 8).map((assignment) => (
-                        <StrategicTargetCard
-                          key={assignment.id}
-                          assignment={assignment}
-                          canManageTargets={canManageTargets}
-                          fixtureMode={fixtureMode}
-                          busyActionKey={busyActionKey}
-                          onRemoveTarget={handleRemoveTarget}
-                        />
-                      ))
-                    ) : (
-                      <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
-                        No strategic build targets have been assigned yet.
-                      </div>
-                    )}
-                  </div>
-
-                  {fixtureMode && (
-                    <p className="mt-4 text-sm text-amber-200">
-                      Demo strategic targets are read-only in fixture mode.
-                    </p>
-                  )}
-
-                  {!fixtureMode && !canManageTargets && (
-                    <p className="mt-4 text-sm text-gray-500">
-                      Owners, admins, and officers can assign or remove strategic targets.
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                    Next Action
-                  </p>
-                  <div className="mt-4 space-y-3">
-                    {planner?.recommendedActions.map((action, index) => (
-                      <div
-                        key={`${action}-${index}`}
-                        className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-200"
-                      >
-                        {action}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                    Guild Coverage
-                  </p>
-                  <h2 className="mt-3 text-2xl font-semibold text-white">
-                    {Math.round((planner?.dataState.rosterCoverageRatio ?? 0) * 100)}%
-                  </h2>
-                  <p className="mt-2 text-sm text-gray-400">
-                    Share of guild members with relevant roster data for the imported platoon units.
-                  </p>
-                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-950">
-                    <div
-                      className="h-full bg-blue-400"
-                      style={{
-                        width: `${Math.round((planner?.dataState.rosterCoverageRatio ?? 0) * 100)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="mt-8">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                    Zone Readiness
-                  </p>
-                  <h2 className="mt-2 text-2xl font-semibold text-white">
-                    Where the guild is blocked
-                  </h2>
-                </div>
-                <p className="text-sm text-gray-400">
-                  Every zone is evaluated from guild roster plus reference platoon requirements only.
-                </p>
-              </div>
-
-              <div className="mt-5 space-y-8">
-                {groupedZones.map(([phase, zones]) => (
-                  <div key={phase}>
-                    <div className="mb-4 flex items-center justify-between">
-                      <h3 className="text-xl font-semibold text-white">Phase {phase}</h3>
-                      <span className="text-sm text-gray-500">
-                        {zones.length} zone{zones.length === 1 ? '' : 's'}
-                      </span>
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      {zones.map((zone) => (
-                        <ZoneReadinessCard key={zone.zoneKey} zone={zone} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </>
+        {plannerView === 'overview' ? (
+          <OverviewView
+            summary={summary}
+            topBlocker={topBlocker}
+            topMissingUnits={overviewMissingUnits}
+            blockedZones={overviewBlockedZones}
+            recommendedActions={recommendedActions}
+            rosterCoveragePercent={rosterCoveragePercent}
+            planner={planner}
+            prioritiesHref={prioritiesHref}
+            targetsHref={targetsHref}
+          />
+        ) : plannerView === 'priorities' ? (
+          <PrioritiesView
+            summary={summary}
+            topMissingUnits={priorityUnits}
+            groupedZones={groupedZones}
+            canManageTargets={canManageTargets}
+            fixtureMode={fixtureMode}
+            busyActionKey={busyActionKey}
+            onAssignTarget={handleAssignTarget}
+            targetsHref={targetsHref}
+          />
         ) : (
-          <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-8">
-            <h2 className="text-2xl font-semibold text-white">Planner waiting for data</h2>
-            <p className="mt-3 max-w-2xl text-sm text-gray-400">
-              Once a guild and Territory Battle reference set are available, this page will rank
-              bottleneck units, score zone readiness, and highlight the most impactful upgrades.
-            </p>
-          </section>
+          <MemberTargetsView
+            summary={summary}
+            strategicTargets={strategicTargets}
+            targetOpportunities={targetOpportunities}
+            assignedMemberCount={assignedMemberCount}
+            unassignedPriorityCount={unassignedPriorityCount}
+            canManageTargets={canManageTargets}
+            fixtureMode={fixtureMode}
+            busyActionKey={busyActionKey}
+            onAssignTarget={handleAssignTarget}
+            onRemoveTarget={handleRemoveTarget}
+            prioritiesHref={prioritiesHref}
+            overviewHref={overviewHref}
+          />
         )}
       </div>
     </div>
+  );
+}
+
+function PlannerViewNavigation({
+  currentView,
+  fixture,
+  summary,
+  missingUnitCount,
+  strategicTargetCount,
+}: {
+  currentView: PlannerViewKey;
+  fixture: string | null;
+  summary: StrategicPlannerSummary | null;
+  missingUnitCount: number;
+  strategicTargetCount: number;
+}) {
+  const metaLabels: Record<PlannerViewKey, string> = {
+    overview: summary ? `${summary.coveragePercent}% slot coverage` : 'Guild readiness summary',
+    priorities: `${missingUnitCount} ranked bottleneck${missingUnitCount === 1 ? '' : 's'}`,
+    targets: `${strategicTargetCount} active target${strategicTargetCount === 1 ? '' : 's'}`,
+  };
+
+  return (
+    <section className="mt-6 rounded-3xl border border-gray-800 bg-gray-900/70 p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+            Planner Views
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">
+            Work the guild plan in three steps
+          </h2>
+        </div>
+        <p className="max-w-2xl text-sm text-gray-400">
+          Start with guild health, move into missing-unit pressure, then assign ownership in the
+          member-target workspace.
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        {PLANNER_VIEW_ITEMS.map((item) => {
+          const active = item.key === currentView;
+
+          return (
+            <Link
+              key={item.key}
+              href={buildPlannerViewHref(item.key, fixture)}
+              scroll={false}
+              aria-current={active ? 'page' : undefined}
+              className={`rounded-2xl border px-4 py-4 transition-colors ${
+                active
+                  ? 'border-blue-500 bg-blue-950/40'
+                  : 'border-gray-800 bg-gray-950/60 hover:border-gray-700 hover:bg-gray-900'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-base font-semibold text-white">{item.label}</p>
+                  <p className="mt-2 text-sm text-gray-400">{item.description}</p>
+                </div>
+                {active && (
+                  <span className="rounded-full border border-blue-500 bg-blue-600 px-3 py-1 text-xs font-medium text-white">
+                    Current
+                  </span>
+                )}
+              </div>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                {metaLabels[item.key]}
+              </p>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function OverviewView({
+  summary,
+  topBlocker,
+  topMissingUnits,
+  blockedZones,
+  recommendedActions,
+  rosterCoveragePercent,
+  planner,
+  prioritiesHref,
+  targetsHref,
+}: {
+  summary: StrategicPlannerSummary | null;
+  topBlocker: StrategicUnitImpact | null;
+  topMissingUnits: StrategicUnitImpact[];
+  blockedZones: StrategicZoneReadiness[];
+  recommendedActions: string[];
+  rosterCoveragePercent: number;
+  planner: StrategicPlannerData | null;
+  prioritiesHref: string;
+  targetsHref: string;
+}) {
+  if (!summary) {
+    return (
+      <PlannerEmptyState
+        title="Overview waiting for readiness data"
+        body="Import a Territory Battle reference set and guild roster data to score guild health, blockers, and next actions."
+      />
+    );
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+            Overview
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold text-white">
+            Guild readiness at a glance
+          </h2>
+        </div>
+        <p className="max-w-3xl text-sm text-gray-400">
+          Keep this view short: overall coverage, the biggest blockers, and what leadership should
+          review next.
+        </p>
+      </div>
+
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <MetricCard
+          title="Coverable slots"
+          value={`${summary.coverableSlots}/${summary.totalSlots}`}
+          detail={`${summary.coveragePercent}% of all reference platoon slots`}
+          tone={summary.coveragePercent >= 80 ? 'positive' : 'info'}
+        />
+        <MetricCard
+          title="Missing slots"
+          value={`${summary.missingSlots}`}
+          detail="Slots still blocked by missing ownership or insufficient relic and rarity"
+          tone={summary.missingSlots > 0 ? 'danger' : 'positive'}
+        />
+        <MetricCard
+          title="Platoon coverage"
+          value={`${summary.estimatedCoverablePlatoons}/${summary.totalPlatoons}`}
+          detail="Greedy estimate of complete platoons with current guild inventory"
+          tone={summary.blockedPlatoons > 0 ? 'warning' : 'positive'}
+        />
+        <MetricCard
+          title="Blocked zones"
+          value={`${summary.blockedZones}/${summary.totalZones}`}
+          detail="Zones that still have unresolved strategic blockers"
+          tone={summary.blockedZones > 0 ? 'warning' : 'positive'}
+        />
+        <MetricCard
+          title="Top bottleneck"
+          value={topBlocker ? topBlocker.unitName : 'None'}
+          detail={
+            topBlocker
+              ? `${topBlocker.blockedSlots} blocked slots and ${topBlocker.limitingZones} primary zone bottlenecks`
+              : 'No guild-wide bottleneck detected'
+          }
+          tone={topBlocker ? 'danger' : 'positive'}
+        />
+      </section>
+
+      <section className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.85fr)]">
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                Biggest Blockers
+              </p>
+              <h3 className="mt-2 text-2xl font-semibold text-white">
+                The units worth leadership attention first
+              </h3>
+            </div>
+            <Link
+              href={prioritiesHref}
+              className="text-sm font-medium text-blue-300 transition-colors hover:text-blue-200"
+            >
+              Open full priorities
+            </Link>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {topMissingUnits.length > 0 ? (
+              topMissingUnits.map((unit, index) => (
+                <CompactMissingUnitRow key={unit.unitBaseId} unit={unit} rank={index + 1} />
+              ))
+            ) : (
+              <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-100">
+                Current roster data covers every imported platoon slot.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Leadership Next Actions
+            </p>
+            <div className="mt-4 space-y-3">
+              {(recommendedActions.length > 0
+                ? recommendedActions.slice(0, 4)
+                : ['Open Missing Units to review the highest-pressure platoon bottlenecks.']
+              ).map((action, index) => (
+                <div
+                  key={`${action}-${index}`}
+                  className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-200"
+                >
+                  {action}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Guild Context
+            </p>
+            <div className="mt-4 flex items-end justify-between gap-4">
+              <div>
+                <h3 className="text-2xl font-semibold text-white">{rosterCoveragePercent}%</h3>
+                <p className="mt-2 text-sm text-gray-400">
+                  Share of guild members with relevant roster data for imported platoon units.
+                </p>
+              </div>
+              <span className="rounded-full border border-gray-800 bg-gray-950/70 px-3 py-1 text-xs text-gray-300">
+                {planner?.guild?.rosteredMembers ?? 0} rostered members
+              </span>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-950">
+              <div className="h-full bg-blue-400" style={{ width: `${rosterCoveragePercent}%` }} />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-sm">
+              {planner?.reference && (
+                <HeaderPill label={`${planner.reference.name} reference`} tone="info" />
+              )}
+              <HeaderPill
+                label={
+                  planner?.dataState.hasRosterData ? 'Roster data available' : 'Roster cache missing'
+                }
+                tone={planner?.dataState.hasRosterData ? 'positive' : 'warning'}
+              />
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <Link
+                href={prioritiesHref}
+                className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              >
+                Review missing-unit priorities
+              </Link>
+              <Link
+                href={targetsHref}
+                className="rounded-xl border border-gray-700 bg-gray-950 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-900"
+              >
+                Open member targets
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Top Blocked Zones
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Where readiness breaks first
+            </h3>
+          </div>
+          <Link
+            href={prioritiesHref}
+            className="text-sm font-medium text-blue-300 transition-colors hover:text-blue-200"
+          >
+            Open zone pressure
+          </Link>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {blockedZones.length > 0 ? (
+            blockedZones.map((zone) => <CompactZoneRow key={zone.zoneKey} zone={zone} />)
+          ) : (
+            <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-100">
+              No blocked zones detected with the current guild roster.
+            </div>
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function PrioritiesView({
+  summary,
+  topMissingUnits,
+  groupedZones,
+  canManageTargets,
+  fixtureMode,
+  busyActionKey,
+  onAssignTarget,
+  targetsHref,
+}: {
+  summary: StrategicPlannerSummary | null;
+  topMissingUnits: StrategicUnitImpact[];
+  groupedZones: Array<[number, StrategicZoneReadiness[]]>;
+  canManageTargets: boolean;
+  fixtureMode: boolean;
+  busyActionKey: string | null;
+  onAssignTarget: (
+    guildMemberId: string,
+    unitBaseId: string,
+    memberName: string,
+    unitName: string
+  ) => Promise<void>;
+  targetsHref: string;
+}) {
+  if (!summary && topMissingUnits.length === 0 && groupedZones.length === 0) {
+    return (
+      <PlannerEmptyState
+        title="Missing-unit priorities will appear once readiness data is available"
+        body="Import a Territory Battle reference set and guild roster data to rank the units and zones that matter most."
+      />
+    );
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+            Missing Units
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold text-white">
+            Rank the bottlenecks that matter most
+          </h2>
+        </div>
+        <Link
+          href={targetsHref}
+          className="text-sm font-medium text-blue-300 transition-colors hover:text-blue-200"
+        >
+          Move into member targets
+        </Link>
+      </div>
+
+      {summary && (
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            title="Bottleneck units"
+            value={`${summary.bottleneckUnitCount}`}
+            detail="Distinct units currently constraining platoon readiness"
+            tone={summary.bottleneckUnitCount > 0 ? 'warning' : 'positive'}
+          />
+          <MetricCard
+            title="Missing slots"
+            value={`${summary.missingSlots}`}
+            detail="Blocked demand still unresolved across the imported reference"
+            tone={summary.missingSlots > 0 ? 'danger' : 'positive'}
+          />
+          <MetricCard
+            title="Blocked platoons"
+            value={`${summary.blockedPlatoons}`}
+            detail="Platoons still short of required guild inventory"
+            tone={summary.blockedPlatoons > 0 ? 'warning' : 'positive'}
+          />
+          <MetricCard
+            title="Blocked zones"
+            value={`${summary.blockedZones}`}
+            detail="Zones under structural pressure from missing units"
+            tone={summary.blockedZones > 0 ? 'warning' : 'positive'}
+          />
+        </section>
+      )}
+
+      <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Ranked Missing Units
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Full bottleneck ranking
+            </h3>
+          </div>
+          <p className="max-w-2xl text-sm text-gray-400">
+            Impact blends blocked demand, limiting zones and platoons, shortage depth, and upgrade
+            leverage. Candidate suggestions stay secondary to the unit analysis.
+          </p>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          {topMissingUnits.length > 0 ? (
+            topMissingUnits.map((unit, index) => (
+              <MissingUnitCard
+                key={unit.unitBaseId}
+                unit={unit}
+                rank={index + 1}
+                candidateLimit={3}
+                canManageTargets={canManageTargets}
+                fixtureMode={fixtureMode}
+                busyActionKey={busyActionKey}
+                onAssignTarget={onAssignTarget}
+              />
+            ))
+          ) : (
+            <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
+              Current roster data covers every imported platoon slot.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Zone Pressure
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Zone and platoon context
+            </h3>
+          </div>
+          <p className="text-sm text-gray-400">
+            Every zone is evaluated from guild roster plus imported platoon requirements only.
+          </p>
+        </div>
+
+        <div className="mt-5 space-y-8">
+          {groupedZones.length > 0 ? (
+            groupedZones.map(([phase, zones]) => (
+              <div key={phase}>
+                <div className="mb-4 flex items-center justify-between">
+                  <h4 className="text-xl font-semibold text-white">Phase {phase}</h4>
+                  <span className="text-sm text-gray-500">
+                    {zones.length} zone{zones.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {zones.map((zone) => (
+                    <ZoneReadinessCard key={zone.zoneKey} zone={zone} />
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5 text-sm text-gray-400">
+              Zone pressure will appear here once the planner has enough readiness data.
+            </div>
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function MemberTargetsView({
+  summary,
+  strategicTargets,
+  targetOpportunities,
+  assignedMemberCount,
+  unassignedPriorityCount,
+  canManageTargets,
+  fixtureMode,
+  busyActionKey,
+  onAssignTarget,
+  onRemoveTarget,
+  prioritiesHref,
+  overviewHref,
+}: {
+  summary: StrategicPlannerSummary | null;
+  strategicTargets: StrategicTargetAssignment[];
+  targetOpportunities: StrategicUnitImpact[];
+  assignedMemberCount: number;
+  unassignedPriorityCount: number;
+  canManageTargets: boolean;
+  fixtureMode: boolean;
+  busyActionKey: string | null;
+  onAssignTarget: (
+    guildMemberId: string,
+    unitBaseId: string,
+    memberName: string,
+    unitName: string
+  ) => Promise<void>;
+  onRemoveTarget: (assignmentId: string, memberName: string, unitName: string) => Promise<void>;
+  prioritiesHref: string;
+  overviewHref: string;
+}) {
+  const accessValue = fixtureMode ? 'Demo' : canManageTargets ? 'Enabled' : 'Read only';
+  const accessDetail = fixtureMode
+    ? 'Assignments render in fixture mode, but assign and remove stays disabled.'
+    : canManageTargets
+      ? 'You can assign and remove strategic targets in this workspace.'
+      : 'Owners, admins, and officers can manage targets here.';
+
+  if (!summary && strategicTargets.length === 0 && targetOpportunities.length === 0) {
+    return (
+      <PlannerEmptyState
+        title="Member targets are waiting for planner data"
+        body="Once readiness analysis is available, this workspace will show assigned targets and the best candidate-to-target matches."
+      />
+    );
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+            Member Targets
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold text-white">
+            Turn priorities into ownership
+          </h2>
+        </div>
+        <p className="max-w-3xl text-sm text-gray-400">
+          Use this workspace to review assigned build targets, check who is already carrying work,
+          and move from strategic analysis into member-level planning.
+        </p>
+      </div>
+
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title="Active targets"
+          value={`${strategicTargets.length}`}
+          detail="Current build commitments for long-term platoon readiness"
+          tone={strategicTargets.length > 0 ? 'info' : 'warning'}
+        />
+        <MetricCard
+          title="Targeted members"
+          value={`${assignedMemberCount}`}
+          detail="Guild members currently carrying at least one strategic target"
+          tone={assignedMemberCount > 0 ? 'positive' : 'info'}
+        />
+        <MetricCard
+          title="Unassigned priorities"
+          value={`${unassignedPriorityCount}`}
+          detail="High-priority units without any active ownership target"
+          tone={unassignedPriorityCount > 0 ? 'warning' : 'positive'}
+        />
+        <MetricCard
+          title="Assignment access"
+          value={accessValue}
+          detail={accessDetail}
+          tone={fixtureMode ? 'warning' : canManageTargets ? 'positive' : 'info'}
+        />
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Current Strategic Targets
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Assigned ownership commitments
+            </h3>
+          </div>
+          <Link
+            href={overviewHref}
+            className="text-sm font-medium text-blue-300 transition-colors hover:text-blue-200"
+          >
+            Back to overview
+          </Link>
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {strategicTargets.length > 0 ? (
+            strategicTargets.map((assignment) => (
+              <StrategicTargetCard
+                key={assignment.id}
+                assignment={assignment}
+                canManageTargets={canManageTargets}
+                fixtureMode={fixtureMode}
+                busyActionKey={busyActionKey}
+                onRemoveTarget={onRemoveTarget}
+              />
+            ))
+          ) : (
+            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+              No strategic build targets have been assigned yet.
+            </div>
+          )}
+        </div>
+
+        {fixtureMode && (
+          <p className="mt-4 text-sm text-amber-200">
+            Demo strategic targets are read-only in fixture mode.
+          </p>
+        )}
+
+        {!fixtureMode && !canManageTargets && (
+          <p className="mt-4 text-sm text-gray-500">
+            Owners, admins, and officers can assign or remove strategic targets.
+          </p>
+        )}
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Recommended Next Targets
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Candidate-to-target workflow
+            </h3>
+          </div>
+          <Link
+            href={prioritiesHref}
+            className="text-sm font-medium text-blue-300 transition-colors hover:text-blue-200"
+          >
+            Review full priorities
+          </Link>
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          {targetOpportunities.length > 0 ? (
+            targetOpportunities.map((unit, index) => (
+              <TargetOpportunityCard
+                key={unit.unitBaseId}
+                unit={unit}
+                rank={index + 1}
+                canManageTargets={canManageTargets}
+                fixtureMode={fixtureMode}
+                busyActionKey={busyActionKey}
+                onAssignTarget={onAssignTarget}
+              />
+            ))
+          ) : (
+            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-300 xl:col-span-2">
+              No candidate workflows are queued yet. Review Missing Units to find the next
+              ownership targets worth assigning.
+            </div>
+          )}
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -616,6 +1169,21 @@ function HeaderPill({
   return <span className={`rounded-full border px-3 py-1 ${toneClasses[tone]}`}>{label}</span>;
 }
 
+function PlannerEmptyState({
+  title,
+  body,
+}: {
+  title: string;
+  body: string;
+}) {
+  return (
+    <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-8">
+      <h2 className="text-2xl font-semibold text-white">{title}</h2>
+      <p className="mt-3 max-w-2xl text-sm text-gray-400">{body}</p>
+    </section>
+  );
+}
+
 function Banner({
   title,
   body,
@@ -668,7 +1236,148 @@ function MetricCard({
   );
 }
 
-function MissingUnitCard({
+function CompactMissingUnitRow({
+  unit,
+  rank,
+}: {
+  unit: StrategicUnitImpact;
+  rank: number;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs font-semibold text-blue-200">
+              #{rank}
+            </span>
+            <p className="text-sm font-medium text-white">{unit.unitName}</p>
+            <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+              {formatConstraintLabel(unit.primaryConstraint)}
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-gray-400">{unit.reasonSummary}</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-red-900 bg-red-950/40 px-3 py-1 text-red-200">
+            Impact {unit.impactScore}
+          </span>
+          <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+            {unit.blockedSlots} blocked slots
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompactZoneRow({ zone }: { zone: StrategicZoneReadiness }) {
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-white">
+              Phase {zone.phase} {zone.zoneName}
+            </p>
+            <span
+              className={`rounded-full border px-3 py-1 text-xs ${
+                zone.status === 'ready'
+                  ? 'border-emerald-900 bg-emerald-950/50 text-emerald-200'
+                  : zone.status === 'partial'
+                    ? 'border-amber-900 bg-amber-950/50 text-amber-200'
+                    : 'border-red-900 bg-red-950/50 text-red-200'
+              }`}
+            >
+              {zone.status === 'partial' ? 'Partially blocked' : zone.status}
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-gray-400">
+            {zone.estimatedCoverablePlatoons}/{zone.totalPlatoons} platoons coverable with{' '}
+            {zone.missingSlots} missing slot{zone.missingSlots === 1 ? '' : 's'}.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+            {zone.coverableSlots}/{zone.totalSlots} slots
+          </span>
+          <span className="rounded-full border border-amber-900 bg-amber-950/40 px-3 py-1 text-amber-200">
+            {zone.blockedPlatoons} blocked platoon{zone.blockedPlatoons === 1 ? '' : 's'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TargetCandidateRow({
+  candidate,
+  unitBaseId,
+  unitName,
+  canManageTargets,
+  fixtureMode,
+  busyActionKey,
+  onAssignTarget,
+}: {
+  candidate: StrategicTargetCandidate;
+  unitBaseId: string;
+  unitName: string;
+  canManageTargets: boolean;
+  fixtureMode: boolean;
+  busyActionKey: string | null;
+  onAssignTarget: (
+    guildMemberId: string,
+    unitBaseId: string,
+    memberName: string,
+    unitName: string
+  ) => Promise<void>;
+}) {
+  const actionKey = `assign:${candidate.guildMemberId}:${unitBaseId}`;
+
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/70 px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-white">{candidate.memberName}</p>
+            <TargetStateBadge state={candidate.state} />
+            <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs text-blue-200">
+              Score {candidate.score}
+            </span>
+            {candidate.existingStrategicTargetCount > 0 && (
+              <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+                {candidate.existingStrategicTargetCount} other target
+                {candidate.existingStrategicTargetCount === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-sm text-gray-400">{candidate.reasonSummary}</p>
+          <p className="mt-2 text-xs text-gray-500">
+            {formatCandidateProgress(candidate, unitName)}
+          </p>
+        </div>
+
+        {canManageTargets && !fixtureMode && (
+          <button
+            onClick={() =>
+              void onAssignTarget(candidate.guildMemberId, unitBaseId, candidate.memberName, unitName)
+            }
+            disabled={candidate.isAlreadyAssigned || busyActionKey === actionKey}
+            className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+          >
+            {candidate.isAlreadyAssigned
+              ? 'Assigned'
+              : busyActionKey === actionKey
+                ? 'Assigning...'
+                : 'Assign target'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TargetOpportunityCard({
   unit,
   rank,
   canManageTargets,
@@ -678,6 +1387,80 @@ function MissingUnitCard({
 }: {
   unit: StrategicUnitImpact;
   rank: number;
+  canManageTargets: boolean;
+  fixtureMode: boolean;
+  busyActionKey: string | null;
+  onAssignTarget: (
+    guildMemberId: string,
+    unitBaseId: string,
+    memberName: string,
+    unitName: string
+  ) => Promise<void>;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs font-semibold text-blue-200">
+              Priority #{rank}
+            </span>
+            <h4 className="text-lg font-semibold text-white">{unit.unitName}</h4>
+            <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+              {formatConstraintLabel(unit.primaryConstraint)}
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-gray-400">{unit.reasonSummary}</p>
+        </div>
+        <span className="rounded-full border border-red-900 bg-red-950/50 px-3 py-1 text-sm text-red-200">
+          Impact {unit.impactScore}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-xs">
+        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+          {unit.blockedSlots} blocked slots
+        </span>
+        <span className="rounded-full border border-amber-900 bg-amber-950/40 px-3 py-1 text-amber-200">
+          {unit.limitingZones} primary zone{unit.limitingZones === 1 ? '' : 's'}
+        </span>
+        <span className="rounded-full border border-blue-900 bg-blue-950/40 px-3 py-1 text-blue-200">
+          {unit.assignmentCount > 0
+            ? `${unit.assignmentCount} active target${unit.assignmentCount === 1 ? '' : 's'}`
+            : 'No active target yet'}
+        </span>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {unit.bestCandidates.slice(0, 3).map((candidate) => (
+          <TargetCandidateRow
+            key={`${unit.unitBaseId}-${candidate.guildMemberId}`}
+            candidate={candidate}
+            unitBaseId={unit.unitBaseId}
+            unitName={unit.unitName}
+            canManageTargets={canManageTargets}
+            fixtureMode={fixtureMode}
+            busyActionKey={busyActionKey}
+            onAssignTarget={onAssignTarget}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MissingUnitCard({
+  unit,
+  rank,
+  candidateLimit = 4,
+  canManageTargets,
+  fixtureMode,
+  busyActionKey,
+  onAssignTarget,
+}: {
+  unit: StrategicUnitImpact;
+  rank: number;
+  candidateLimit?: number;
   canManageTargets: boolean;
   fixtureMode: boolean;
   busyActionKey: string | null;
@@ -739,10 +1522,10 @@ function MissingUnitCard({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
-              Best Candidates
+              Candidate Suggestions
             </p>
             <p className="mt-1 text-sm text-gray-400">
-              Suggested members for this long-term ownership target.
+              Secondary guidance for turning this unit priority into an ownership target.
             </p>
           </div>
           <p className="text-sm text-gray-500">
@@ -753,59 +1536,23 @@ function MissingUnitCard({
         </div>
 
         <div className="mt-4 space-y-3">
-          {unit.bestCandidates.slice(0, 4).map((candidate) => {
-            const actionKey = `assign:${candidate.guildMemberId}:${unit.unitBaseId}`;
-
-            return (
-              <div
-                key={`${unit.unitBaseId}-${candidate.guildMemberId}`}
-                className="rounded-2xl border border-gray-800 bg-gray-950/70 px-4 py-3"
-              >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium text-white">{candidate.memberName}</p>
-                      <TargetStateBadge state={candidate.state} />
-                      <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs text-blue-200">
-                        Score {candidate.score}
-                      </span>
-                      {candidate.existingStrategicTargetCount > 0 && (
-                        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
-                          {candidate.existingStrategicTargetCount} other target
-                          {candidate.existingStrategicTargetCount === 1 ? '' : 's'}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-2 text-sm text-gray-400">{candidate.reasonSummary}</p>
-                    <p className="mt-2 text-xs text-gray-500">
-                      {formatCandidateProgress(candidate, unit.unitName)}
-                    </p>
-                  </div>
-
-                  {canManageTargets && !fixtureMode && (
-                    <button
-                      onClick={() =>
-                        void onAssignTarget(
-                          candidate.guildMemberId,
-                          unit.unitBaseId,
-                          candidate.memberName,
-                          unit.unitName
-                        )
-                      }
-                      disabled={candidate.isAlreadyAssigned || busyActionKey === actionKey}
-                      className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
-                    >
-                      {candidate.isAlreadyAssigned
-                        ? 'Assigned'
-                        : busyActionKey === actionKey
-                          ? 'Assigning...'
-                          : 'Assign target'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {unit.bestCandidates.slice(0, candidateLimit).map((candidate) => (
+            <TargetCandidateRow
+              key={`${unit.unitBaseId}-${candidate.guildMemberId}`}
+              candidate={candidate}
+              unitBaseId={unit.unitBaseId}
+              unitName={unit.unitName}
+              canManageTargets={canManageTargets}
+              fixtureMode={fixtureMode}
+              busyActionKey={busyActionKey}
+              onAssignTarget={onAssignTarget}
+            />
+          ))}
+          {unit.bestCandidates.length === 0 && (
+            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+              No candidate suggestions are available for this unit yet.
+            </div>
+          )}
         </div>
       </div>
     </div>
