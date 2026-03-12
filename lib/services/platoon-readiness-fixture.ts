@@ -1,4 +1,5 @@
 import type {
+  PlanetCategory,
   StrategicPlannerAssignmentInput,
   StrategicPlannerDataset,
   StrategicPlannerMemberInput,
@@ -75,6 +76,7 @@ function buildZoneSlots(input: {
   zoneKey: string;
   zoneName: string;
   zoneSortOrder: number;
+  planetCategory: PlanetCategory;
   platoons: Array<{
     platoonNumber: number;
     slots: Array<{
@@ -102,6 +104,7 @@ function buildZoneSlots(input: {
       unitName: slot.unitName,
       requiredRelicTier: slot.requiredRelicTier,
       requiredRarity: slot.requiredRarity ?? 7,
+      planetCategory: input.planetCategory,
     }));
   });
 }
@@ -113,6 +116,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       zoneKey: 'demo-p1-core-foundry',
       zoneName: 'Core Foundry',
       zoneSortOrder: 1,
+      planetCategory: 'LS',
       platoons: [
         {
           platoonNumber: 1,
@@ -148,6 +152,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       zoneKey: 'demo-p2-shadow-research',
       zoneName: 'Shadow Research',
       zoneSortOrder: 2,
+      planetCategory: 'DS',
       platoons: [
         {
           platoonNumber: 1,
@@ -183,6 +188,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       zoneKey: 'demo-p3-mustafar-approach',
       zoneName: 'Mustafar Approach',
       zoneSortOrder: 3,
+      planetCategory: 'MIX',
       platoons: [
         {
           platoonNumber: 1,
@@ -218,6 +224,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       zoneKey: 'demo-p4-holo-archives',
       zoneName: 'Holo Archives',
       zoneSortOrder: 4,
+      planetCategory: 'SPECIAL',
       platoons: [
         {
           platoonNumber: 1,
@@ -400,6 +407,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       guildId: null,
       guildMemberId: 'demo-member-11',
       unitBaseId: 'WATTAMBOR',
+      planetCategory: 'DS',
       note: 'Close relic finish for repeated platoon demand.',
       createdByUserId: null,
       createdAt: '2026-03-09T12:00:00.000Z',
@@ -410,6 +418,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       guildId: null,
       guildMemberId: 'demo-member-14',
       unitBaseId: 'JEDIKNIGHTLUKE',
+      planetCategory: 'MIX',
       note: 'High-impact Phase 3 blocker.',
       createdByUserId: null,
       createdAt: '2026-03-10T09:15:00.000Z',
@@ -420,6 +429,7 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
       guildId: null,
       guildMemberId: 'demo-member-15',
       unitBaseId: 'CAPTAINDROGAN',
+      planetCategory: 'SPECIAL',
       note: null,
       createdByUserId: null,
       createdAt: '2026-03-10T16:30:00.000Z',

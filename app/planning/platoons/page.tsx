@@ -4,7 +4,10 @@ import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+import { Navbar } from '@/components/layout/Navbar';
 import type {
+  PlanetCategory,
+  StrategicMemberAssignmentLoad,
   StrategicPlannerData,
   StrategicPlannerSummary,
   StrategicTargetAssignment,
@@ -23,6 +26,8 @@ type Notice = {
 };
 
 type PlannerViewKey = 'overview' | 'priorities' | 'targets';
+
+const MAX_STATIONS_PER_MEMBER_PER_PLANET = 10;
 
 const PLANNER_VIEW_ITEMS: Array<{
   key: PlannerViewKey;
@@ -83,6 +88,13 @@ function PlatoonReadinessContent() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
+  const navbar = (
+    <Navbar
+      guildName={data?.guild?.name ?? null}
+      guildSlug={data?.guild?.slug ?? null}
+      canManageGuild={data?.permissions.canManageTargets ?? false}
+    />
+  );
 
   const loadPlanner = useCallback(
     async (showLoadingState = true) => {
@@ -131,6 +143,7 @@ function PlatoonReadinessContent() {
 
     return (
       <div className="min-h-screen bg-gray-950 text-white">
+        {navbar}
         <div className="mx-auto max-w-4xl px-4 py-16">
           <div className="rounded-3xl border border-red-900 bg-red-950/30 p-8">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-red-200">
@@ -172,6 +185,7 @@ function PlatoonReadinessContent() {
   const priorityUnits = planner?.topMissingUnits ?? [];
   const strategicTargets = planner?.strategicTargets ?? [];
   const recommendedActions = planner?.recommendedActions ?? [];
+  const memberCapacityPressure = planner?.memberCapacityPressure ?? null;
   const overviewMissingUnits = priorityUnits.slice(0, 4);
   const overviewBlockedZones = [...(planner?.zones ?? [])]
     .filter((zone) => zone.status !== 'ready')
@@ -194,12 +208,16 @@ function PlatoonReadinessContent() {
   const overviewHref = buildPlannerViewHref('overview', fixture);
   const prioritiesHref = buildPlannerViewHref('priorities', fixture);
   const targetsHref = buildPlannerViewHref('targets', fixture);
+  const publicTargetsHref = planner?.guild?.slug
+    ? `/public/guild/${planner.guild.slug}/targets`
+    : null;
 
   async function handleAssignTarget(
     guildMemberId: string,
     unitBaseId: string,
     memberName: string,
-    unitName: string
+    unitName: string,
+    planetCategory: PlanetCategory | null
   ) {
     if (!planner?.guild?.id || fixtureMode || !canManageTargets) {
       return;
@@ -219,6 +237,7 @@ function PlatoonReadinessContent() {
           guildId: planner.guild.id,
           guildMemberId,
           unitBaseId,
+          planetCategory,
         }),
       });
       const payload = (await response.json()) as ApiEnvelope<{
@@ -293,6 +312,7 @@ function PlatoonReadinessContent() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {navbar}
       <div className="mx-auto max-w-7xl px-4 py-10">
         <section className="rounded-3xl border border-gray-800 bg-gradient-to-br from-blue-950/50 via-gray-900 to-gray-950 p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -421,6 +441,7 @@ function PlatoonReadinessContent() {
             topMissingUnits={overviewMissingUnits}
             blockedZones={overviewBlockedZones}
             recommendedActions={recommendedActions}
+            memberCapacityPressure={memberCapacityPressure}
             rosterCoveragePercent={rosterCoveragePercent}
             planner={planner}
             prioritiesHref={prioritiesHref}
@@ -451,6 +472,7 @@ function PlatoonReadinessContent() {
             onRemoveTarget={handleRemoveTarget}
             prioritiesHref={prioritiesHref}
             overviewHref={overviewHref}
+            publicTargetsHref={publicTargetsHref}
           />
         )}
       </div>
@@ -538,6 +560,7 @@ function OverviewView({
   topMissingUnits,
   blockedZones,
   recommendedActions,
+  memberCapacityPressure,
   rosterCoveragePercent,
   planner,
   prioritiesHref,
@@ -548,6 +571,7 @@ function OverviewView({
   topMissingUnits: StrategicUnitImpact[];
   blockedZones: StrategicZoneReadiness[];
   recommendedActions: string[];
+  memberCapacityPressure: StrategicPlannerData['memberCapacityPressure'] | null;
   rosterCoveragePercent: number;
   planner: StrategicPlannerData | null;
   prioritiesHref: string;
@@ -670,6 +694,35 @@ function OverviewView({
 
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Member Capacity Pressure
+            </p>
+            <div className="mt-4 space-y-3 text-sm text-gray-300">
+              <CapacitySummaryLine
+                label="Members near LS capacity"
+                value={memberCapacityPressure?.nearCapacityByCategory.LS ?? 0}
+              />
+              <CapacitySummaryLine
+                label="Members near DS capacity"
+                value={memberCapacityPressure?.nearCapacityByCategory.DS ?? 0}
+              />
+              <CapacitySummaryLine
+                label="Members near MIX capacity"
+                value={memberCapacityPressure?.nearCapacityByCategory.MIX ?? 0}
+              />
+              <CapacitySummaryLine
+                label="Members near SPECIAL capacity"
+                value={memberCapacityPressure?.nearCapacityByCategory.SPECIAL ?? 0}
+              />
+              <CapacitySummaryLine
+                label="Members at capacity"
+                value={memberCapacityPressure?.atCapacityMembers ?? 0}
+                tone={(memberCapacityPressure?.atCapacityMembers ?? 0) > 0 ? 'danger' : 'neutral'}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
               Guild Context
             </p>
             <div className="mt-4 flex items-end justify-between gap-4">
@@ -769,7 +822,8 @@ function PrioritiesView({
     guildMemberId: string,
     unitBaseId: string,
     memberName: string,
-    unitName: string
+    unitName: string,
+    planetCategory: PlanetCategory | null
   ) => Promise<void>;
   targetsHref: string;
 }) {
@@ -925,6 +979,7 @@ function MemberTargetsView({
   onRemoveTarget,
   prioritiesHref,
   overviewHref,
+  publicTargetsHref,
 }: {
   summary: StrategicPlannerSummary | null;
   strategicTargets: StrategicTargetAssignment[];
@@ -938,11 +993,13 @@ function MemberTargetsView({
     guildMemberId: string,
     unitBaseId: string,
     memberName: string,
-    unitName: string
+    unitName: string,
+    planetCategory: PlanetCategory | null
   ) => Promise<void>;
   onRemoveTarget: (assignmentId: string, memberName: string, unitName: string) => Promise<void>;
   prioritiesHref: string;
   overviewHref: string;
+  publicTargetsHref: string | null;
 }) {
   const accessValue = fixtureMode ? 'Demo' : canManageTargets ? 'Enabled' : 'Read only';
   const accessDetail = fixtureMode
@@ -950,6 +1007,7 @@ function MemberTargetsView({
     : canManageTargets
       ? 'You can assign and remove strategic targets in this workspace.'
       : 'Owners, admins, and officers can manage targets here.';
+  const memberTargetGroups = groupStrategicTargetsByMember(strategicTargets);
 
   if (!summary && strategicTargets.length === 0 && targetOpportunities.length === 0) {
     return (
@@ -1002,6 +1060,40 @@ function MemberTargetsView({
           detail={accessDetail}
           tone={fixtureMode ? 'warning' : canManageTargets ? 'positive' : 'info'}
         />
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Member Load
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">
+              Assignment capacity by member
+            </h3>
+          </div>
+          {publicTargetsHref && (
+            <Link
+              href={publicTargetsHref}
+              target="_blank"
+              className="text-sm font-medium text-blue-300 transition-colors hover:text-blue-200"
+            >
+              Open public targets board
+            </Link>
+          )}
+        </div>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          {memberTargetGroups.length > 0 ? (
+            memberTargetGroups.map((group) => (
+              <MemberCapacityCard key={group.guildMemberId} group={group} />
+            ))
+          ) : (
+            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-300 xl:col-span-2">
+              No strategic build targets have been assigned yet.
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="mt-6 rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
@@ -1100,6 +1192,7 @@ function MemberTargetsView({
 function PlannerLoadingShell() {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      <Navbar />
       <div className="mx-auto max-w-7xl px-4 py-10">
         <div className="rounded-3xl border border-gray-800 bg-gray-900/70 p-8">
           <div className="h-4 w-40 animate-pulse rounded bg-gray-800" />
@@ -1138,6 +1231,82 @@ function groupZonesByPhase(zones: StrategicZoneReadiness[]) {
   }
 
   return [...grouped.entries()].sort(([left], [right]) => left - right);
+}
+
+type MemberTargetGroup = {
+  guildMemberId: string;
+  memberName: string;
+  allyCode: string;
+  load: StrategicMemberAssignmentLoad;
+  targets: StrategicTargetAssignment[];
+};
+
+function groupStrategicTargetsByMember(
+  assignments: StrategicTargetAssignment[]
+): MemberTargetGroup[] {
+  const groups = new Map<string, MemberTargetGroup>();
+
+  for (const assignment of assignments) {
+    const existing = groups.get(assignment.guildMemberId);
+    if (existing) {
+      existing.targets.push(assignment);
+      continue;
+    }
+
+    groups.set(assignment.guildMemberId, {
+      guildMemberId: assignment.guildMemberId,
+      memberName: assignment.memberName,
+      allyCode: assignment.allyCode,
+      load: assignment.memberAssignmentLoad,
+      targets: [assignment],
+    });
+  }
+
+  return [...groups.values()]
+    .sort((left, right) => {
+      if (right.load.TOTAL !== left.load.TOTAL) {
+        return right.load.TOTAL - left.load.TOTAL;
+      }
+
+      return left.memberName.localeCompare(right.memberName);
+    })
+    .map((group) => ({
+      ...group,
+      targets: [...group.targets].sort((left, right) => left.unitName.localeCompare(right.unitName)),
+    }));
+}
+
+function getUncategorizedAssignmentCount(load: StrategicMemberAssignmentLoad) {
+  return Math.max(load.TOTAL - load.LS - load.DS - load.MIX - load.SPECIAL, 0);
+}
+
+function formatCapacityCategoryCount(
+  category: PlanetCategory,
+  load: StrategicMemberAssignmentLoad
+) {
+  return `${category}: ${load[category]} / ${MAX_STATIONS_PER_MEMBER_PER_PLANET}`;
+}
+
+function formatCandidateCapacity(candidate: StrategicTargetCandidate) {
+  if (candidate.capacityCategory) {
+    return `${candidate.capacityCategory} ${candidate.capacityLoad[candidate.capacityCategory]}/${MAX_STATIONS_PER_MEMBER_PER_PLANET}`;
+  }
+
+  const uncategorized = getUncategorizedAssignmentCount(candidate.capacityLoad);
+  return uncategorized > 0
+    ? `Category pending, ${candidate.capacityLoad.TOTAL} total assignments (${uncategorized} uncategorized)`
+    : `Category pending, ${candidate.capacityLoad.TOTAL} total assignments`;
+}
+
+function formatAssignmentCapacity(assignment: StrategicTargetAssignment) {
+  if (assignment.planetCategory) {
+    return `Capacity ${assignment.planetCategory} ${assignment.memberAssignmentLoad[assignment.planetCategory]}/${MAX_STATIONS_PER_MEMBER_PER_PLANET}`;
+  }
+
+  const uncategorized = getUncategorizedAssignmentCount(assignment.memberAssignmentLoad);
+  return uncategorized > 0
+    ? `Capacity category pending (${uncategorized} uncategorized)`
+    : 'Capacity category pending';
 }
 
 function formatDateTime(value: string) {
@@ -1236,6 +1405,73 @@ function MetricCard({
   );
 }
 
+function CapacitySummaryLine({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: number;
+  tone?: 'neutral' | 'danger';
+}) {
+  const toneClasses = {
+    neutral: 'border-gray-800 bg-gray-950/60 text-gray-200',
+    danger: 'border-red-900 bg-red-950/40 text-red-100',
+  };
+
+  return (
+    <div className={`flex items-center justify-between rounded-2xl border px-4 py-3 ${toneClasses[tone]}`}>
+      <span>{label}</span>
+      <span className="font-semibold text-white">{value}</span>
+    </div>
+  );
+}
+
+function MemberCapacityCard({ group }: { group: MemberTargetGroup }) {
+  const uncategorizedCount = getUncategorizedAssignmentCount(group.load);
+
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h4 className="text-lg font-semibold text-white">{group.memberName}</h4>
+          <p className="mt-1 font-mono text-xs text-gray-500">{group.allyCode}</p>
+        </div>
+        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+          Assignments: {group.load.TOTAL}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {(['LS', 'DS', 'MIX', 'SPECIAL'] as PlanetCategory[]).map((category) => (
+          <div
+            key={category}
+            className="rounded-2xl border border-gray-800 bg-gray-900/70 px-4 py-3 text-sm text-gray-200"
+          >
+            {formatCapacityCategoryCount(category, group.load)}
+          </div>
+        ))}
+        {uncategorizedCount > 0 && (
+          <div className="rounded-2xl border border-amber-900 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
+            Category pending: {uncategorizedCount}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-xs">
+        {group.targets.map((target) => (
+          <span
+            key={target.id}
+            className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300"
+          >
+            {target.unitName}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CompactMissingUnitRow({
   unit,
   rank,
@@ -1329,7 +1565,8 @@ function TargetCandidateRow({
     guildMemberId: string,
     unitBaseId: string,
     memberName: string,
-    unitName: string
+    unitName: string,
+    planetCategory: PlanetCategory | null
   ) => Promise<void>;
 }) {
   const actionKey = `assign:${candidate.guildMemberId}:${unitBaseId}`;
@@ -1350,23 +1587,41 @@ function TargetCandidateRow({
                 {candidate.existingStrategicTargetCount === 1 ? '' : 's'}
               </span>
             )}
+            {candidate.capacityReached && (
+              <span className="rounded-full border border-red-900 bg-red-950/50 px-3 py-1 text-xs text-red-200">
+                Capacity reached
+              </span>
+            )}
           </div>
           <p className="mt-2 text-sm text-gray-400">{candidate.reasonSummary}</p>
           <p className="mt-2 text-xs text-gray-500">
             {formatCandidateProgress(candidate, unitName)}
+          </p>
+          <p className="mt-2 text-xs text-gray-400">
+            Capacity: {formatCandidateCapacity(candidate)}
           </p>
         </div>
 
         {canManageTargets && !fixtureMode && (
           <button
             onClick={() =>
-              void onAssignTarget(candidate.guildMemberId, unitBaseId, candidate.memberName, unitName)
+              void onAssignTarget(
+                candidate.guildMemberId,
+                unitBaseId,
+                candidate.memberName,
+                unitName,
+                candidate.capacityCategory
+              )
             }
-            disabled={candidate.isAlreadyAssigned || busyActionKey === actionKey}
+            disabled={
+              candidate.isAlreadyAssigned || candidate.capacityReached || busyActionKey === actionKey
+            }
             className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
           >
             {candidate.isAlreadyAssigned
               ? 'Assigned'
+              : candidate.capacityReached
+                ? 'Capacity reached'
               : busyActionKey === actionKey
                 ? 'Assigning...'
                 : 'Assign target'}
@@ -1394,7 +1649,8 @@ function TargetOpportunityCard({
     guildMemberId: string,
     unitBaseId: string,
     memberName: string,
-    unitName: string
+    unitName: string,
+    planetCategory: PlanetCategory | null
   ) => Promise<void>;
 }) {
   return (
@@ -1406,6 +1662,11 @@ function TargetOpportunityCard({
               Priority #{rank}
             </span>
             <h4 className="text-lg font-semibold text-white">{unit.unitName}</h4>
+            {unit.primaryPlanetCategory && (
+              <span className="rounded-full border border-blue-900 bg-blue-950/40 px-3 py-1 text-xs text-blue-200">
+                {unit.primaryPlanetCategory}
+              </span>
+            )}
             <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
               {formatConstraintLabel(unit.primaryConstraint)}
             </span>
@@ -1468,7 +1729,8 @@ function MissingUnitCard({
     guildMemberId: string,
     unitBaseId: string,
     memberName: string,
-    unitName: string
+    unitName: string,
+    planetCategory: PlanetCategory | null
   ) => Promise<void>;
 }) {
   const shortagePercent = Math.round(unit.shortageRatio * 100);
@@ -1483,6 +1745,11 @@ function MissingUnitCard({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-lg font-semibold text-white">{unit.unitName}</h3>
+              {unit.primaryPlanetCategory && (
+                <span className="rounded-full border border-blue-900 bg-blue-950/40 px-3 py-1 text-xs text-blue-200">
+                  {unit.primaryPlanetCategory}
+                </span>
+              )}
               <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
                 {formatConstraintLabel(unit.primaryConstraint)}
               </span>
@@ -1610,6 +1877,14 @@ function StrategicTargetCard({
           {assignment.existingStrategicTargetCount} active target
           {assignment.existingStrategicTargetCount === 1 ? '' : 's'}
         </span>
+        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+          {formatAssignmentCapacity(assignment)}
+        </span>
+        {assignment.planetCategory && (
+          <span className="rounded-full border border-blue-900 bg-blue-950/40 px-3 py-1 text-blue-200">
+            {assignment.planetCategory}
+          </span>
+        )}
         {assignment.zoneHighlights.length > 0 && (
           <span className="rounded-full border border-amber-900 bg-amber-950/40 px-3 py-1 text-amber-200">
             {assignment.zoneHighlights.join(', ')}

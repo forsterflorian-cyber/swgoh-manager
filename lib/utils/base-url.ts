@@ -12,3 +12,9 @@ export function getAppBaseUrl(): string {
 
   return 'http://localhost:3000';
 }
+
+export function buildPublicGuildTargetsUrl(slug: string, baseUrl: string): string {
+  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+
+  return new URL(`/public/guild/${encodeURIComponent(slug)}/targets`, normalizedBaseUrl).toString();
+}

@@ -5,6 +5,7 @@ import { jsonError, jsonOk, readJsonObject } from '@/lib/api/responses';
 import {
   createGuildUpgradeAssignment,
   getGuildIdForUpgradeAssignment,
+  normalizePlanetCategory,
   removeGuildUpgradeAssignment,
 } from '@/lib/services/strategic-targets';
 import { PlatoonReadinessService } from '@/lib/services/platoon-readiness';
@@ -15,6 +16,7 @@ type CreateTargetBody = {
   guildId?: unknown;
   guildMemberId?: unknown;
   unitBaseId?: unknown;
+  planetCategory?: unknown;
   note?: unknown;
 };
 
@@ -94,9 +96,21 @@ export async function POST(request: NextRequest) {
       typeof body.guildMemberId === 'string' ? body.guildMemberId.trim() : '';
     const unitBaseId = typeof body.unitBaseId === 'string' ? body.unitBaseId.trim() : '';
     const note = typeof body.note === 'string' ? body.note : null;
+    const hasPlanetCategory =
+      body.planetCategory === undefined ||
+      body.planetCategory === null ||
+      typeof body.planetCategory === 'string';
+    const planetCategory =
+      typeof body.planetCategory === 'string'
+        ? normalizePlanetCategory(body.planetCategory)
+        : null;
 
     if (!guildId || !guildMemberId || !unitBaseId) {
       return jsonError('guildId, guildMemberId, and unitBaseId are required', 400);
+    }
+
+    if (!hasPlanetCategory || (typeof body.planetCategory === 'string' && !planetCategory)) {
+      return jsonError('planetCategory must be LS, DS, MIX, SPECIAL, or null', 400);
     }
 
     if (!(await userCanManageGuild(user.id, guildId))) {
@@ -108,11 +122,12 @@ export async function POST(request: NextRequest) {
       guildMemberId,
       unitBaseId,
       createdByUserId: user.id,
+      planetCategory,
       note,
     });
 
     if (!result.success) {
-      return jsonError(result.error, 400);
+      return jsonError(result.error, result.status);
     }
 
     return jsonOk({

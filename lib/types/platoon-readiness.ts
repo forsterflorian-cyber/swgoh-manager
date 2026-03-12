@@ -8,6 +8,19 @@ export interface StrategicPlannerGuild {
   lastRosterSync: string | null;
 }
 
+export type PlanetCategory = 'LS' | 'DS' | 'MIX' | 'SPECIAL';
+
+export type StrategicPlanetCategoryCounts = Record<PlanetCategory, number>;
+
+export type StrategicMemberAssignmentLoad = StrategicPlanetCategoryCounts & {
+  TOTAL: number;
+};
+
+export interface StrategicPlannerCapacityPressureSummary {
+  nearCapacityByCategory: StrategicPlanetCategoryCounts;
+  atCapacityMembers: number;
+}
+
 export interface StrategicPlannerSlotInput {
   phase: number;
   zoneKey: string;
@@ -22,6 +35,7 @@ export interface StrategicPlannerSlotInput {
   unitName: string | null;
   requiredRelicTier: number;
   requiredRarity: number;
+  planetCategory: PlanetCategory | null;
 }
 
 export interface StrategicPlannerRosterInput {
@@ -47,6 +61,7 @@ export interface StrategicPlannerAssignmentInput {
   guildId: string | null;
   guildMemberId: string;
   unitBaseId: string;
+  planetCategory: PlanetCategory | null;
   note: string | null;
   createdByUserId: string | null;
   createdAt: string;
@@ -70,6 +85,9 @@ export interface StrategicTargetCandidate {
   missingRarity: number;
   existingStrategicTargetCount: number;
   isAlreadyAssigned: boolean;
+  capacityCategory: PlanetCategory | null;
+  capacityLoad: StrategicMemberAssignmentLoad;
+  capacityReached: boolean;
 }
 
 export interface StrategicTargetAssignment {
@@ -80,6 +98,7 @@ export interface StrategicTargetAssignment {
   allyCode: string;
   unitBaseId: string;
   unitName: string;
+  planetCategory: PlanetCategory | null;
   note: string | null;
   createdByUserId: string | null;
   createdAt: string;
@@ -92,6 +111,7 @@ export interface StrategicTargetAssignment {
   missingRelicTiers: number;
   missingRarity: number;
   existingStrategicTargetCount: number;
+  memberAssignmentLoad: StrategicMemberAssignmentLoad;
   whyItMatters: string;
   zoneHighlights: string[];
 }
@@ -141,6 +161,7 @@ export interface StrategicRequirementSummary {
   unitName: string | null;
   minRelic: number;
   minRarity: number;
+  planetCategory: PlanetCategory | null;
   satisfyingMembers: number;
   availableMembers: number;
   ownedMembers: number;
@@ -152,6 +173,7 @@ export interface StrategicRequirementSummary {
 export interface StrategicUnitImpact {
   unitBaseId: string;
   unitName: string;
+  primaryPlanetCategory: PlanetCategory | null;
   totalRequiredSlots: number;
   coverableSlots: number;
   missingSlots: number;
@@ -234,6 +256,7 @@ export interface StrategicPlannerData {
   guild: StrategicPlannerGuild | null;
   reference: StrategicPlannerReference | null;
   summary: StrategicPlannerSummary | null;
+  memberCapacityPressure: StrategicPlannerCapacityPressureSummary;
   topMissingUnits: StrategicUnitImpact[];
   strategicTargets: StrategicTargetAssignment[];
   zones: StrategicZoneReadiness[];

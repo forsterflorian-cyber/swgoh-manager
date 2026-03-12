@@ -1,12 +1,20 @@
 import { sql } from '@vercel/postgres';
 
 import { getDemoPlatoonReadinessDataset } from '@/lib/services/platoon-readiness-fixture';
-import { listGuildUpgradeAssignments } from '@/lib/services/strategic-targets';
+import {
+  buildMemberAssignmentLoadMap,
+  listGuildUpgradeAssignments,
+  MAX_STATIONS_PER_MEMBER_PER_PLANET,
+} from '@/lib/services/strategic-targets';
 import type {
+  PlanetCategory,
+  StrategicMemberAssignmentLoad,
   StrategicPlannerData,
+  StrategicPlannerCapacityPressureSummary,
   StrategicPlannerDataset,
   StrategicPlannerGuild,
   StrategicPlannerMemberInput,
+  StrategicPlanetCategoryCounts,
   StrategicPlannerReference,
   StrategicPlannerRosterInput,
   StrategicPlannerSlotInput,
@@ -76,6 +84,8 @@ type PlannerOptions = {
   fixture?: string | null;
 };
 
+const PLANET_CATEGORIES: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
+
 type UnitAllocation = {
   unitBaseId: string;
   unitName: string;
@@ -138,6 +148,157 @@ type StrategicImpactCore = Omit<
   'impactScore' | 'reasonSummary' | 'bestCandidates' | 'assignmentCount' | 'assignedMemberNames'
 >;
 
+function createEmptyPlanetCategoryCounts(): StrategicPlanetCategoryCounts {
+  return {
+    LS: 0,
+    DS: 0,
+    MIX: 0,
+    SPECIAL: 0,
+  };
+}
+
+function createEmptyMemberAssignmentLoad(): StrategicMemberAssignmentLoad {
+  return {
+    ...createEmptyPlanetCategoryCounts(),
+    TOTAL: 0,
+  };
+}
+
+function createEmptyCapacityPressureSummary(): StrategicPlannerCapacityPressureSummary {
+  return {
+    nearCapacityByCategory: createEmptyPlanetCategoryCounts(),
+    atCapacityMembers: 0,
+  };
+}
+
+function inferPlanetCategory(input: {
+  tbKey: string;
+  zoneKey: string;
+  zoneName: string;
+}): PlanetCategory | null {
+  const normalized = `${input.tbKey} ${input.zoneKey} ${input.zoneName}`.toLowerCase();
+
+  if (
+    normalized.includes('special') ||
+    normalized.includes('event') ||
+    normalized.includes('bonus')
+  ) {
+    return 'SPECIAL';
+  }
+
+  if (
+    normalized.includes('lightside') ||
+    normalized.includes('light_side') ||
+    /\blight\b/.test(normalized) ||
+    /\bls\b/.test(normalized) ||
+    input.tbKey.includes('lstb')
+  ) {
+    return 'LS';
+  }
+
+  if (
+    normalized.includes('darkside') ||
+    normalized.includes('dark_side') ||
+    /\bdark\b/.test(normalized) ||
+    /\bds\b/.test(normalized) ||
+    input.tbKey.includes('dstb')
+  ) {
+    return 'DS';
+  }
+
+  if (
+    normalized.includes('mixed') ||
+    normalized.includes('mix') ||
+    normalized.includes('territory_tb3_hero')
+  ) {
+    return 'MIX';
+  }
+
+  return null;
+}
+
+function getPrimaryPlanetCategory(
+  slotSummaries: StrategicRequirementSummary[]
+): PlanetCategory | null {
+  const blockedCounts = createEmptyPlanetCategoryCounts();
+  const totalCounts = createEmptyPlanetCategoryCounts();
+
+  for (const summary of slotSummaries) {
+    if (!summary.planetCategory) {
+      continue;
+    }
+
+    totalCounts[summary.planetCategory] += 1;
+    if (summary.blocked) {
+      blockedCounts[summary.planetCategory] += 1;
+    }
+  }
+
+  const blockedLeader = [...PLANET_CATEGORIES].sort(
+    (left, right) => blockedCounts[right] - blockedCounts[left]
+  )[0];
+
+  if (blockedLeader && blockedCounts[blockedLeader] > 0) {
+    const blockedLeaderCount = blockedCounts[blockedLeader];
+    const blockedLeaderTies = PLANET_CATEGORIES.filter(
+      (category) => blockedCounts[category] === blockedLeaderCount
+    );
+
+    return blockedLeaderTies.length === 1 ? blockedLeader : null;
+  }
+
+  const totalLeader = [...PLANET_CATEGORIES].sort(
+    (left, right) => totalCounts[right] - totalCounts[left]
+  )[0];
+  if (totalLeader && totalCounts[totalLeader] > 0) {
+    const totalLeaderCount = totalCounts[totalLeader];
+    const totalLeaderTies = PLANET_CATEGORIES.filter(
+      (category) => totalCounts[category] === totalLeaderCount
+    );
+
+    return totalLeaderTies.length === 1 ? totalLeader : null;
+  }
+
+  return null;
+}
+
+function buildCapacityPressureSummary(
+  memberLoadMap: Record<string, StrategicMemberAssignmentLoad>
+): StrategicPlannerCapacityPressureSummary {
+  const summary = createEmptyCapacityPressureSummary();
+
+  for (const memberLoad of Object.values(memberLoadMap)) {
+    for (const category of PLANET_CATEGORIES) {
+      const categoryLoad = memberLoad[category];
+      if (categoryLoad >= 7 && categoryLoad < MAX_STATIONS_PER_MEMBER_PER_PLANET) {
+        summary.nearCapacityByCategory[category] += 1;
+      }
+    }
+
+    if (PLANET_CATEGORIES.some((category) => memberLoad[category] >= MAX_STATIONS_PER_MEMBER_PER_PLANET)) {
+      summary.atCapacityMembers += 1;
+    }
+  }
+
+  return summary;
+}
+
+function getCapacityPenalty(load: number) {
+  if (load >= MAX_STATIONS_PER_MEMBER_PER_PLANET) {
+    return 999;
+  }
+
+  if (load >= 9) {
+    return 42;
+  }
+
+  if (load >= 7) {
+    return 18;
+  }
+
+  return 0;
+}
+
 function buildEmptyPlannerData(input: {
   mode: 'live' | 'fixture';
   fixtureName?: string | null;
@@ -153,6 +314,7 @@ function buildEmptyPlannerData(input: {
     guild: input.guild ?? null,
     reference: input.reference ?? null,
     summary: null,
+    memberCapacityPressure: createEmptyCapacityPressureSummary(),
     topMissingUnits: [],
     strategicTargets: [],
     zones: [],
@@ -315,6 +477,7 @@ function allocateRequirements(
       unitName: requirement.unitName,
       minRelic: requirement.requiredRelicTier,
       minRarity: requirement.requiredRarity,
+      planetCategory: requirement.planetCategory,
       satisfyingMembers: satisfyingOwners.length,
       availableMembers: availableOwners.length,
       ownedMembers: sortedOwners.length,
@@ -552,6 +715,8 @@ function calculateCandidateScore(input: {
   readiness: CandidateReadiness;
   existingStrategicTargetCount: number;
   isAlreadyAssigned: boolean;
+  capacityCategory: PlanetCategory | null;
+  capacityLoad: StrategicMemberAssignmentLoad;
 }) {
   const baseScore = {
     near_miss: 125,
@@ -567,8 +732,14 @@ function calculateCandidateScore(input: {
     : 0;
   const loadPenalty = input.existingStrategicTargetCount * 18;
   const alreadyAssignedPenalty = input.isAlreadyAssigned ? 70 : 0;
+  const capacityPenalty = input.capacityCategory
+    ? getCapacityPenalty(input.capacityLoad[input.capacityCategory])
+    : 0;
 
-  return Math.max(baseScore + closenessBonus - loadPenalty - alreadyAssignedPenalty, 0);
+  return Math.max(
+    baseScore + closenessBonus - loadPenalty - alreadyAssignedPenalty - capacityPenalty,
+    0
+  );
 }
 
 function formatRequirementDeficits(readiness: CandidateReadiness) {
@@ -593,6 +764,8 @@ function buildCandidateReasonSummary(input: {
   readiness: CandidateReadiness;
   existingStrategicTargetCount: number;
   isAlreadyAssigned: boolean;
+  capacityCategory: PlanetCategory | null;
+  capacityLoad: StrategicMemberAssignmentLoad;
 }) {
   const baseReason =
     input.readiness.state === 'near_miss'
@@ -604,16 +777,26 @@ function buildCandidateReasonSummary(input: {
           : input.member.lastSynced
             ? `${input.member.playerName} has no synced roster copy of ${input.unitName} yet, so this would be a fresh ownership target.`
             : `${input.member.playerName} has no synced roster data for ${input.unitName} yet, so the planner currently treats this as missing ownership.`;
+  const capacityLoad =
+    input.capacityCategory ? input.capacityLoad[input.capacityCategory] : null;
+  const capacityReason =
+    input.capacityCategory && capacityLoad !== null
+      ? capacityLoad >= MAX_STATIONS_PER_MEMBER_PER_PLANET
+        ? `${input.capacityCategory} capacity is already ${capacityLoad}/${MAX_STATIONS_PER_MEMBER_PER_PLANET}.`
+        : capacityLoad >= 7
+          ? `${input.capacityCategory} capacity is already ${capacityLoad}/${MAX_STATIONS_PER_MEMBER_PER_PLANET}, so this member is nearing the station limit.`
+          : `${input.capacityCategory} capacity is currently ${capacityLoad}/${MAX_STATIONS_PER_MEMBER_PER_PLANET}.`
+      : 'Planet category is still pending for this target, so capacity pressure is advisory only.';
 
   if (input.isAlreadyAssigned) {
-    return `${baseReason} This member already owns the same strategic target.`;
+    return `${baseReason} ${capacityReason} This member already owns the same strategic target.`;
   }
 
   if (input.existingStrategicTargetCount > 0) {
-    return `${baseReason} ${input.existingStrategicTargetCount} other strategic target${input.existingStrategicTargetCount === 1 ? ' is' : 's are'} already assigned.`;
+    return `${baseReason} ${capacityReason} ${input.existingStrategicTargetCount} other strategic target${input.existingStrategicTargetCount === 1 ? ' is' : 's are'} already assigned.`;
   }
 
-  return baseReason;
+  return `${baseReason} ${capacityReason}`;
 }
 
 function buildZoneHighlights(
@@ -646,14 +829,23 @@ function rankCandidatesForUnit(input: {
   members: StrategicPlannerMemberInput[];
   rosterByMemberUnit: Map<string, StrategicPlannerRosterInput>;
   assignmentCounts: Map<string, number>;
+  memberAssignmentLoadMap: Record<string, StrategicMemberAssignmentLoad>;
   assignedMemberIds: Set<string>;
 }): StrategicTargetCandidate[] {
   return input.members
     .map<StrategicTargetCandidate>((member) => {
-      const rosterEntry = input.rosterByMemberUnit.get(`${member.memberId}:${input.impact.unitBaseId}`);
+      const rosterEntry = input.rosterByMemberUnit.get(
+        `${member.memberId}:${input.impact.unitBaseId}`
+      );
       const readiness = getCandidateReadiness(rosterEntry, input.impact.strictestRequirement);
       const existingStrategicTargetCount = input.assignmentCounts.get(member.memberId) ?? 0;
+      const capacityLoad =
+        input.memberAssignmentLoadMap[member.memberId] ?? createEmptyMemberAssignmentLoad();
+      const capacityCategory = input.impact.primaryPlanetCategory;
       const isAlreadyAssigned = input.assignedMemberIds.has(member.memberId);
+      const capacityReached = capacityCategory
+        ? capacityLoad[capacityCategory] >= MAX_STATIONS_PER_MEMBER_PER_PLANET
+        : false;
 
       return {
         guildMemberId: member.memberId,
@@ -664,6 +856,8 @@ function rankCandidatesForUnit(input: {
           readiness,
           existingStrategicTargetCount,
           isAlreadyAssigned,
+          capacityCategory,
+          capacityLoad,
         }),
         reasonSummary: buildCandidateReasonSummary({
           member,
@@ -671,6 +865,8 @@ function rankCandidatesForUnit(input: {
           readiness,
           existingStrategicTargetCount,
           isAlreadyAssigned,
+          capacityCategory,
+          capacityLoad,
         }),
         currentRarity: readiness.currentRarity,
         currentRelicTier: readiness.currentRelicTier,
@@ -680,6 +876,9 @@ function rankCandidatesForUnit(input: {
         missingRarity: readiness.missingRarity,
         existingStrategicTargetCount,
         isAlreadyAssigned,
+        capacityCategory,
+        capacityLoad,
+        capacityReached,
       };
     })
     .sort((left, right) => {
@@ -693,6 +892,15 @@ function rankCandidatesForUnit(input: {
 
       if (left.existingStrategicTargetCount !== right.existingStrategicTargetCount) {
         return left.existingStrategicTargetCount - right.existingStrategicTargetCount;
+      }
+
+      if (left.capacityCategory && right.capacityCategory) {
+        const leftCapacityLoad = left.capacityLoad[left.capacityCategory];
+        const rightCapacityLoad = right.capacityLoad[right.capacityCategory];
+
+        if (leftCapacityLoad !== rightCapacityLoad) {
+          return leftCapacityLoad - rightCapacityLoad;
+        }
       }
 
       return left.memberName.localeCompare(right.memberName);
@@ -801,10 +1009,12 @@ function toImpact(
       ? allocation.missingSlots / allocation.totalRequiredSlots
       : 0;
   const primaryConstraint = getPrimaryConstraint(allocation);
+  const primaryPlanetCategory = getPrimaryPlanetCategory(allocation.slotSummaries);
 
   const impactWithoutScore = {
     unitBaseId: allocation.unitBaseId,
     unitName: allocation.unitName,
+    primaryPlanetCategory,
     totalRequiredSlots: allocation.totalRequiredSlots,
     coverableSlots: allocation.coverableSlots,
     missingSlots: allocation.missingSlots,
@@ -1099,6 +1309,8 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
   const ownersByUnit = toOwnerMap(dataset.roster);
   const rosterByMemberUnit = toMemberUnitMap(dataset.roster);
   const assignmentCounts = toAssignmentCountMap(dataset.strategicAssignments);
+  const memberAssignmentLoadMap = buildMemberAssignmentLoadMap(dataset.strategicAssignments);
+  const memberCapacityPressure = buildCapacityPressureSummary(memberAssignmentLoadMap);
   const membersById = new Map(dataset.members.map((member) => [member.memberId, member]));
   const unitNameMap = toUnitNameMap(dataset.slots, dataset.roster);
   const zoneGroups = groupSlotsByZone(dataset.slots);
@@ -1130,7 +1342,8 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
       }
 
       const impact = impactByUnitBaseId.get(assignment.unitBaseId);
-      const unitName = impact?.unitName ?? unitNameMap.get(assignment.unitBaseId) ?? assignment.unitBaseId;
+      const unitName =
+        impact?.unitName ?? unitNameMap.get(assignment.unitBaseId) ?? assignment.unitBaseId;
       const readiness = getCandidateReadiness(
         rosterByMemberUnit.get(`${assignment.guildMemberId}:${assignment.unitBaseId}`),
         impact?.strictestRequirement ?? {
@@ -1147,6 +1360,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
         allyCode: member.allyCode,
         unitBaseId: assignment.unitBaseId,
         unitName,
+        planetCategory: assignment.planetCategory,
         note: assignment.note,
         createdByUserId: assignment.createdByUserId,
         createdAt: assignment.createdAt,
@@ -1159,6 +1373,8 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
         missingRelicTiers: readiness.missingRelicTiers,
         missingRarity: readiness.missingRarity,
         existingStrategicTargetCount: assignmentCounts.get(assignment.guildMemberId) ?? 0,
+        memberAssignmentLoad:
+          memberAssignmentLoadMap[assignment.guildMemberId] ?? createEmptyMemberAssignmentLoad(),
         whyItMatters:
           impact && impact.missingSlots > 0
             ? impact.reasonSummary
@@ -1197,6 +1413,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
           members: dataset.members,
           rosterByMemberUnit,
           assignmentCounts,
+          memberAssignmentLoadMap,
           assignedMemberIds: new Set(assignedMembers.map((assignment) => assignment.guildMemberId)),
         }),
         assignmentCount: assignedMembers.length,
@@ -1300,6 +1517,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     guild: normalizedGuild,
     reference,
     summary,
+    memberCapacityPressure,
     topMissingUnits,
     strategicTargets,
     zones,
@@ -1400,7 +1618,9 @@ async function getReferenceDefinition(): Promise<StrategicPlannerReference | nul
   };
 }
 
-async function loadSlotsForReference(referenceId: string): Promise<StrategicPlannerSlotInput[]> {
+async function loadSlotsForReference(
+  reference: Pick<StrategicPlannerReference, 'id' | 'tbKey'>
+): Promise<StrategicPlannerSlotInput[]> {
   const result = await sql<SlotRow>`
     SELECT
       tp.phase_number,
@@ -1420,7 +1640,7 @@ async function loadSlotsForReference(referenceId: string): Promise<StrategicPlan
     JOIN tb_zones tz ON tz.tb_phase_id = tp.id
     JOIN tb_platoons tpl ON tpl.tb_zone_id = tz.id
     JOIN tb_platoon_slots tps ON tps.tb_platoon_id = tpl.id
-    WHERE tp.tb_definition_id = ${referenceId}
+    WHERE tp.tb_definition_id = ${reference.id}
     ORDER BY tp.phase_number ASC, tz.sort_order ASC, tpl.sort_order ASC, tps.slot_number ASC
   `;
 
@@ -1438,6 +1658,11 @@ async function loadSlotsForReference(referenceId: string): Promise<StrategicPlan
     unitName: row.unit_name,
     requiredRelicTier: toNumber(row.required_relic_tier),
     requiredRarity: toNumber(row.required_rarity, 7),
+    planetCategory: inferPlanetCategory({
+      tbKey: reference.tbKey,
+      zoneKey: row.zone_key,
+      zoneName: row.zone_name,
+    }),
   }));
 }
 
@@ -1552,7 +1777,7 @@ async function loadLiveDataset(
     };
   }
 
-  const slots = await loadSlotsForReference(reference.id);
+  const slots = await loadSlotsForReference(reference);
   const unitBaseIds = [...new Set(slots.map((slot) => slot.unitBaseId))];
   const [roster, members, strategicAssignments] = await Promise.all([
     loadRosterForUnits(guildRow.id, unitBaseIds),

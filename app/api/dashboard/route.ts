@@ -22,6 +22,9 @@ export async function GET() {
         activeTb: null,
         lastRosterSync: null,
         strategicReadiness: null,
+        permissions: {
+          canManageGuild: false,
+        },
       });
     }
 
@@ -125,6 +128,9 @@ export async function GET() {
               recommendedActions: planning.recommendedActions,
               dataState: planning.dataState,
             },
+      permissions: {
+        canManageGuild: planning.permissions.canManageTargets,
+      },
     });
   } catch (error: unknown) {
     return jsonError(

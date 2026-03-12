@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import { Navbar } from '@/components/layout/Navbar';
+
 type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
@@ -79,6 +81,9 @@ type DashboardData = {
   activeTb: DashboardTb | null;
   lastRosterSync: string | null;
   strategicReadiness: DashboardStrategicReadiness | null;
+  permissions: {
+    canManageGuild: boolean;
+  };
 };
 
 type GuildMemberSummary = {
@@ -118,10 +123,18 @@ export default function DashboardPage() {
   const [lastRosterSync, setLastRosterSync] = useState<string | null>(null);
   const [strategicReadiness, setStrategicReadiness] =
     useState<DashboardStrategicReadiness | null>(null);
+  const [canManageGuild, setCanManageGuild] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const navbar = (
+    <Navbar
+      guildName={guild?.name ?? null}
+      guildSlug={guild?.slug ?? null}
+      canManageGuild={canManageGuild}
+    />
+  );
 
   useEffect(() => {
     async function loadDashboard() {
@@ -131,6 +144,7 @@ export default function DashboardPage() {
         setActiveTb(dashboard.activeTb);
         setLastRosterSync(dashboard.lastRosterSync);
         setStrategicReadiness(dashboard.strategicReadiness);
+        setCanManageGuild(dashboard.permissions.canManageGuild);
         setError(null);
       } catch (loadError: unknown) {
         setError(loadError instanceof Error ? loadError.message : 'Dashboard could not be loaded');
@@ -212,6 +226,7 @@ export default function DashboardPage() {
       setActiveTb(dashboard.activeTb);
       setLastRosterSync(dashboard.lastRosterSync);
       setStrategicReadiness(dashboard.strategicReadiness);
+      setCanManageGuild(dashboard.permissions.canManageGuild);
       setNotice({
         tone: 'success',
         message: 'Roster sync completed successfully.',
@@ -241,6 +256,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 text-white">
+        {navbar}
         <div className="mx-auto max-w-6xl px-4 py-10">
           <div className="rounded-3xl border border-gray-800 bg-gray-900/70 p-8">
             <div className="h-4 w-32 animate-pulse rounded bg-gray-800" />
@@ -268,6 +284,7 @@ export default function DashboardPage() {
   if (!guild) {
     return (
       <div className="min-h-screen bg-gray-950 text-white">
+        {navbar}
         <div className="mx-auto max-w-4xl px-4 py-16">
           <div className="rounded-3xl border border-gray-800 bg-gray-900/70 p-8 text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
@@ -308,6 +325,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
+      {navbar}
       <div className="mx-auto max-w-6xl px-4 py-10">
         <section className="rounded-3xl border border-gray-800 bg-gradient-to-br from-blue-950/50 via-gray-900 to-gray-950 p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
