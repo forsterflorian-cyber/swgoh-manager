@@ -5,12 +5,22 @@ import { useParams } from 'next/navigation';
 
 import { PhaseNavigation } from '@/components/tb/PhaseNavigation';
 import { ZoneCard } from '@/components/tb/ZoneCard';
-import type { ZoneGapSummary } from '@/lib/types/tb';
+import type { GapAnalysisUnit, ZoneGapSummary } from '@/lib/types/tb';
 import { toNumber } from '@/lib/utils/to-number';
 
 type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+type PhaseOverview = {
+  totalSlots: number;
+  filledSlots: number;
+  openSlots: number;
+  unresolvedGaps: number;
+  completeZones: number;
+  blockedZones: number;
+  totalZones: number;
+};
 
 async function loadAnalysis(
   instanceId: string,
@@ -20,6 +30,7 @@ async function loadAnalysis(
   setError: (error: string | null) => void
 ) {
   setLoading(true);
+
   try {
     const res = await fetch(`/api/tb/${instanceId}/gap?phase=${phase}`);
     const json = (await res.json()) as ApiEnvelope<ZoneGapSummary[]>;
@@ -47,10 +58,16 @@ export default function PhaseDashboardPage() {
   const [zones, setZones] = useState<ZoneGapSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchAnalysis = async () => {
     await loadAnalysis(instanceId, phase, setZones, setLoading, setError);
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchAnalysis();
+    setRefreshing(false);
   };
 
   useEffect(() => {
@@ -61,32 +78,53 @@ export default function PhaseDashboardPage() {
     void loadAnalysis(instanceId, phase, setZones, setLoading, setError);
   }, [instanceId, isValidPhase, phase]);
 
+  const overview = getPhaseOverview(zones);
+  const totalPhases = zones[0]?.totalPhases ?? 6;
+  const tbName = zones[0]?.tbName ?? 'Territory Battle';
+  const showBlockingLoader = loading && zones.length === 0;
+  const blockedSlotCount = countUnitsWithStatus(zones, 'critical');
+  const readySlotCount = countUnitsWithStatus(zones, 'partial');
+  const emptySlotCount = countUnitsWithStatus(zones, 'empty');
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <header className="sticky top-0 z-50 border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
-        <div className="mx-auto max-w-7xl px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">{zones[0]?.tbName || 'Territory Battle'}</h1>
-              <p className="mt-1 text-sm text-gray-400">Phase {phase} gap analysis</p>
+      <header className="sticky top-0 z-50 border-b border-gray-800 bg-gray-950/90 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
+                Territory Battle Planner
+              </p>
+              <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+                {tbName}
+              </h1>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <HeaderPill label={`Phase ${phase}`} tone="neutral" />
+                <HeaderPill
+                  label={`${overview.totalZones} zone${overview.totalZones === 1 ? '' : 's'}`}
+                  tone="neutral"
+                />
+                <HeaderPill
+                  label={`${overview.completeZones} complete`}
+                  tone={overview.completeZones > 0 ? 'positive' : 'neutral'}
+                />
+                <HeaderPill
+                  label={`${overview.blockedZones} blocked`}
+                  tone={overview.blockedZones > 0 ? 'danger' : 'neutral'}
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+
+            <div className="flex flex-wrap items-center gap-3">
+              {refreshing && (
+                <span className="text-sm text-blue-200">Refreshing latest analysis...</span>
+              )}
               <button
-                onClick={() => void fetchAnalysis()}
-                className="rounded-lg bg-gray-800 px-4 py-2 text-sm transition-colors hover:bg-gray-700"
+                onClick={() => void handleRefresh()}
+                disabled={!isValidPhase || refreshing}
+                className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
               >
-                Refresh
-              </button>
-              <button
-                onClick={async () => {
-                  setSyncing(true);
-                  await fetchAnalysis();
-                  setSyncing(false);
-                }}
-                disabled={syncing}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm transition-colors hover:bg-blue-500 disabled:opacity-50"
-              >
-                {syncing ? 'Refreshing...' : 'Refresh Analysis'}
+                {refreshing ? 'Refreshing...' : 'Refresh analysis'}
               </button>
             </div>
           </div>
@@ -94,60 +132,109 @@ export default function PhaseDashboardPage() {
           <PhaseNavigation
             instanceId={instanceId}
             currentPhase={phase}
-            totalPhases={zones[0]?.totalPhases || 6}
+            totalPhases={totalPhases}
           />
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
         {!isValidPhase && (
-          <div className="mb-6 rounded-xl border border-red-800 bg-red-950/40 p-4 text-red-200">
-            Invalid Territory Battle phase
-          </div>
+          <PageMessage
+            tone="danger"
+            title="Invalid phase"
+            description="Open a valid Territory Battle phase to load the planner."
+          />
         )}
 
-        {isValidPhase && error && !loading && (
-          <div className="mb-6 rounded-xl border border-red-800 bg-red-950/40 p-4 text-red-200">
-            {error}
-          </div>
+        {isValidPhase && error && !showBlockingLoader && (
+          <PageMessage
+            tone="danger"
+            title="Analysis could not be refreshed"
+            description={error}
+          />
         )}
 
-        {!isValidPhase ? null : loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-            <span className="ml-3 text-gray-400">Analyzing roster data...</span>
-          </div>
+        {!isValidPhase ? null : showBlockingLoader ? (
+          <PageMessage
+            tone="neutral"
+            title="Loading phase analysis"
+            description="Reading saved Territory Battle reference data and current roster state."
+            loading
+          />
         ) : zones.length === 0 ? (
-          <div className="py-20 text-center text-gray-500">
-            <p className="text-xl">No reference data found for phase {phase}</p>
-            <p className="mt-2">Import the current territory battle reference data first.</p>
-          </div>
+          <PageMessage
+            tone="neutral"
+            title={`No reference data for phase ${phase}`}
+            description="Import the current Territory Battle reference data first, then reload this planner page."
+          />
         ) : (
           <>
-            <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+            <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <SummaryCard
-                label="Total Slots"
-                value={zones.reduce((sum, zone) => sum + zone.totalSlots, 0)}
-                color="gray"
+                label="Total slots"
+                value={overview.totalSlots}
+                detail={`${overview.totalZones} zone${overview.totalZones === 1 ? '' : 's'} in this phase`}
+                tone="neutral"
               />
               <SummaryCard
-                label="Filled"
-                value={zones.reduce((sum, zone) => sum + zone.filledSlots, 0)}
-                color="green"
+                label="Filled slots"
+                value={overview.filledSlots}
+                detail={`${Math.round(
+                  overview.totalSlots === 0
+                    ? 0
+                    : (overview.filledSlots / overview.totalSlots) * 100
+                )}% assigned`}
+                tone="positive"
               />
               <SummaryCard
-                label="Ready"
-                value={zones.reduce((sum, zone) => sum + zone.readySlots - zone.filledSlots, 0)}
-                color="blue"
+                label="Open slots"
+                value={overview.openSlots}
+                detail="Still waiting for assignments"
+                tone="neutral"
               />
               <SummaryCard
-                label="Gaps"
-                value={zones.reduce((sum, zone) => sum + zone.gapSlots, 0)}
-                color="red"
+                label="Unresolved gaps"
+                value={overview.unresolvedGaps}
+                detail="Slots with no valid assignment yet"
+                tone={overview.unresolvedGaps > 0 ? 'danger' : 'positive'}
               />
-            </div>
+              <SummaryCard
+                label="Complete zones"
+                value={overview.completeZones}
+                detail={`${overview.blockedZones} blocked zone${
+                  overview.blockedZones === 1 ? '' : 's'
+                }`}
+                tone={overview.completeZones > 0 ? 'info' : 'neutral'}
+              />
+            </section>
 
-            <div className="space-y-6">
+            <section className="mb-6 rounded-2xl border border-gray-800 bg-gray-900/60 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Phase focus</h2>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Start with blocked zones, then close the remaining open slots in partial
+                    zones.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <HeaderPill
+                    label={`${blockedSlotCount} blocked slots`}
+                    tone={blockedSlotCount > 0 ? 'danger' : 'neutral'}
+                  />
+                  <HeaderPill
+                    label={`${readySlotCount} ready-to-fill slots`}
+                    tone={readySlotCount > 0 ? 'warning' : 'neutral'}
+                  />
+                  <HeaderPill
+                    label={`${emptySlotCount} empty slots`}
+                    tone={emptySlotCount > 0 ? 'neutral' : 'positive'}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <div className="space-y-5">
               {zones.map((zone) => (
                 <ZoneCard
                   key={zone.zoneKey}
@@ -164,26 +251,123 @@ export default function PhaseDashboardPage() {
   );
 }
 
-function SummaryCard({
+function getPhaseOverview(zones: ZoneGapSummary[]): PhaseOverview {
+  const overview = zones.reduce<PhaseOverview>(
+    (overview, zone) => {
+      const zoneIsComplete = zone.totalSlots > 0 && zone.gapSlots === 0;
+      const zoneIsBlocked = zone.units.some((unit) => unit.status === 'critical');
+
+      overview.totalSlots += zone.totalSlots;
+      overview.filledSlots += zone.filledSlots;
+      overview.unresolvedGaps += zone.gapSlots;
+      overview.totalZones += 1;
+      overview.completeZones += zoneIsComplete ? 1 : 0;
+      overview.blockedZones += zoneIsBlocked ? 1 : 0;
+
+      return overview;
+    },
+    {
+      totalSlots: 0,
+      filledSlots: 0,
+      openSlots: 0,
+      unresolvedGaps: 0,
+      completeZones: 0,
+      blockedZones: 0,
+      totalZones: 0,
+    }
+  );
+
+  overview.openSlots = Math.max(overview.totalSlots - overview.filledSlots, 0);
+
+  return overview;
+}
+
+function countUnitsWithStatus(
+  zones: ZoneGapSummary[],
+  status: GapAnalysisUnit['status']
+): number {
+  return zones.reduce(
+    (count, zone) => count + zone.units.filter((unit) => unit.status === status).length,
+    0
+  );
+}
+
+function HeaderPill({
   label,
-  value,
-  color,
+  tone,
 }: {
   label: string;
-  value: number;
-  color: 'gray' | 'green' | 'blue' | 'red';
+  tone: 'neutral' | 'positive' | 'warning' | 'danger' | 'info';
 }) {
-  const colors = {
-    gray: 'border-gray-700 bg-gray-800',
-    green: 'border-emerald-700 bg-emerald-900/30',
-    blue: 'border-blue-700 bg-blue-900/30',
-    red: 'border-red-700 bg-red-900/30',
+  const toneClasses = {
+    neutral: 'border-gray-800 bg-gray-900 text-gray-300',
+    positive: 'border-emerald-800 bg-emerald-950/60 text-emerald-200',
+    warning: 'border-amber-800 bg-amber-950/60 text-amber-200',
+    danger: 'border-red-900 bg-red-950/60 text-red-200',
+    info: 'border-blue-800 bg-blue-950/60 text-blue-200',
   };
 
   return (
-    <div className={`rounded-xl border p-4 ${colors[color]}`}>
+    <span className={`rounded-full border px-3 py-1 text-sm ${toneClasses[tone]}`}>
+      {label}
+    </span>
+  );
+}
+
+function PageMessage({
+  title,
+  description,
+  tone,
+  loading = false,
+}: {
+  title: string;
+  description: string;
+  tone: 'danger' | 'neutral';
+  loading?: boolean;
+}) {
+  const toneClasses = {
+    danger: 'border-red-900 bg-red-950/40 text-red-100',
+    neutral: 'border-gray-800 bg-gray-900/70 text-gray-100',
+  };
+
+  return (
+    <div className={`mb-6 rounded-2xl border p-5 ${toneClasses[tone]}`}>
+      <div className="flex items-start gap-4">
+        {loading && (
+          <div className="mt-1 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+        )}
+        <div>
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <p className="mt-1 text-sm text-gray-300">{description}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+  tone: 'neutral' | 'positive' | 'danger' | 'info';
+}) {
+  const toneClasses = {
+    neutral: 'border-gray-800 bg-gray-900/70',
+    positive: 'border-emerald-900 bg-emerald-950/40',
+    danger: 'border-red-900 bg-red-950/40',
+    info: 'border-blue-900 bg-blue-950/40',
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClasses[tone]}`}>
       <p className="text-sm text-gray-400">{label}</p>
-      <p className="mt-1 text-3xl font-bold">{value}</p>
+      <p className="mt-2 text-3xl font-semibold tracking-tight text-white">{value}</p>
+      <p className="mt-2 text-sm text-gray-500">{detail}</p>
     </div>
   );
 }

@@ -42,14 +42,57 @@ export async function GET() {
     `;
 
     if (result.rows.length === 0) {
-      return jsonOk({ guild: null });
+      return jsonOk({ guild: null, activeTb: null, lastRosterSync: null });
     }
 
+    const guild = {
+      ...result.rows[0],
+      memberCount: toNumber(result.rows[0].memberCount),
+    };
+
+    const activeTbResult = await sql<{
+      id: string;
+      name: string | null;
+      status: string;
+      definition_name: string;
+    }>`
+      SELECT
+        ti.id,
+        ti.name,
+        ti.status,
+        td.name AS definition_name
+      FROM tb_instances ti
+      JOIN tb_definitions td ON td.id = ti.tb_definition_id
+      WHERE ti.guild_id = ${guild.id}
+        AND ti.status IN ('planning', 'active')
+      ORDER BY
+        CASE ti.status
+          WHEN 'active' THEN 0
+          ELSE 1
+        END,
+        ti.created_at DESC
+      LIMIT 1
+    `;
+
+    const syncResult = await sql<{
+      latest_sync: string | null;
+    }>`
+      SELECT MAX(last_synced)::text AS latest_sync
+      FROM guild_members
+      WHERE guild_id = ${guild.id}
+    `;
+
     return jsonOk({
-      guild: {
-        ...result.rows[0],
-        memberCount: toNumber(result.rows[0].memberCount),
-      },
+      guild,
+      activeTb:
+        activeTbResult.rows[0]
+          ? {
+              id: activeTbResult.rows[0].id,
+              name: activeTbResult.rows[0].name || activeTbResult.rows[0].definition_name,
+              status: activeTbResult.rows[0].status,
+            }
+          : null,
+      lastRosterSync: syncResult.rows[0]?.latest_sync ?? null,
     });
   } catch (error: unknown) {
     return jsonError(

@@ -2,11 +2,17 @@
 
 import { useState } from 'react';
 
-import type { GapAnalysisUnit, PlayerCandidate } from '@/lib/types/tb';
+import type { AssignedPlayer, GapAnalysisUnit, PlayerCandidate } from '@/lib/types/tb';
 
 type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+type RowState = 'complete' | 'partial' | 'critical' | 'empty' | 'conflict' | 'invalid';
+type RequirementBadge = {
+  label: string;
+  className: string;
+};
 
 interface Props {
   unit: GapAnalysisUnit;
@@ -17,23 +23,16 @@ interface Props {
 export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
   const [assigning, setAssigning] = useState(false);
   const [showCandidates, setShowCandidates] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const statusIcons: Record<string, string> = {
-    complete: 'OK',
-    partial: 'READY',
-    critical: 'WARN',
-    empty: 'OPEN',
-  };
-
-  const statusColors: Record<string, string> = {
-    complete: 'border-l-emerald-500',
-    partial: 'border-l-yellow-500',
-    critical: 'border-l-red-500',
-    empty: 'border-l-gray-600',
-  };
+  const rowState = getRowState(unit);
+  const rowTone = getRowTone(rowState);
+  const requirements = getRequirementBadges(unit);
 
   const handleAssign = async (memberId: string) => {
     setAssigning(true);
+    setActionError(null);
+
     try {
       const res = await fetch(`/api/tb/${instanceId}/assign`, {
         method: 'POST',
@@ -47,13 +46,14 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
       const data = (await res.json()) as ApiEnvelope<{ assigned: true }>;
 
       if (res.ok && data.ok) {
-        onAssignmentChange();
         setShowCandidates(false);
-      } else {
-        alert(`Error: ${data.ok ? 'Assignment failed' : data.error}`);
+        onAssignmentChange();
+        return;
       }
+
+      setActionError(data.ok ? 'Assignment failed' : data.error);
     } catch {
-      alert('Assignment failed');
+      setActionError('Assignment failed');
     } finally {
       setAssigning(false);
     }
@@ -63,6 +63,8 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
     if (!confirm('Remove this assignment?')) {
       return;
     }
+
+    setActionError(null);
 
     try {
       const res = await fetch(`/api/tb/${instanceId}/assign`, {
@@ -75,111 +77,121 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
 
       if (res.ok && data.ok) {
         onAssignmentChange();
-      } else if (!data.ok) {
-        alert(`Error: ${data.error}`);
+        return;
       }
+
+      setActionError(data.ok ? 'Unassign failed' : data.error);
     } catch {
-      alert('Unassign failed');
+      setActionError('Unassign failed');
     }
   };
 
   return (
-    <div className={`border-l-4 ${statusColors[unit.status]} border-b border-gray-800 last:border-b-0`}>
-      <div className="grid grid-cols-12 gap-2 px-4 py-3 items-center">
-        <div className="col-span-1 text-center text-[11px] font-semibold text-gray-300">
-          {statusIcons[unit.status]}
-        </div>
-
-        <div className="col-span-3">
-          <p className="font-medium text-sm">
-            {unit.requirement.unitName || unit.requirement.unitBaseId}
-          </p>
-          <p className="text-xs text-gray-500">
-            Platoon {unit.requirement.platoonNumber}, slot {unit.requirement.slotNumber}
-          </p>
-        </div>
-
-        <div className="col-span-1">
-          <span className="inline-flex items-center rounded border border-blue-700 bg-blue-900/40 px-2 py-0.5 font-mono text-xs text-blue-200">
-            R{unit.requirement.minRelic}
-          </span>
-        </div>
-
-        <div className="col-span-3">
-          {unit.assignedPlayers.length > 0 ? (
-            <div className="space-y-1">
-              {unit.assignedPlayers.map((player) => (
-                <div
-                  key={player.assignmentId}
-                  className="flex items-center justify-between rounded bg-gray-800 px-2 py-1"
-                >
-                  <span className="text-sm">
-                    {player.playerName}
-                    <span
-                      className={`ml-1 text-xs ${
-                        player.relicTier >= unit.requirement.minRelic
-                          ? 'text-emerald-400'
-                          : 'text-red-400'
-                      }`}
-                    >
-                      (R{player.relicTier})
-                    </span>
-                    {player.hasConflict && (
-                      <span className="ml-2 rounded border border-orange-700 bg-orange-900/50 px-1.5 py-0.5 text-[10px] text-orange-200">
-                        CONFLICT
-                      </span>
-                    )}
-                  </span>
-                  <button
-                    onClick={() => void handleUnassign(player.assignmentId)}
-                    className="ml-2 text-xs text-red-400 hover:text-red-300"
-                    title="Remove assignment"
-                  >
-                    X
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <span className="text-sm italic text-gray-500">Nobody assigned</span>
-          )}
-        </div>
-
-        <div className="col-span-4">
-          {unit.gapCount > 0 ? (
-            <div className="relative">
-              <button
-                onClick={() => setShowCandidates((value) => !value)}
-                className="flex w-full items-center justify-between rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-left text-sm transition-colors hover:bg-gray-700"
-              >
-                <span>
-                  {unit.qualifiedPlayers.length > 0 ? (
-                    <span className="text-emerald-400">
-                      {unit.qualifiedPlayers.length} ready
-                    </span>
-                  ) : unit.nearMissPlayers.length > 0 ? (
-                    <span className="text-yellow-400">
-                      {unit.nearMissPlayers.length} near misses
-                    </span>
-                  ) : (
-                    <span className="text-red-400">No candidates</span>
-                  )}
+    <div className={`border-l-4 ${rowTone.border} bg-gray-950/20`}>
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <StateBadge label={rowTone.label} className={rowTone.badge} />
+              <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+                Platoon {unit.requirement.platoonNumber}, slot {unit.requirement.slotNumber}
+              </span>
+              {unit.gapCount > 0 && (
+                <span className="rounded-full border border-red-900 bg-red-950/70 px-3 py-1 text-xs text-red-200">
+                  {unit.gapCount} open
                 </span>
-                <span>{showCandidates ? '^' : 'v'}</span>
-              </button>
+              )}
+            </div>
 
-              {showCandidates && (
-                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-lg border border-gray-700 bg-gray-800 shadow-2xl">
+            <div className="mt-3">
+              <h3 className="text-lg font-semibold text-white">
+                {unit.requirement.unitName || unit.requirement.unitBaseId}
+              </h3>
+              <p className="mt-1 text-sm text-gray-400">
+                Base ID: <span className="font-mono text-gray-300">{unit.requirement.unitBaseId}</span>
+              </p>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {requirements.map((requirement) => (
+                <span
+                  key={requirement.label}
+                  className={`rounded-full border px-3 py-1 text-xs ${requirement.className}`}
+                >
+                  {requirement.label}
+                </span>
+              ))}
+              <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+                {unit.qualifiedPlayers.length} ready
+              </span>
+              {unit.nearMissPlayers.length > 0 && (
+                <span className="rounded-full border border-amber-900 bg-amber-950/70 px-3 py-1 text-xs text-amber-200">
+                  {unit.nearMissPlayers.length} near miss
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-3 xl:w-[40rem] xl:grid-cols-[minmax(0,1fr)_minmax(16rem,18rem)]">
+            <div className="rounded-2xl border border-gray-800 bg-gray-900/80 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                Assignment
+              </p>
+
+              {unit.assignedPlayers.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {unit.assignedPlayers.map((player) => (
+                    <AssignedPlayerCard
+                      key={player.assignmentId}
+                      player={player}
+                      minRelic={unit.requirement.minRelic}
+                      onUnassign={() => void handleUnassign(player.assignmentId)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-gray-400">
+                  No member assigned yet. Review candidates on the right to fill this slot.
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-gray-800 bg-gray-900/80 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                    Next action
+                  </p>
+                  <p className="mt-2 text-sm text-gray-300">{getActionSummary(unit, rowState)}</p>
+                </div>
+                {unit.gapCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCandidates((value) => !value)}
+                    className="rounded-xl border border-gray-700 bg-gray-950/70 px-3 py-2 text-sm font-medium text-gray-200 transition-colors hover:border-gray-600 hover:bg-gray-900"
+                  >
+                    {showCandidates ? 'Hide' : 'Review'}
+                  </button>
+                )}
+              </div>
+
+              {unit.gapCount === 0 ? (
+                <div className="mt-3 rounded-xl border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">
+                  Slot covered. Remove an assignment only if you need to rebalance the phase.
+                </div>
+              ) : showCandidates ? (
+                <div className="mt-3 overflow-hidden rounded-xl border border-gray-800 bg-gray-950/70">
                   {unit.qualifiedPlayers.length > 0 && (
                     <>
-                      <div className="border-b border-gray-700 bg-emerald-900/20 px-3 py-1.5 text-xs font-semibold text-emerald-400">
-                        Ready
+                      <div className="border-b border-gray-800 bg-emerald-950/40 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">
+                        Ready candidates
                       </div>
                       {unit.qualifiedPlayers.map((candidate) => (
                         <CandidateRow
                           key={`${candidate.allyCode}-${candidate.memberId}`}
                           candidate={candidate}
                           minRelic={unit.requirement.minRelic}
+                          minRarity={unit.requirement.minRarity}
                           onAssign={() => void handleAssign(candidate.memberId)}
                           assigning={assigning}
                         />
@@ -189,14 +201,15 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
 
                   {unit.nearMissPlayers.length > 0 && (
                     <>
-                      <div className="border-b border-gray-700 bg-yellow-900/20 px-3 py-1.5 text-xs font-semibold text-yellow-400">
-                        Near miss
+                      <div className="border-b border-t border-gray-800 bg-amber-950/40 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">
+                        Near misses
                       </div>
                       {unit.nearMissPlayers.map((candidate) => (
                         <CandidateRow
                           key={`${candidate.allyCode}-${candidate.memberId}`}
                           candidate={candidate}
                           minRelic={unit.requirement.minRelic}
+                          minRarity={unit.requirement.minRarity}
                           onAssign={() => void handleAssign(candidate.memberId)}
                           assigning={assigning}
                           isNearMiss
@@ -206,18 +219,197 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
                   )}
 
                   {unit.qualifiedPlayers.length === 0 && unit.nearMissPlayers.length === 0 && (
-                    <div className="px-3 py-4 text-center text-sm text-gray-500">
-                      No guild member owns this unit
+                    <div className="px-3 py-4 text-sm text-gray-400">
+                      No guild member currently owns this unit at usable levels.
                     </div>
                   )}
                 </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1 text-xs text-gray-300">
+                    {unit.qualifiedPlayers.length} ready
+                  </span>
+                  <span className="rounded-full border border-gray-800 bg-gray-950 px-3 py-1 text-xs text-gray-300">
+                    {unit.nearMissPlayers.length} near miss
+                  </span>
+                </div>
               )}
             </div>
-          ) : (
-            <span className="text-sm font-medium text-emerald-400">Filled</span>
+          </div>
+        </div>
+
+        {actionError && (
+          <div className="mt-4 rounded-xl border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+            {actionError}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getRowState(unit: GapAnalysisUnit): RowState {
+  const hasConflict = unit.assignedPlayers.some((player) => player.hasConflict);
+  const hasInvalidRelic = unit.assignedPlayers.some(
+    (player) => player.relicTier < unit.requirement.minRelic
+  );
+
+  if (hasConflict) {
+    return 'conflict';
+  }
+
+  if (hasInvalidRelic) {
+    return 'invalid';
+  }
+
+  return unit.status;
+}
+
+function getActionSummary(unit: GapAnalysisUnit, rowState: RowState) {
+  if (rowState === 'conflict') {
+    return 'This assignment conflicts with another slot in the same phase.';
+  }
+
+  if (rowState === 'invalid') {
+    return 'Current assignment is below the required relic tier and should be replaced.';
+  }
+
+  if (unit.gapCount === 0) {
+    return 'This slot is fully covered.';
+  }
+
+  if (unit.qualifiedPlayers.length > 0) {
+    return 'Ready candidates are available for assignment.';
+  }
+
+  if (unit.nearMissPlayers.length > 0) {
+    return 'Only near misses are available. This slot still needs upgrades.';
+  }
+
+  return 'No candidate currently meets this requirement.';
+}
+
+function getRowTone(rowState: RowState) {
+  switch (rowState) {
+    case 'complete':
+      return {
+        label: 'Assigned',
+        border: 'border-emerald-500',
+        badge: 'border-emerald-900 bg-emerald-950/70 text-emerald-200',
+      };
+    case 'partial':
+      return {
+        label: 'Ready',
+        border: 'border-amber-400',
+        badge: 'border-amber-900 bg-amber-950/70 text-amber-200',
+      };
+    case 'critical':
+      return {
+        label: 'Blocked',
+        border: 'border-red-500',
+        badge: 'border-red-900 bg-red-950/70 text-red-200',
+      };
+    case 'empty':
+      return {
+        label: 'Open',
+        border: 'border-gray-700',
+        badge: 'border-gray-800 bg-gray-950/70 text-gray-300',
+      };
+    case 'conflict':
+      return {
+        label: 'Conflict',
+        border: 'border-orange-500',
+        badge: 'border-orange-900 bg-orange-950/70 text-orange-200',
+      };
+    case 'invalid':
+    default:
+      return {
+        label: 'Invalid',
+        border: 'border-rose-500',
+        badge: 'border-rose-900 bg-rose-950/70 text-rose-200',
+      };
+  }
+}
+
+function getRequirementBadges(unit: GapAnalysisUnit) {
+  const requirements: RequirementBadge[] = [];
+
+  if (unit.requirement.minRarity > 0) {
+    requirements.push({
+      label: `${unit.requirement.minRarity}★ minimum`,
+      className: 'border-indigo-900 bg-indigo-950/70 text-indigo-200',
+    });
+  }
+
+  requirements.push({
+    label: `R${unit.requirement.minRelic} minimum`,
+    className: 'border-blue-900 bg-blue-950/70 text-blue-200',
+  });
+
+  return requirements;
+}
+
+function StateBadge({
+  label,
+  className,
+}: {
+  label: string;
+  className: string;
+}) {
+  return <span className={`rounded-full border px-3 py-1 text-xs font-medium ${className}`}>{label}</span>;
+}
+
+function AssignedPlayerCard({
+  player,
+  minRelic,
+  onUnassign,
+}: {
+  player: AssignedPlayer;
+  minRelic: number;
+  onUnassign: () => void;
+}) {
+  const belowRequirement = player.relicTier < minRelic;
+
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-gray-800 bg-gray-950/80 px-3 py-2">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-medium text-white">{player.playerName}</p>
+          {player.hasConflict && (
+            <span className="rounded-full border border-orange-900 bg-orange-950/70 px-2 py-0.5 text-[11px] text-orange-200">
+              Conflict
+            </span>
+          )}
+          {belowRequirement && (
+            <span className="rounded-full border border-rose-900 bg-rose-950/70 px-2 py-0.5 text-[11px] text-rose-200">
+              Below relic
+            </span>
           )}
         </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+          <span
+            className={`rounded-full border px-2 py-0.5 ${
+              belowRequirement
+                ? 'border-rose-900 bg-rose-950/70 text-rose-200'
+                : 'border-emerald-900 bg-emerald-950/70 text-emerald-200'
+            }`}
+          >
+            R{player.relicTier}
+          </span>
+          <span className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-gray-300">
+            {formatStatus(player.status)}
+          </span>
+          <span className="font-mono text-gray-500">{player.allyCode}</span>
+        </div>
       </div>
+
+      <button
+        onClick={onUnassign}
+        className="shrink-0 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs font-medium text-red-200 transition-colors hover:bg-red-950/80"
+        title="Remove assignment"
+      >
+        Remove
+      </button>
     </div>
   );
 }
@@ -225,53 +417,60 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
 function CandidateRow({
   candidate,
   minRelic,
+  minRarity,
   onAssign,
   assigning,
   isNearMiss = false,
 }: {
   candidate: PlayerCandidate;
   minRelic: number;
+  minRarity: number;
   onAssign: () => void;
   assigning: boolean;
   isNearMiss?: boolean;
 }) {
+  const relicOk = candidate.relicTier >= minRelic;
+  const rarityOk = candidate.rarity >= minRarity;
+
   return (
-    <div className="flex items-center justify-between border-b border-gray-700/50 px-3 py-2 transition-colors last:border-b-0 hover:bg-gray-700/50">
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{candidate.playerName}</span>
+    <div className="flex items-start justify-between gap-3 border-t border-gray-800 px-3 py-3 first:border-t-0">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-medium text-white">{candidate.playerName}</p>
           {candidate.isAlreadyAssignedElsewhere && (
-            <span
-              className="rounded border border-orange-700 bg-orange-900/50 px-1.5 py-0.5 text-[10px] text-orange-300"
-              title="Already assigned elsewhere in this phase"
-            >
-              BUSY
+            <span className="rounded-full border border-orange-900 bg-orange-950/70 px-2 py-0.5 text-[11px] text-orange-200">
+              Busy
             </span>
           )}
         </div>
-        <div className="mt-0.5 flex items-center gap-2">
+
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-400">
           <span
-            className={`text-xs font-mono ${
-              candidate.relicTier >= minRelic ? 'text-emerald-400' : 'text-red-400'
+            className={`rounded-full border px-2 py-0.5 ${
+              relicOk
+                ? 'border-emerald-900 bg-emerald-950/70 text-emerald-200'
+                : 'border-rose-900 bg-rose-950/70 text-rose-200'
             }`}
           >
             R{candidate.relicTier}
           </span>
+          <span
+            className={`rounded-full border px-2 py-0.5 ${
+              rarityOk
+                ? 'border-emerald-900 bg-emerald-950/70 text-emerald-200'
+                : 'border-rose-900 bg-rose-950/70 text-rose-200'
+            }`}
+          >
+            {candidate.rarity}★
+          </span>
           {candidate.relicDeficit > 0 && (
-            <span className="text-[10px] text-red-400">
-              missing {candidate.relicDeficit}
-            </span>
+            <span className="text-rose-300">needs +{candidate.relicDeficit} relic</span>
           )}
           {candidate.rarityDeficit > 0 && (
-            <span className="text-[10px] text-red-400">
-              missing {candidate.rarityDeficit} star
-              {candidate.rarityDeficit === 1 ? '' : 's'}
-            </span>
+            <span className="text-rose-300">needs +{candidate.rarityDeficit} star</span>
           )}
           {candidate.assignmentCount > 0 && (
-            <span className="text-[10px] text-gray-500">
-              {candidate.assignmentCount} assignments
-            </span>
+            <span className="text-gray-500">{candidate.assignmentCount} assignments</span>
           )}
         </div>
       </div>
@@ -282,14 +481,18 @@ function CandidateRow({
           onAssign();
         }}
         disabled={assigning || isNearMiss}
-        className={`rounded px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+        className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           isNearMiss
-            ? 'bg-yellow-700 text-yellow-100 hover:bg-yellow-600'
-            : 'bg-emerald-700 text-emerald-100 hover:bg-emerald-600'
+            ? 'border border-amber-800 bg-amber-950/50 text-amber-200 hover:bg-amber-950/80'
+            : 'border border-emerald-800 bg-emerald-950/50 text-emerald-200 hover:bg-emerald-950/80'
         }`}
       >
-        {isNearMiss ? 'Needs upgrades' : assigning ? '...' : 'Assign'}
+        {isNearMiss ? 'Upgrade needed' : assigning ? 'Assigning...' : 'Assign'}
       </button>
     </div>
   );
+}
+
+function formatStatus(status: string) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }

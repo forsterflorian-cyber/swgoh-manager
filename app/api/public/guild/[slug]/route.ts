@@ -53,7 +53,12 @@ export async function GET(
       JOIN tb_definitions td ON td.id = ti.tb_definition_id
       WHERE ti.guild_id = ${guild.id}
         AND ti.status IN ('planning', 'active')
-      ORDER BY ti.created_at DESC
+      ORDER BY
+        CASE ti.status
+          WHEN 'active' THEN 0
+          ELSE 1
+        END,
+        ti.created_at DESC
       LIMIT 1
     `;
 
