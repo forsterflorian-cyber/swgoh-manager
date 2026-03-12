@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import type {
   StrategicPlannerData,
+  StrategicTargetAssignment,
+  StrategicTargetCandidate,
   StrategicUnitImpact,
   StrategicZoneReadiness,
 } from '@/lib/types/platoon-readiness';
@@ -13,6 +15,11 @@ import type {
 type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
+
+type Notice = {
+  tone: 'success' | 'error';
+  message: string;
+};
 
 export default function PlatoonReadinessPage() {
   return (
@@ -28,10 +35,14 @@ function PlatoonReadinessContent() {
   const [data, setData] = useState<StrategicPlannerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadPlanner() {
-      setLoading(true);
+  const loadPlanner = useCallback(
+    async (showLoadingState = true) => {
+      if (showLoadingState) {
+        setLoading(true);
+      }
 
       try {
         const url =
@@ -46,15 +57,24 @@ function PlatoonReadinessContent() {
         setData(payload.data);
         setError(null);
       } catch (loadError: unknown) {
-        setData(null);
+        if (showLoadingState) {
+          setData(null);
+        }
+
         setError(loadError instanceof Error ? loadError.message : 'Planner could not be loaded.');
       } finally {
-        setLoading(false);
+        if (showLoadingState) {
+          setLoading(false);
+        }
       }
-    }
+    },
+    [fixture]
+  );
 
-    void loadPlanner();
-  }, [fixture]);
+  useEffect(() => {
+    setNotice(null);
+    void loadPlanner(true);
+  }, [fixture, loadPlanner]);
 
   if (loading) {
     return <PlannerLoadingShell />;
@@ -101,6 +121,103 @@ function PlatoonReadinessContent() {
   const groupedZones = groupZonesByPhase(planner?.zones ?? []);
   const fixtureMode = planner?.dataState.isFixture ?? false;
   const topBlocker = planner?.topMissingUnits[0] ?? null;
+  const canManageTargets = planner?.permissions.canManageTargets ?? false;
+
+  async function handleAssignTarget(
+    guildMemberId: string,
+    unitBaseId: string,
+    memberName: string,
+    unitName: string
+  ) {
+    if (!planner?.guild?.id || fixtureMode || !canManageTargets) {
+      return;
+    }
+
+    const actionKey = `assign:${guildMemberId}:${unitBaseId}`;
+    setBusyActionKey(actionKey);
+    setNotice(null);
+
+    try {
+      const response = await fetch('/api/planning/platoons/targets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          guildId: planner.guild.id,
+          guildMemberId,
+          unitBaseId,
+        }),
+      });
+      const payload = (await response.json()) as ApiEnvelope<{
+        assigned: boolean;
+        assignmentId: string;
+      }>;
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? 'Strategic target could not be assigned.' : payload.error);
+      }
+
+      await loadPlanner(false);
+      setNotice({
+        tone: 'success',
+        message: `${memberName} is now assigned to ${unitName} as a strategic build target.`,
+      });
+    } catch (assignmentError: unknown) {
+      setNotice({
+        tone: 'error',
+        message:
+          assignmentError instanceof Error
+            ? assignmentError.message
+            : 'Strategic target could not be assigned.',
+      });
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleRemoveTarget(assignmentId: string, memberName: string, unitName: string) {
+    if (fixtureMode || !canManageTargets) {
+      return;
+    }
+
+    const actionKey = `remove:${assignmentId}`;
+    setBusyActionKey(actionKey);
+    setNotice(null);
+
+    try {
+      const response = await fetch('/api/planning/platoons/targets', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          assignmentId,
+        }),
+      });
+      const payload = (await response.json()) as ApiEnvelope<{ removed: boolean }>;
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? 'Strategic target could not be removed.' : payload.error);
+      }
+
+      await loadPlanner(false);
+      setNotice({
+        tone: 'success',
+        message: `${memberName} is no longer assigned to ${unitName}.`,
+      });
+    } catch (removeError: unknown) {
+      setNotice({
+        tone: 'error',
+        message:
+          removeError instanceof Error
+            ? removeError.message
+            : 'Strategic target could not be removed.',
+      });
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -208,6 +325,15 @@ function PlatoonReadinessContent() {
           />
         )}
 
+        {notice && (
+          <Banner
+            tone={notice.tone}
+            className="mt-6"
+            title={notice.tone === 'success' ? 'Strategic targets updated' : 'Strategic targets failed'}
+            body={notice.message}
+          />
+        )}
+
         {summary ? (
           <>
             <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -265,7 +391,15 @@ function PlatoonReadinessContent() {
 
                 <div className="mt-5 space-y-4">
                   {planner?.topMissingUnits.slice(0, 8).map((unit, index) => (
-                    <MissingUnitCard key={unit.unitBaseId} unit={unit} rank={index + 1} />
+                    <MissingUnitCard
+                      key={unit.unitBaseId}
+                      unit={unit}
+                      rank={index + 1}
+                      canManageTargets={canManageTargets}
+                      fixtureMode={fixtureMode}
+                      busyActionKey={busyActionKey}
+                      onAssignTarget={handleAssignTarget}
+                    />
                   ))}
                   {planner?.topMissingUnits.length === 0 && (
                     <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
@@ -276,6 +410,53 @@ function PlatoonReadinessContent() {
               </div>
 
               <div className="space-y-4">
+                <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                        Current Strategic Targets
+                      </p>
+                      <h2 className="mt-2 text-2xl font-semibold text-white">
+                        Assigned build targets
+                      </h2>
+                    </div>
+                    <p className="text-sm text-gray-400">
+                      Guild-level ownership and upgrade commitments for future platoon readiness.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    {planner?.strategicTargets.length ? (
+                      planner.strategicTargets.slice(0, 8).map((assignment) => (
+                        <StrategicTargetCard
+                          key={assignment.id}
+                          assignment={assignment}
+                          canManageTargets={canManageTargets}
+                          fixtureMode={fixtureMode}
+                          busyActionKey={busyActionKey}
+                          onRemoveTarget={handleRemoveTarget}
+                        />
+                      ))
+                    ) : (
+                      <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+                        No strategic build targets have been assigned yet.
+                      </div>
+                    )}
+                  </div>
+
+                  {fixtureMode && (
+                    <p className="mt-4 text-sm text-amber-200">
+                      Demo strategic targets are read-only in fixture mode.
+                    </p>
+                  )}
+
+                  {!fixtureMode && !canManageTargets && (
+                    <p className="mt-4 text-sm text-gray-500">
+                      Owners, admins, and officers can assign or remove strategic targets.
+                    </p>
+                  )}
+                </div>
+
                 <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
                     Next Action
@@ -443,12 +624,13 @@ function Banner({
 }: {
   title: string;
   body: string;
-  tone: 'warning' | 'error';
+  tone: 'warning' | 'error' | 'success';
   className?: string;
 }) {
   const toneClasses = {
     warning: 'border-amber-900 bg-amber-950/30 text-amber-100',
     error: 'border-red-900 bg-red-950/30 text-red-100',
+    success: 'border-emerald-900 bg-emerald-950/30 text-emerald-100',
   };
 
   return (
@@ -489,9 +671,22 @@ function MetricCard({
 function MissingUnitCard({
   unit,
   rank,
+  canManageTargets,
+  fixtureMode,
+  busyActionKey,
+  onAssignTarget,
 }: {
   unit: StrategicUnitImpact;
   rank: number;
+  canManageTargets: boolean;
+  fixtureMode: boolean;
+  busyActionKey: string | null;
+  onAssignTarget: (
+    guildMemberId: string,
+    unitBaseId: string,
+    memberName: string,
+    unitName: string
+  ) => Promise<void>;
 }) {
   const shortagePercent = Math.round(unit.shortageRatio * 100);
 
@@ -539,8 +734,212 @@ function MissingUnitCard({
         miss pressure affects {unit.nearMissSlots} blocked slot
         {unit.nearMissSlots === 1 ? '' : 's'}.
       </p>
+
+      <div className="mt-5 rounded-2xl border border-gray-800 bg-gray-900/60 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+              Best Candidates
+            </p>
+            <p className="mt-1 text-sm text-gray-400">
+              Suggested members for this long-term ownership target.
+            </p>
+          </div>
+          <p className="text-sm text-gray-500">
+            {unit.assignmentCount > 0
+              ? `${unit.assignmentCount} active target${unit.assignmentCount === 1 ? '' : 's'}: ${unit.assignedMemberNames.join(', ')}`
+              : 'No active strategic target yet'}
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {unit.bestCandidates.slice(0, 4).map((candidate) => {
+            const actionKey = `assign:${candidate.guildMemberId}:${unit.unitBaseId}`;
+
+            return (
+              <div
+                key={`${unit.unitBaseId}-${candidate.guildMemberId}`}
+                className="rounded-2xl border border-gray-800 bg-gray-950/70 px-4 py-3"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-white">{candidate.memberName}</p>
+                      <TargetStateBadge state={candidate.state} />
+                      <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs text-blue-200">
+                        Score {candidate.score}
+                      </span>
+                      {candidate.existingStrategicTargetCount > 0 && (
+                        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
+                          {candidate.existingStrategicTargetCount} other target
+                          {candidate.existingStrategicTargetCount === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-sm text-gray-400">{candidate.reasonSummary}</p>
+                    <p className="mt-2 text-xs text-gray-500">
+                      {formatCandidateProgress(candidate, unit.unitName)}
+                    </p>
+                  </div>
+
+                  {canManageTargets && !fixtureMode && (
+                    <button
+                      onClick={() =>
+                        void onAssignTarget(
+                          candidate.guildMemberId,
+                          unit.unitBaseId,
+                          candidate.memberName,
+                          unit.unitName
+                        )
+                      }
+                      disabled={candidate.isAlreadyAssigned || busyActionKey === actionKey}
+                      className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+                    >
+                      {candidate.isAlreadyAssigned
+                        ? 'Assigned'
+                        : busyActionKey === actionKey
+                          ? 'Assigning...'
+                          : 'Assign target'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
+}
+
+function StrategicTargetCard({
+  assignment,
+  canManageTargets,
+  fixtureMode,
+  busyActionKey,
+  onRemoveTarget,
+}: {
+  assignment: StrategicTargetAssignment;
+  canManageTargets: boolean;
+  fixtureMode: boolean;
+  busyActionKey: string | null;
+  onRemoveTarget: (assignmentId: string, memberName: string, unitName: string) => Promise<void>;
+}) {
+  const actionKey = `remove:${assignment.id}`;
+
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-white">
+              {assignment.memberName}
+              {' -> '}
+              {assignment.unitName}
+            </p>
+            <TargetStateBadge state={assignment.currentState} />
+          </div>
+          <p className="mt-2 text-sm text-gray-400">{assignment.whyItMatters}</p>
+        </div>
+
+        {canManageTargets && !fixtureMode && (
+          <button
+            onClick={() =>
+              void onRemoveTarget(assignment.id, assignment.memberName, assignment.unitName)
+            }
+            disabled={busyActionKey === actionKey}
+            className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800 disabled:cursor-not-allowed disabled:border-gray-800 disabled:bg-gray-900/60 disabled:text-gray-500"
+          >
+            {busyActionKey === actionKey ? 'Removing...' : 'Remove'}
+          </button>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+          {formatAssignmentProgress(assignment)}
+        </span>
+        <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+          {assignment.existingStrategicTargetCount} active target
+          {assignment.existingStrategicTargetCount === 1 ? '' : 's'}
+        </span>
+        {assignment.zoneHighlights.length > 0 && (
+          <span className="rounded-full border border-amber-900 bg-amber-950/40 px-3 py-1 text-amber-200">
+            {assignment.zoneHighlights.join(', ')}
+          </span>
+        )}
+        {assignment.note && (
+          <span className="rounded-full border border-blue-900 bg-blue-950/40 px-3 py-1 text-blue-200">
+            {assignment.note}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TargetStateBadge({
+  state,
+}: {
+  state: StrategicTargetCandidate['state'] | StrategicTargetAssignment['currentState'];
+}) {
+  const toneClasses = {
+    ready: 'border-emerald-900 bg-emerald-950/50 text-emerald-200',
+    near_miss: 'border-amber-900 bg-amber-950/50 text-amber-200',
+    owned_shortfall: 'border-blue-900 bg-blue-950/50 text-blue-200',
+    missing: 'border-red-900 bg-red-950/50 text-red-200',
+  };
+
+  return (
+    <span className={`rounded-full border px-3 py-1 text-xs ${toneClasses[state]}`}>
+      {formatTargetStateLabel(state)}
+    </span>
+  );
+}
+
+function formatCandidateProgress(candidate: StrategicTargetCandidate, unitName: string) {
+  if (!candidate.meetsOwnership) {
+    return `${unitName} is not owned yet.`;
+  }
+
+  return `${candidate.currentRarity ?? 0}* / R${candidate.currentRelicTier ?? 0}, missing ${formatRequirementGap(candidate.missingRelicTiers, candidate.missingRarity)}.`;
+}
+
+function formatAssignmentProgress(assignment: StrategicTargetAssignment) {
+  if (!assignment.meetsOwnership) {
+    return `${assignment.unitName} not owned yet`;
+  }
+
+  return `${assignment.currentRarity ?? 0}* / R${assignment.currentRelicTier ?? 0}, missing ${formatRequirementGap(assignment.missingRelicTiers, assignment.missingRarity)}`;
+}
+
+function formatTargetStateLabel(
+  state: StrategicTargetCandidate['state'] | StrategicTargetAssignment['currentState']
+) {
+  switch (state) {
+    case 'ready':
+      return 'Ready';
+    case 'near_miss':
+      return 'Near miss';
+    case 'owned_shortfall':
+      return 'Long build';
+    default:
+      return 'Missing';
+  }
+}
+
+function formatRequirementGap(missingRelicTiers: number, missingRarity: number) {
+  const parts: string[] = [];
+
+  if (missingRelicTiers > 0) {
+    parts.push(`${missingRelicTiers} relic tier${missingRelicTiers === 1 ? '' : 's'}`);
+  }
+
+  if (missingRarity > 0) {
+    parts.push(`${missingRarity} star${missingRarity === 1 ? '' : 's'}`);
+  }
+
+  return parts.length > 0 ? parts.join(' and ') : 'no remaining upgrades';
 }
 
 function formatConstraintLabel(constraint: StrategicUnitImpact['primaryConstraint']) {

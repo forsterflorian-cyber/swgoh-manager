@@ -24,6 +24,7 @@ model User {
   ownedGuilds  Guild[]        @relation("GuildOwner")
   assignedBy   TbAssignment[] @relation("AssignedBy")
   grantedPerms Permission[]   @relation("GrantedBy")
+  createdUpgradeAssignments GuildUpgradeAssignment[] @relation("GuildUpgradeAssignmentCreatedBy")
 
   @@map("users")
 }
@@ -71,6 +72,7 @@ model Guild {
   owner       User          @relation("GuildOwner", fields: [ownerId], references: [id])
   permissions Permission[]
   members     GuildMember[]
+  upgradeAssignments GuildUpgradeAssignment[]
   rosterCache RosterCache[]
   tbInstances TbInstance[]
 
@@ -115,6 +117,7 @@ model GuildMember {
 
   guild       Guild          @relation(fields: [guildId], references: [id], onDelete: Cascade)
   assignments TbAssignment[]
+  upgradeAssignments GuildUpgradeAssignment[]
 
   @@unique([guildId, allyCode])
   @@map("guild_members")
@@ -281,4 +284,24 @@ model TbAssignment {
 
   @@index([tbInstanceId, allyCode, unitBaseId])
   @@map("tb_assignments")
+}
+
+model GuildUpgradeAssignment {
+  id              String   @id @default(uuid())
+  guildId         String   @map("guild_id")
+  guildMemberId   String   @map("guild_member_id")
+  unitBaseId      String   @map("unit_base_id")
+  createdByUserId String?  @map("created_by_user_id")
+  note            String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  guild         Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  guildMember   GuildMember @relation(fields: [guildMemberId], references: [id], onDelete: Cascade)
+  createdByUser User?       @relation("GuildUpgradeAssignmentCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@unique([guildId, guildMemberId, unitBaseId])
+  @@index([guildId, unitBaseId])
+  @@index([guildId, guildMemberId])
+  @@map("guild_upgrade_assignments")
 }

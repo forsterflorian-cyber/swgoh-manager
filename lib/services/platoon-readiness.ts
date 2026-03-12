@@ -1,15 +1,20 @@
 import { sql } from '@vercel/postgres';
 
 import { getDemoPlatoonReadinessDataset } from '@/lib/services/platoon-readiness-fixture';
+import { listGuildUpgradeAssignments } from '@/lib/services/strategic-targets';
 import type {
   StrategicPlannerData,
   StrategicPlannerDataset,
   StrategicPlannerGuild,
+  StrategicPlannerMemberInput,
   StrategicPlannerReference,
   StrategicPlannerRosterInput,
   StrategicPlannerSlotInput,
   StrategicPlatoonStatus,
   StrategicRequirementSummary,
+  StrategicTargetAssignment,
+  StrategicTargetCandidate,
+  StrategicTargetState,
   StrategicUnitImpact,
   StrategicZoneReadiness,
 } from '@/lib/types/platoon-readiness';
@@ -19,6 +24,7 @@ type AccessibleGuildRow = {
   id: string;
   name: string;
   slug: string;
+  role: 'owner' | 'admin' | 'officer' | 'member';
   member_count: string | number;
   last_roster_sync: string | null;
 };
@@ -55,6 +61,14 @@ type RosterRow = {
   unit_name: string;
   relic_tier: string | number | null;
   rarity: string | number | null;
+};
+
+type GuildMemberRow = {
+  id: string;
+  ally_code: string;
+  player_name: string;
+  galactic_power: string | number;
+  last_synced: string | null;
 };
 
 type PlannerOptions = {
@@ -109,12 +123,28 @@ type ZoneGroup = {
   slots: StrategicPlannerSlotInput[];
 };
 
+type CandidateReadiness = {
+  state: StrategicTargetState;
+  currentRelicTier: number | null;
+  currentRarity: number | null;
+  meetsOwnership: boolean;
+  missingCopies: number | null;
+  missingRelicTiers: number;
+  missingRarity: number;
+};
+
+type StrategicImpactCore = Omit<
+  StrategicUnitImpact,
+  'impactScore' | 'reasonSummary' | 'bestCandidates' | 'assignmentCount' | 'assignedMemberNames'
+>;
+
 function buildEmptyPlannerData(input: {
   mode: 'live' | 'fixture';
   fixtureName?: string | null;
   guild?: StrategicPlannerGuild | null;
   reference?: StrategicPlannerReference | null;
   recommendedActions: string[];
+  canManageTargets?: boolean;
 }): StrategicPlannerData {
   return {
     mode: input.mode,
@@ -124,6 +154,7 @@ function buildEmptyPlannerData(input: {
     reference: input.reference ?? null,
     summary: null,
     topMissingUnits: [],
+    strategicTargets: [],
     zones: [],
     slotSummaries: [],
     recommendedActions: input.recommendedActions,
@@ -133,6 +164,9 @@ function buildEmptyPlannerData(input: {
       hasReferenceData: Boolean(input.reference),
       isFixture: input.mode === 'fixture',
       rosterCoverageRatio: 0,
+    },
+    permissions: {
+      canManageTargets: input.canManageTargets ?? false,
     },
   };
 }
@@ -418,6 +452,254 @@ function toOwnerMap(roster: StrategicPlannerRosterInput[]) {
   return ownersByUnit;
 }
 
+function toMemberUnitMap(roster: StrategicPlannerRosterInput[]) {
+  return new Map<string, StrategicPlannerRosterInput>(
+    roster.map((entry) => [`${entry.memberId}:${entry.unitBaseId}`, entry])
+  );
+}
+
+function toUnitNameMap(slots: StrategicPlannerSlotInput[], roster: StrategicPlannerRosterInput[]) {
+  const unitNames = new Map<string, string>();
+
+  for (const slot of slots) {
+    if (!unitNames.has(slot.unitBaseId)) {
+      unitNames.set(slot.unitBaseId, slot.unitName ?? slot.unitBaseId);
+    }
+  }
+
+  for (const owner of roster) {
+    if (!unitNames.has(owner.unitBaseId)) {
+      unitNames.set(owner.unitBaseId, owner.unitName);
+    }
+  }
+
+  return unitNames;
+}
+
+function toAssignmentCountMap(assignments: StrategicPlannerDataset['strategicAssignments']) {
+  const counts = new Map<string, number>();
+
+  for (const assignment of assignments) {
+    counts.set(
+      assignment.guildMemberId,
+      (counts.get(assignment.guildMemberId) ?? 0) + 1
+    );
+  }
+
+  return counts;
+}
+
+function getTargetStatePriority(state: StrategicTargetState) {
+  switch (state) {
+    case 'near_miss':
+      return 0;
+    case 'owned_shortfall':
+      return 1;
+    case 'missing':
+      return 2;
+    case 'ready':
+    default:
+      return 3;
+  }
+}
+
+function getCandidateReadiness(
+  owner: StrategicPlannerRosterInput | undefined,
+  requirement: StrategicUnitImpact['strictestRequirement']
+): CandidateReadiness {
+  if (!owner) {
+    return {
+      state: 'missing',
+      currentRelicTier: null,
+      currentRarity: null,
+      meetsOwnership: false,
+      missingCopies: 1,
+      missingRelicTiers: requirement.minRelic,
+      missingRarity: requirement.minRarity,
+    };
+  }
+
+  const missingRelicTiers = Math.max(requirement.minRelic - owner.relicTier, 0);
+  const missingRarity = Math.max(requirement.minRarity - owner.rarity, 0);
+
+  if (missingRelicTiers === 0 && missingRarity === 0) {
+    return {
+      state: 'ready',
+      currentRelicTier: owner.relicTier,
+      currentRarity: owner.rarity,
+      meetsOwnership: true,
+      missingCopies: 0,
+      missingRelicTiers,
+      missingRarity,
+    };
+  }
+
+  const state =
+    missingRelicTiers <= 2 && missingRarity <= 1 ? 'near_miss' : 'owned_shortfall';
+
+  return {
+    state,
+    currentRelicTier: owner.relicTier,
+    currentRarity: owner.rarity,
+    meetsOwnership: true,
+    missingCopies: 0,
+    missingRelicTiers,
+    missingRarity,
+  };
+}
+
+function calculateCandidateScore(input: {
+  readiness: CandidateReadiness;
+  existingStrategicTargetCount: number;
+  isAlreadyAssigned: boolean;
+}) {
+  const baseScore = {
+    near_miss: 125,
+    owned_shortfall: 85,
+    missing: 40,
+    ready: 12,
+  }[input.readiness.state];
+  const closenessBonus = input.readiness.meetsOwnership
+    ? Math.max(
+        0,
+        24 - input.readiness.missingRelicTiers * 8 - input.readiness.missingRarity * 10
+      )
+    : 0;
+  const loadPenalty = input.existingStrategicTargetCount * 18;
+  const alreadyAssignedPenalty = input.isAlreadyAssigned ? 70 : 0;
+
+  return Math.max(baseScore + closenessBonus - loadPenalty - alreadyAssignedPenalty, 0);
+}
+
+function formatRequirementDeficits(readiness: CandidateReadiness) {
+  const parts: string[] = [];
+
+  if (readiness.missingRelicTiers > 0) {
+    parts.push(
+      `${readiness.missingRelicTiers} relic tier${readiness.missingRelicTiers === 1 ? '' : 's'}`
+    );
+  }
+
+  if (readiness.missingRarity > 0) {
+    parts.push(`${readiness.missingRarity} star${readiness.missingRarity === 1 ? '' : 's'}`);
+  }
+
+  return parts.length > 0 ? parts.join(' and ') : '0 upgrades';
+}
+
+function buildCandidateReasonSummary(input: {
+  member: StrategicPlannerMemberInput;
+  unitName: string;
+  readiness: CandidateReadiness;
+  existingStrategicTargetCount: number;
+  isAlreadyAssigned: boolean;
+}) {
+  const baseReason =
+    input.readiness.state === 'near_miss'
+      ? `${input.member.playerName} already owns ${input.unitName} and is only ${formatRequirementDeficits(input.readiness)} short of the strictest requirement.`
+      : input.readiness.state === 'owned_shortfall'
+        ? `${input.member.playerName} owns ${input.unitName}, but still needs ${formatRequirementDeficits(input.readiness)} to qualify.`
+        : input.readiness.state === 'ready'
+          ? `${input.member.playerName} already meets the strictest current platoon requirement for ${input.unitName}.`
+          : input.member.lastSynced
+            ? `${input.member.playerName} has no synced roster copy of ${input.unitName} yet, so this would be a fresh ownership target.`
+            : `${input.member.playerName} has no synced roster data for ${input.unitName} yet, so the planner currently treats this as missing ownership.`;
+
+  if (input.isAlreadyAssigned) {
+    return `${baseReason} This member already owns the same strategic target.`;
+  }
+
+  if (input.existingStrategicTargetCount > 0) {
+    return `${baseReason} ${input.existingStrategicTargetCount} other strategic target${input.existingStrategicTargetCount === 1 ? ' is' : 's are'} already assigned.`;
+  }
+
+  return baseReason;
+}
+
+function buildZoneHighlights(
+  slotSummaries: StrategicRequirementSummary[],
+  unitBaseId: string
+): string[] {
+  const blockedZones = [
+    ...new Set(
+      slotSummaries
+        .filter((summary) => summary.unitBaseId === unitBaseId && summary.blocked)
+        .map((summary) => summary.zoneName)
+    ),
+  ];
+
+  if (blockedZones.length > 0) {
+    return blockedZones.slice(0, 3);
+  }
+
+  return [
+    ...new Set(
+      slotSummaries
+        .filter((summary) => summary.unitBaseId === unitBaseId)
+        .map((summary) => summary.zoneName)
+    ),
+  ].slice(0, 3);
+}
+
+function rankCandidatesForUnit(input: {
+  impact: StrategicImpactCore;
+  members: StrategicPlannerMemberInput[];
+  rosterByMemberUnit: Map<string, StrategicPlannerRosterInput>;
+  assignmentCounts: Map<string, number>;
+  assignedMemberIds: Set<string>;
+}): StrategicTargetCandidate[] {
+  return input.members
+    .map<StrategicTargetCandidate>((member) => {
+      const rosterEntry = input.rosterByMemberUnit.get(`${member.memberId}:${input.impact.unitBaseId}`);
+      const readiness = getCandidateReadiness(rosterEntry, input.impact.strictestRequirement);
+      const existingStrategicTargetCount = input.assignmentCounts.get(member.memberId) ?? 0;
+      const isAlreadyAssigned = input.assignedMemberIds.has(member.memberId);
+
+      return {
+        guildMemberId: member.memberId,
+        memberName: member.playerName,
+        allyCode: member.allyCode,
+        state: readiness.state,
+        score: calculateCandidateScore({
+          readiness,
+          existingStrategicTargetCount,
+          isAlreadyAssigned,
+        }),
+        reasonSummary: buildCandidateReasonSummary({
+          member,
+          unitName: input.impact.unitName,
+          readiness,
+          existingStrategicTargetCount,
+          isAlreadyAssigned,
+        }),
+        currentRarity: readiness.currentRarity,
+        currentRelicTier: readiness.currentRelicTier,
+        meetsOwnership: readiness.meetsOwnership,
+        missingCopies: readiness.missingCopies,
+        missingRelicTiers: readiness.missingRelicTiers,
+        missingRarity: readiness.missingRarity,
+        existingStrategicTargetCount,
+        isAlreadyAssigned,
+      };
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      if (getTargetStatePriority(left.state) !== getTargetStatePriority(right.state)) {
+        return getTargetStatePriority(left.state) - getTargetStatePriority(right.state);
+      }
+
+      if (left.existingStrategicTargetCount !== right.existingStrategicTargetCount) {
+        return left.existingStrategicTargetCount - right.existingStrategicTargetCount;
+      }
+
+      return left.memberName.localeCompare(right.memberName);
+    })
+    .slice(0, 6);
+}
+
 function getPrimaryConstraint(
   allocation: UnitAllocation
 ): StrategicUnitImpact['primaryConstraint'] {
@@ -454,7 +736,7 @@ function getPrimaryConstraint(
 }
 
 function calculateBaseImpactScore(
-  impact: Omit<StrategicUnitImpact, 'impactScore' | 'reasonSummary'>
+  impact: StrategicImpactCore
 ) {
   return (
     impact.blockedSlots * 100 +
@@ -471,7 +753,7 @@ function calculateBaseImpactScore(
 }
 
 function buildReasonSummary(
-  impact: Omit<StrategicUnitImpact, 'impactScore' | 'reasonSummary'>
+  impact: StrategicImpactCore
 ): string {
   const parts: string[] = [
     `Blocks ${impact.blockedSlots} slot${impact.blockedSlots === 1 ? '' : 's'} across ${impact.blockedZones} zone${
@@ -550,6 +832,9 @@ function toImpact(
     ...impactWithoutScore,
     reasonSummary: buildReasonSummary(impactWithoutScore),
     impactScore,
+    bestCandidates: [],
+    assignmentCount: 0,
+    assignedMemberNames: [],
   };
 }
 
@@ -773,6 +1058,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
         mode: dataset.mode,
         fixtureName: dataset.fixtureName,
         recommendedActions: ['Select or create a guild to start platoon readiness analysis.'],
+        canManageTargets: dataset.permissions.canManageTargets,
       }),
       generatedAt,
     };
@@ -791,6 +1077,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
         recommendedActions: [
           'Import Territory Battle reference data before strategic readiness can be calculated.',
         ],
+        canManageTargets: dataset.permissions.canManageTargets,
       }),
       generatedAt,
       dataState: {
@@ -810,6 +1097,10 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     rosterUnitCount: dataset.roster.length,
   };
   const ownersByUnit = toOwnerMap(dataset.roster);
+  const rosterByMemberUnit = toMemberUnitMap(dataset.roster);
+  const assignmentCounts = toAssignmentCountMap(dataset.strategicAssignments);
+  const membersById = new Map(dataset.members.map((member) => [member.memberId, member]));
+  const unitNameMap = toUnitNameMap(dataset.slots, dataset.roster);
   const zoneGroups = groupSlotsByZone(dataset.slots);
   const allPlatoons = groupSlotsByPlatoon(dataset.slots);
   const overallUnitAllocations = [...groupSlotsByUnit(dataset.slots).entries()].map(
@@ -822,15 +1113,98 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     .flatMap((allocation) => allocation.slotSummaries)
     .sort(sortSlotSummaries);
   const slotSummaryByKey = new Map(slotSummaries.map((summary) => [summary.slotKey, summary]));
-  const topMissingUnits = overallUnitAllocations
+  const allUnitImpacts = overallUnitAllocations
     .map((allocation) =>
       toImpact(allocation, {
         zones: limitingZoneCounts.get(allocation.unitBaseId) ?? 0,
         platoons: limitingPlatoonCounts.get(allocation.unitBaseId) ?? 0,
       })
-    )
+    );
+  const impactByUnitBaseId = new Map(allUnitImpacts.map((impact) => [impact.unitBaseId, impact]));
+
+  const strategicTargets = dataset.strategicAssignments
+    .map<StrategicTargetAssignment | null>((assignment) => {
+      const member = membersById.get(assignment.guildMemberId);
+      if (!member) {
+        return null;
+      }
+
+      const impact = impactByUnitBaseId.get(assignment.unitBaseId);
+      const unitName = impact?.unitName ?? unitNameMap.get(assignment.unitBaseId) ?? assignment.unitBaseId;
+      const readiness = getCandidateReadiness(
+        rosterByMemberUnit.get(`${assignment.guildMemberId}:${assignment.unitBaseId}`),
+        impact?.strictestRequirement ?? {
+          minRelic: 0,
+          minRarity: 0,
+        }
+      );
+
+      return {
+        id: assignment.id,
+        guildId: assignment.guildId,
+        guildMemberId: assignment.guildMemberId,
+        memberName: member.playerName,
+        allyCode: member.allyCode,
+        unitBaseId: assignment.unitBaseId,
+        unitName,
+        note: assignment.note,
+        createdByUserId: assignment.createdByUserId,
+        createdAt: assignment.createdAt,
+        updatedAt: assignment.updatedAt,
+        currentState: readiness.state,
+        currentRarity: readiness.currentRarity,
+        currentRelicTier: readiness.currentRelicTier,
+        meetsOwnership: readiness.meetsOwnership,
+        missingCopies: readiness.missingCopies,
+        missingRelicTiers: readiness.missingRelicTiers,
+        missingRarity: readiness.missingRarity,
+        existingStrategicTargetCount: assignmentCounts.get(assignment.guildMemberId) ?? 0,
+        whyItMatters:
+          impact && impact.missingSlots > 0
+            ? impact.reasonSummary
+            : 'This target is currently no longer a top guild-wide blocker in the latest readiness snapshot.',
+        zoneHighlights: buildZoneHighlights(slotSummaries, assignment.unitBaseId),
+      };
+    })
+    .filter((assignment): assignment is StrategicTargetAssignment => assignment !== null)
+    .sort((left, right) => {
+      if (getTargetStatePriority(left.currentState) !== getTargetStatePriority(right.currentState)) {
+        return getTargetStatePriority(left.currentState) - getTargetStatePriority(right.currentState);
+      }
+
+      const leftImpact = impactByUnitBaseId.get(left.unitBaseId)?.impactScore ?? 0;
+      const rightImpact = impactByUnitBaseId.get(right.unitBaseId)?.impactScore ?? 0;
+
+      if (rightImpact !== leftImpact) {
+        return rightImpact - leftImpact;
+      }
+
+      return right.createdAt.localeCompare(left.createdAt);
+    });
+
+  const topMissingUnits = allUnitImpacts
     .filter((impact) => impact.missingSlots > 0)
-    .sort(sortImpacts);
+    .sort(sortImpacts)
+    .map((impact) => {
+      const assignedMembers = strategicTargets.filter(
+        (assignment) => assignment.unitBaseId === impact.unitBaseId
+      );
+
+      return {
+        ...impact,
+        bestCandidates: rankCandidatesForUnit({
+          impact,
+          members: dataset.members,
+          rosterByMemberUnit,
+          assignmentCounts,
+          assignedMemberIds: new Set(assignedMembers.map((assignment) => assignment.guildMemberId)),
+        }),
+        assignmentCount: assignedMembers.length,
+        assignedMemberNames: assignedMembers
+          .map((assignment) => assignment.memberName)
+          .sort((left, right) => left.localeCompare(right)),
+      };
+    });
 
   const zones = zoneGroups.map<StrategicZoneReadiness>((zone) => {
     const zoneOwners = toOwnerMap(dataset.roster);
@@ -927,6 +1301,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     reference,
     summary,
     topMissingUnits,
+    strategicTargets,
     zones,
     slotSummaries,
     recommendedActions: buildRecommendedActions({
@@ -946,6 +1321,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
           ? normalizedGuild.rosteredMembers / normalizedGuild.memberCount
           : 0,
     },
+    permissions: dataset.permissions,
   };
 }
 
@@ -954,11 +1330,12 @@ async function getAccessibleGuild(
   guildId?: string
 ): Promise<AccessibleGuildRow | null> {
   const result = guildId
-    ? await sql<AccessibleGuildRow>`
+      ? await sql<AccessibleGuildRow>`
         SELECT
           g.id,
           g.name,
           g.slug,
+          p.role::text AS role,
           (SELECT COUNT(*) FROM guild_members WHERE guild_id = g.id) AS member_count,
           (SELECT MAX(last_synced)::text FROM guild_members WHERE guild_id = g.id) AS last_roster_sync
         FROM permissions p
@@ -980,6 +1357,7 @@ async function getAccessibleGuild(
           g.id,
           g.name,
           g.slug,
+          p.role::text AS role,
           (SELECT COUNT(*) FROM guild_members WHERE guild_id = g.id) AS member_count,
           (SELECT MAX(last_synced)::text FROM guild_members WHERE guild_id = g.id) AS last_roster_sync
         FROM permissions p
@@ -1103,6 +1481,28 @@ async function loadRosterForUnits(
   }));
 }
 
+async function loadGuildMembers(guildId: string): Promise<StrategicPlannerMemberInput[]> {
+  const result = await sql<GuildMemberRow>`
+    SELECT
+      id,
+      ally_code,
+      player_name,
+      galactic_power,
+      last_synced::text
+    FROM guild_members
+    WHERE guild_id = ${guildId}
+    ORDER BY player_name ASC
+  `;
+
+  return result.rows.map((row) => ({
+    memberId: row.id,
+    allyCode: row.ally_code,
+    playerName: row.player_name,
+    galacticPower: toNumber(row.galactic_power),
+    lastSynced: row.last_synced,
+  }));
+}
+
 async function loadLiveDataset(
   userId: string,
   guildId?: string
@@ -1116,6 +1516,11 @@ async function loadLiveDataset(
       reference: null,
       slots: [],
       roster: [],
+      members: [],
+      strategicAssignments: [],
+      permissions: {
+        canManageTargets: false,
+      },
     };
   }
 
@@ -1138,12 +1543,22 @@ async function loadLiveDataset(
       reference: null,
       slots: [],
       roster: [],
+      members: await loadGuildMembers(guildRow.id),
+      strategicAssignments: await listGuildUpgradeAssignments(guildRow.id),
+      permissions: {
+        canManageTargets:
+          guildRow.role === 'owner' || guildRow.role === 'admin' || guildRow.role === 'officer',
+      },
     };
   }
 
   const slots = await loadSlotsForReference(reference.id);
   const unitBaseIds = [...new Set(slots.map((slot) => slot.unitBaseId))];
-  const roster = await loadRosterForUnits(guildRow.id, unitBaseIds);
+  const [roster, members, strategicAssignments] = await Promise.all([
+    loadRosterForUnits(guildRow.id, unitBaseIds),
+    loadGuildMembers(guildRow.id),
+    listGuildUpgradeAssignments(guildRow.id),
+  ]);
 
   return {
     mode: 'live',
@@ -1152,6 +1567,12 @@ async function loadLiveDataset(
     reference,
     slots,
     roster,
+    members,
+    strategicAssignments,
+    permissions: {
+      canManageTargets:
+        guildRow.role === 'owner' || guildRow.role === 'admin' || guildRow.role === 'officer',
+    },
   };
 }
 

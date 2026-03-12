@@ -34,6 +34,68 @@ export interface StrategicPlannerRosterInput {
   rarity: number;
 }
 
+export interface StrategicPlannerMemberInput {
+  memberId: string;
+  allyCode: string;
+  playerName: string;
+  galacticPower: number;
+  lastSynced: string | null;
+}
+
+export interface StrategicPlannerAssignmentInput {
+  id: string;
+  guildId: string | null;
+  guildMemberId: string;
+  unitBaseId: string;
+  note: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StrategicTargetState = 'ready' | 'near_miss' | 'owned_shortfall' | 'missing';
+
+export interface StrategicTargetCandidate {
+  guildMemberId: string;
+  memberName: string;
+  allyCode: string;
+  state: StrategicTargetState;
+  score: number;
+  reasonSummary: string;
+  currentRarity: number | null;
+  currentRelicTier: number | null;
+  meetsOwnership: boolean;
+  missingCopies: number | null;
+  missingRelicTiers: number;
+  missingRarity: number;
+  existingStrategicTargetCount: number;
+  isAlreadyAssigned: boolean;
+}
+
+export interface StrategicTargetAssignment {
+  id: string;
+  guildId: string | null;
+  guildMemberId: string;
+  memberName: string;
+  allyCode: string;
+  unitBaseId: string;
+  unitName: string;
+  note: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  currentState: StrategicTargetState;
+  currentRarity: number | null;
+  currentRelicTier: number | null;
+  meetsOwnership: boolean;
+  missingCopies: number | null;
+  missingRelicTiers: number;
+  missingRarity: number;
+  existingStrategicTargetCount: number;
+  whyItMatters: string;
+  zoneHighlights: string[];
+}
+
 export interface StrategicPlannerReference {
   id: string | null;
   tbKey: string;
@@ -49,6 +111,9 @@ export interface StrategicPlannerDataset {
   reference: StrategicPlannerReference | null;
   slots: StrategicPlannerSlotInput[];
   roster: StrategicPlannerRosterInput[];
+  members: StrategicPlannerMemberInput[];
+  strategicAssignments: StrategicPlannerAssignmentInput[];
+  permissions: StrategicPlannerPermissions;
 }
 
 export interface StrategicPlannerSummary {
@@ -109,6 +174,9 @@ export interface StrategicUnitImpact {
     minRelic: number;
     minRarity: number;
   };
+  bestCandidates: StrategicTargetCandidate[];
+  assignmentCount: number;
+  assignedMemberNames: string[];
 }
 
 export interface StrategicZoneBlocker {
@@ -155,6 +223,10 @@ export interface StrategicPlannerDataState {
   rosterCoverageRatio: number;
 }
 
+export interface StrategicPlannerPermissions {
+  canManageTargets: boolean;
+}
+
 export interface StrategicPlannerData {
   mode: 'live' | 'fixture';
   fixtureName: string | null;
@@ -163,8 +235,10 @@ export interface StrategicPlannerData {
   reference: StrategicPlannerReference | null;
   summary: StrategicPlannerSummary | null;
   topMissingUnits: StrategicUnitImpact[];
+  strategicTargets: StrategicTargetAssignment[];
   zones: StrategicZoneReadiness[];
   slotSummaries: StrategicRequirementSummary[];
   recommendedActions: string[];
   dataState: StrategicPlannerDataState;
+  permissions: StrategicPlannerPermissions;
 }

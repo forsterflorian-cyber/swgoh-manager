@@ -13,6 +13,8 @@ export type AuthenticatedUser = {
   email: string;
 };
 
+export type GuildPermissionRole = 'owner' | 'admin' | 'officer' | 'member';
+
 export async function getAuthenticatedUser(): Promise<AuthenticatedUser | null> {
   const session = await getServerSession(authOptions);
   const sessionUser = session?.user as SessionUser | undefined;
@@ -46,16 +48,28 @@ export async function getAuthenticatedUser(): Promise<AuthenticatedUser | null> 
   };
 }
 
-export async function userCanAccessGuild(userId: string, guildId: string): Promise<boolean> {
-  const result = await sql`
-    SELECT 1
+export async function getGuildPermissionRole(
+  userId: string,
+  guildId: string
+): Promise<GuildPermissionRole | null> {
+  const result = await sql<{ role: GuildPermissionRole }>`
+    SELECT role
     FROM permissions
     WHERE user_id = ${userId}
       AND guild_id = ${guildId}
     LIMIT 1
   `;
 
-  return result.rows.length > 0;
+  return result.rows[0]?.role ?? null;
+}
+
+export async function userCanAccessGuild(userId: string, guildId: string): Promise<boolean> {
+  return (await getGuildPermissionRole(userId, guildId)) !== null;
+}
+
+export async function userCanManageGuild(userId: string, guildId: string): Promise<boolean> {
+  const role = await getGuildPermissionRole(userId, guildId);
+  return role === 'owner' || role === 'admin' || role === 'officer';
 }
 
 export async function userCanAccessTbInstance(

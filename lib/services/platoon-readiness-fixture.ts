@@ -1,5 +1,7 @@
 import type {
+  StrategicPlannerAssignmentInput,
   StrategicPlannerDataset,
+  StrategicPlannerMemberInput,
   StrategicPlannerRosterInput,
   StrategicPlannerSlotInput,
 } from '@/lib/types/platoon-readiness';
@@ -384,6 +386,47 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
     ]),
   ];
 
+  const members: StrategicPlannerMemberInput[] = DEMO_MEMBERS.map((member, index) => ({
+    memberId: member.memberId,
+    allyCode: member.allyCode,
+    playerName: member.playerName,
+    galacticPower: 8_300_000 - index * 45_000,
+    lastSynced: '2026-03-11T18:45:00.000Z',
+  }));
+
+  const strategicAssignments: StrategicPlannerAssignmentInput[] = [
+    {
+      id: 'demo-target-01',
+      guildId: null,
+      guildMemberId: 'demo-member-11',
+      unitBaseId: 'WATTAMBOR',
+      note: 'Close relic finish for repeated platoon demand.',
+      createdByUserId: null,
+      createdAt: '2026-03-09T12:00:00.000Z',
+      updatedAt: '2026-03-09T12:00:00.000Z',
+    },
+    {
+      id: 'demo-target-02',
+      guildId: null,
+      guildMemberId: 'demo-member-14',
+      unitBaseId: 'JEDIKNIGHTLUKE',
+      note: 'High-impact Phase 3 blocker.',
+      createdByUserId: null,
+      createdAt: '2026-03-10T09:15:00.000Z',
+      updatedAt: '2026-03-10T09:15:00.000Z',
+    },
+    {
+      id: 'demo-target-03',
+      guildId: null,
+      guildMemberId: 'demo-member-15',
+      unitBaseId: 'CAPTAINDROGAN',
+      note: null,
+      createdByUserId: null,
+      createdAt: '2026-03-10T16:30:00.000Z',
+      updatedAt: '2026-03-10T16:30:00.000Z',
+    },
+  ];
+
   return {
     mode: 'fixture',
     fixtureName: 'demo',
@@ -405,5 +448,10 @@ export function getDemoPlatoonReadinessDataset(): StrategicPlannerDataset {
     },
     slots,
     roster,
+    members,
+    strategicAssignments,
+    permissions: {
+      canManageTargets: false,
+    },
   };
 }

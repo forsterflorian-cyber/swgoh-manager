@@ -1,6 +1,6 @@
 # SWGOH Manager
 
-SWGOH Manager is a Next.js app for planning Territory Battle platoon assignments for a guild.
+SWGOH Manager is a Next.js app for strategic guild platoon planning in Territory Battles.
 
 The project keeps live guild state separate from Territory Battle reference data:
 
@@ -51,6 +51,12 @@ The importer checks `allVersions.json` first and only fetches the large Territor
 3. Gap analysis combines guild roster state with internal TB slot definitions
 4. Assignments are stored against internal TB slot ids
 
+### Strategic target planning
+
+- Guild-wide platoon readiness stays separate from live TB slot assignments
+- Strategic member build targets are stored in `guild_upgrade_assignments`
+- Candidate ranking uses current roster closeness, ownership state, and existing strategic target load
+
 ## Environment Variables
 
 ### Required for app runtime
@@ -87,11 +93,13 @@ For a fresh database, run these files in order:
 1. `sql/001_extended_schema.sql`
 2. `sql/002_tb_reference_data.sql`
 3. `sql/003_stability_indexes.sql`
+4. `sql/004_guild_upgrade_assignments.sql`
 
 If your Neon database already has the original schema applied, run only:
 
 1. `sql/002_tb_reference_data.sql`
 2. `sql/003_stability_indexes.sql`
+3. `sql/004_guild_upgrade_assignments.sql`
 
 4. Import the current ROTE reference data:
 
@@ -121,6 +129,8 @@ Use the Neon SQL editor and run the files in this order:
 4. Paste the file contents into the Neon SQL editor and run it
 5. Open `sql/003_stability_indexes.sql`
 6. Paste the file contents into the Neon SQL editor and run it
+7. Open `sql/004_guild_upgrade_assignments.sql`
+8. Paste the file contents into the Neon SQL editor and run it
 
 If you want to print the exact SQL locally before pasting it into Neon, use:
 
@@ -128,6 +138,7 @@ If you want to print the exact SQL locally before pasting it into Neon, use:
 Get-Content .\sql\001_extended_schema.sql -Raw
 Get-Content .\sql\002_tb_reference_data.sql -Raw
 Get-Content .\sql\003_stability_indexes.sql -Raw
+Get-Content .\sql\004_guild_upgrade_assignments.sql -Raw
 ```
 
 ## TB Reference Import
