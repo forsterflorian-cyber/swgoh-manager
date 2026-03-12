@@ -68,7 +68,7 @@ The importer checks `allVersions.json` first and only fetches the large Territor
 
 ### Optional but required for the protected admin import route
 
-- `TB_REFERENCE_IMPORT_SECRET`
+- `TB_IMPORT_ADMIN_SECRET`
 
 ## Local Development
 
@@ -154,9 +154,17 @@ Endpoint:
 
 - `POST /api/admin/tb-reference/import`
 
-Required header:
+Required environment variable:
 
-- `x-tb-import-secret: <TB_REFERENCE_IMPORT_SECRET>`
+- `TB_IMPORT_ADMIN_SECRET`
+
+Preferred authentication header:
+
+- `Authorization: Bearer <TB_IMPORT_ADMIN_SECRET>`
+
+Alternative header:
+
+- `x-admin-secret: <TB_IMPORT_ADMIN_SECRET>`
 
 Example body:
 
@@ -167,13 +175,24 @@ Example body:
 }
 ```
 
+Example `curl`:
+
+```bash
+curl -X POST http://localhost:3000/api/admin/tb-reference/import \
+  -H "Authorization: Bearer $TB_IMPORT_ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"tb":"rote","force":true}'
+```
+
+The route is intended for occasional protected admin use only. It is not a public import endpoint.
+
 ## Vercel Deployment Notes
 
 - The app is compatible with Vercel server-side execution
 - API routes that touch Postgres or upstream sync sources run on the Node.js runtime
 - The importer runs server-side only
 - The browser never fetches GitHub raw JSON directly
-- The admin import route must be protected with `TB_REFERENCE_IMPORT_SECRET`
+- The admin import route must be protected with `TB_IMPORT_ADMIN_SECRET`
 - `NEXTAUTH_URL` should be set in production, and `VERCEL_URL` is used as the fallback base URL for server-side public-page fetches
 - Configure the same database env vars in Vercel that you use locally
 - After deploying schema changes, run the manual TB reference import once before using ROTE planning screens

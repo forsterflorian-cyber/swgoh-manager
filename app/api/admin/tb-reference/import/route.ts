@@ -1,48 +1,110 @@
 import { NextRequest } from 'next/server';
 
-import { jsonError, jsonOk, readJsonObject } from '@/lib/api/responses';
+import { jsonError, jsonOk } from '@/lib/api/responses';
 import { importTerritoryBattleReferenceData } from '@/lib/reference-data/tb-import';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 type ImportBody = {
-  tb?: unknown;
-  force?: unknown;
+  tb: 'rote';
+  force: boolean;
 };
 
-export async function POST(request: NextRequest) {
+function getProvidedSecret(request: NextRequest) {
+  const authorizationHeader = request.headers.get('authorization');
+  const bearerSecret = authorizationHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+
+  return bearerSecret || request.headers.get('x-admin-secret')?.trim() || null;
+}
+
+async function parseImportBody(request: NextRequest): Promise<ImportBody> {
+  const rawBody = await request.text();
+
+  if (!rawBody.trim()) {
+    return {
+      tb: 'rote',
+      force: false,
+    };
+  }
+
+  let parsedBody: unknown;
   try {
-    const expectedSecret = process.env.TB_REFERENCE_IMPORT_SECRET;
-    if (!expectedSecret) {
-      return jsonError('TB_REFERENCE_IMPORT_SECRET is not configured', 500);
-    }
+    parsedBody = JSON.parse(rawBody);
+  } catch {
+    throw new Error('Request body must be valid JSON');
+  }
 
-    const providedSecret =
-      request.headers.get('x-tb-import-secret') ||
-      request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+  if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+    throw new Error('Request body must be a JSON object');
+  }
 
-    if (providedSecret !== expectedSecret) {
-      return jsonError('Unauthorized', 401);
-    }
+  const body = parsedBody as Record<string, unknown>;
+  const tbValue = body.tb;
+  const forceValue = body.force;
 
-    const body = (await readJsonObject<ImportBody>(request)) ?? {};
-    const tb = typeof body.tb === 'string' ? body.tb : undefined;
-    const force = body.force === true;
+  if (tbValue !== undefined && tbValue !== 'rote') {
+    throw new Error('Unsupported tb key');
+  }
 
-    if (tb && tb !== 'rote') {
-      return jsonError(`Unsupported tb key: ${tb}`, 400);
-    }
+  if (forceValue !== undefined && typeof forceValue !== 'boolean') {
+    throw new Error('The "force" field must be a boolean');
+  }
 
-    const tbKey = 'rote';
-    const result = await importTerritoryBattleReferenceData(tbKey, {
-      force,
-    });
+  return {
+    tb: 'rote',
+    force: forceValue === true,
+  };
+}
 
-    return jsonOk(result);
+export async function GET() {
+  return jsonError('Use POST with admin authentication to trigger the TB reference import.', 405);
+}
+
+export async function POST(request: NextRequest) {
+  const expectedSecret = process.env.TB_IMPORT_ADMIN_SECRET?.trim();
+  if (!expectedSecret) {
+    return jsonError('TB_IMPORT_ADMIN_SECRET is not configured', 500);
+  }
+
+  const providedSecret = getProvidedSecret(request);
+  if (!providedSecret || providedSecret !== expectedSecret) {
+    return jsonError('Unauthorized', 401);
+  }
+
+  let body: ImportBody;
+  try {
+    body = await parseImportBody(request);
   } catch (error: unknown) {
     return jsonError(
-      error instanceof Error ? error.message : 'Reference data import failed',
-      500
+      error instanceof Error ? error.message : 'Request body could not be parsed',
+      400
     );
+  }
+
+  try {
+    const result = await importTerritoryBattleReferenceData(body.tb, {
+      force: body.force,
+    });
+
+    return jsonOk({
+      tb: result.tbKey,
+      tbName: result.tbName,
+      imported: !result.skipped,
+      skipped: result.skipped,
+      force: result.forced,
+      sourceVersion: result.sourceVersion,
+      sourceVersions: result.sourceVersions,
+      counts: result.counts,
+      completedAt: new Date().toISOString(),
+    });
+  } catch (error: unknown) {
+    console.error('[tb-import-admin] reference import failed', {
+      tb: body.tb,
+      force: body.force,
+      error,
+    });
+
+    return jsonError('Reference data import failed. Check server logs for details.', 502);
   }
 }
