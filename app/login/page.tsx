@@ -27,9 +27,9 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-950 px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-white">SWGoH TB Manager</h1>
+          <h1 className="text-3xl font-bold text-white">SWGoH Platoon Manager</h1>
           <p className="mt-2 text-gray-400">
-            Melde dich an, um deine Gilde zu verwalten
+            Melde dich an, um deine Gilde strategisch zu planen
           </p>
         </div>
 
@@ -65,7 +65,8 @@ export default function LoginPage() {
 
           <div className="mt-6 border-t border-gray-800 pt-6 text-center">
             <p className="text-sm text-gray-500">
-              Nach dem Login kannst du deine Gilde verknuepfen und Territory Battles planen.
+              Nach dem Login kannst du fehlende Platoon-Einheiten, blockierte Zonen und
+              strategische Upgrade-Prioritaeten analysieren.
             </p>
           </div>
         </div>

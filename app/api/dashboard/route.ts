@@ -2,7 +2,7 @@ import { sql } from '@vercel/postgres';
 
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import { jsonError, jsonOk } from '@/lib/api/responses';
-import { toNumber } from '@/lib/utils/to-number';
+import { PlatoonReadinessService } from '@/lib/services/platoon-readiness';
 
 export const runtime = 'nodejs';
 
@@ -13,42 +13,17 @@ export async function GET() {
       return jsonError('Unauthorized', 401);
     }
 
-    const result = await sql<{
-      id: string;
-      name: string;
-      swgoh_gg_id: string | null;
-      slug: string;
-      memberCount: string | number;
-    }>`
-      SELECT
-        g.id,
-        g.name,
-        g.swgoh_gg_id,
-        g.slug,
-        (SELECT COUNT(*) FROM guild_members WHERE guild_id = g.id) AS "memberCount"
-      FROM users u
-      JOIN permissions p ON p.user_id = u.id
-      JOIN guilds g ON g.id = p.guild_id
-      WHERE u.id = ${user.id}
-      ORDER BY
-        CASE p.role
-          WHEN 'owner' THEN 0
-          WHEN 'admin' THEN 1
-          WHEN 'officer' THEN 2
-          ELSE 3
-        END,
-        g.created_at ASC
-      LIMIT 1
-    `;
+    const planning = await PlatoonReadinessService.analyzeForUser(user.id);
+    const guild = planning.guild;
 
-    if (result.rows.length === 0) {
-      return jsonOk({ guild: null, activeTb: null, lastRosterSync: null });
+    if (!guild) {
+      return jsonOk({
+        guild: null,
+        activeTb: null,
+        lastRosterSync: null,
+        strategicReadiness: null,
+      });
     }
-
-    const guild = {
-      ...result.rows[0],
-      memberCount: toNumber(result.rows[0].memberCount),
-    };
 
     const activeTbResult = await sql<{
       id: string;
@@ -74,16 +49,15 @@ export async function GET() {
       LIMIT 1
     `;
 
-    const syncResult = await sql<{
-      latest_sync: string | null;
-    }>`
-      SELECT MAX(last_synced)::text AS latest_sync
-      FROM guild_members
-      WHERE guild_id = ${guild.id}
-    `;
-
     return jsonOk({
-      guild,
+      guild: {
+        id: guild.id,
+        name: guild.name,
+        slug: guild.slug,
+        swgoh_gg_id: null,
+        memberCount: guild.memberCount,
+        rosteredMembers: guild.rosteredMembers,
+      },
       activeTb:
         activeTbResult.rows[0]
           ? {
@@ -92,7 +66,55 @@ export async function GET() {
               status: activeTbResult.rows[0].status,
             }
           : null,
-      lastRosterSync: syncResult.rows[0]?.latest_sync ?? null,
+      lastRosterSync: guild.lastRosterSync,
+      strategicReadiness:
+        planning.summary && planning.reference
+          ? {
+              reference: {
+                name: planning.reference.name,
+                tbKey: planning.reference.tbKey,
+              },
+              summary: planning.summary,
+              topMissingUnits: planning.topMissingUnits.slice(0, 5).map((unit) => ({
+                unitName: unit.unitName,
+                missingSlots: unit.missingSlots,
+                blockedZones: unit.blockedZones,
+                nearMissOwners: unit.nearMissOwners,
+              })),
+              zones: [...planning.zones]
+                .sort((left, right) => {
+                  if (right.missingSlots !== left.missingSlots) {
+                    return right.missingSlots - left.missingSlots;
+                  }
+
+                  return left.phase - right.phase;
+                })
+                .slice(0, 4)
+                .map((zone) => ({
+                  phase: zone.phase,
+                  zoneName: zone.zoneName,
+                  missingSlots: zone.missingSlots,
+                  status: zone.status,
+                  estimatedCoverablePlatoons: zone.estimatedCoverablePlatoons,
+                  totalPlatoons: zone.totalPlatoons,
+                  blockers: zone.blockers.slice(0, 2).map((blocker) => blocker.unitName),
+                })),
+              recommendedActions: planning.recommendedActions,
+              dataState: planning.dataState,
+            }
+          : {
+              reference: planning.reference
+                ? {
+                    name: planning.reference.name,
+                    tbKey: planning.reference.tbKey,
+                  }
+                : null,
+              summary: null,
+              topMissingUnits: [],
+              zones: [],
+              recommendedActions: planning.recommendedActions,
+              dataState: planning.dataState,
+            },
     });
   } catch (error: unknown) {
     return jsonError(

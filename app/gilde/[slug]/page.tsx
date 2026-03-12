@@ -69,8 +69,8 @@ export async function generateMetadata({
   }
 
   return {
-    title: `${payload.data.guild.name} - TB Assignments`,
-    description: `Territory Battle assignments for ${payload.data.guild.name}`,
+    title: `${payload.data.guild.name} - Guild Board`,
+    description: `Guild assignments and readiness context for ${payload.data.guild.name}`,
   };
 }
 
@@ -135,7 +135,7 @@ export default async function PublicGuildPage({
                 label={
                   activeTB
                     ? `${activeTB.name} (${formatStatus(activeTB.status)})`
-                    : 'No active Territory Battle'
+                    : 'No live assignment board'
                 }
                 tone={activeTB ? (activeTB.status === 'active' ? 'positive' : 'info') : 'neutral'}
               />
@@ -144,12 +144,12 @@ export default async function PublicGuildPage({
 
           <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
-              title="Current TB"
+              title="Live board"
               value={activeTB ? activeTB.name : 'None'}
               detail={
                 activeTB
                   ? `${activeTB.totalPhases} phases · ${formatStatus(activeTB.status)}`
-                  : 'No planning or active TB is published right now'
+                  : 'No live assignment board is published right now'
               }
               tone={activeTB ? 'info' : 'neutral'}
             />
@@ -194,12 +194,12 @@ export default async function PublicGuildPage({
               Assignment board
             </p>
             <h2 className="mt-3 text-2xl font-semibold text-white">
-              {activeTB ? activeTB.name : 'No active Territory Battle'}
+              {activeTB ? activeTB.name : 'No live assignment board'}
             </h2>
             <p className="mt-2 text-sm text-gray-400">
               {activeTB
                 ? 'Assignments below are grouped by phase and zone so members can find their current platoon responsibility quickly.'
-                : 'Guild leadership has not published a planning or active Territory Battle yet.'}
+                : 'Guild leadership has not published live platoon assignments yet. Strategic readiness planning may still be happening in the protected planner.'}
             </p>
           </div>
 
@@ -315,12 +315,12 @@ export default async function PublicGuildPage({
         ) : (
           <section className="mt-8 rounded-2xl border border-gray-800 bg-gray-900/70 p-8 text-center">
             <h2 className="text-2xl font-semibold text-white">
-              {activeTB ? 'No assignments published yet' : 'No Territory Battle available'}
+              {activeTB ? 'No assignments published yet' : 'No live assignment board available'}
             </h2>
             <p className="mt-3 text-sm text-gray-400">
               {activeTB
                 ? 'Guild leadership is still preparing assignments for the current Territory Battle.'
-                : 'Check back once guild leadership has created a planning board.'}
+                : 'Check back once guild leadership has published live platoon assignments.'}
             </p>
           </section>
         )}
@@ -388,7 +388,7 @@ export default async function PublicGuildPage({
 
       <footer className="mt-12 border-t border-gray-800">
         <div className="mx-auto max-w-6xl px-4 py-6 text-center text-sm text-gray-500">
-          <p>SWGOH TB Manager public assignment board</p>
+          <p>SWGOH guild assignment board</p>
           <p className="mt-1">
             Guild leadership can{' '}
             <Link href="/login" className="text-blue-400 hover:underline">

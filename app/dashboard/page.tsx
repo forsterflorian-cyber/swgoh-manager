@@ -10,9 +10,10 @@ type ApiEnvelope<T> =
 type DashboardGuild = {
   id: string;
   name: string;
-  slug: string;
+  slug: string | null;
   swgoh_gg_id: string | null;
   memberCount: number;
+  rosteredMembers: number;
 };
 
 type DashboardTb = {
@@ -21,10 +22,53 @@ type DashboardTb = {
   status: string;
 };
 
+type DashboardStrategicReadiness = {
+  reference: {
+    name: string;
+    tbKey: string;
+  } | null;
+  summary: {
+    totalZones: number;
+    totalPlatoons: number;
+    totalSlots: number;
+    coverableSlots: number;
+    missingSlots: number;
+    coveragePercent: number;
+    estimatedCoverablePlatoons: number;
+    blockedPlatoons: number;
+    blockedZones: number;
+    bottleneckUnitCount: number;
+  } | null;
+  topMissingUnits: Array<{
+    unitName: string;
+    missingSlots: number;
+    blockedZones: number;
+    nearMissOwners: number;
+  }>;
+  zones: Array<{
+    phase: number;
+    zoneName: string;
+    missingSlots: number;
+    status: 'ready' | 'partial' | 'blocked';
+    estimatedCoverablePlatoons: number;
+    totalPlatoons: number;
+    blockers: string[];
+  }>;
+  recommendedActions: string[];
+  dataState: {
+    hasGuild: boolean;
+    hasRosterData: boolean;
+    hasReferenceData: boolean;
+    isFixture: boolean;
+    rosterCoverageRatio: number;
+  };
+};
+
 type DashboardData = {
   guild: DashboardGuild | null;
   activeTb: DashboardTb | null;
   lastRosterSync: string | null;
+  strategicReadiness: DashboardStrategicReadiness | null;
 };
 
 type GuildMemberSummary = {
@@ -47,6 +91,8 @@ export default function DashboardPage() {
   const [guild, setGuild] = useState<DashboardGuild | null>(null);
   const [activeTb, setActiveTb] = useState<DashboardTb | null>(null);
   const [lastRosterSync, setLastRosterSync] = useState<string | null>(null);
+  const [strategicReadiness, setStrategicReadiness] =
+    useState<DashboardStrategicReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -59,9 +105,10 @@ export default function DashboardPage() {
         setGuild(dashboard.guild);
         setActiveTb(dashboard.activeTb);
         setLastRosterSync(dashboard.lastRosterSync);
+        setStrategicReadiness(dashboard.strategicReadiness);
         setError(null);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Dashboard konnte nicht geladen werden');
+      } catch (loadError: unknown) {
+        setError(loadError instanceof Error ? loadError.message : 'Dashboard could not be loaded');
       } finally {
         setLoading(false);
       }
@@ -79,13 +126,13 @@ export default function DashboardPage() {
     setNotice(null);
 
     try {
-      setSyncStatus({ current: 0, total: 0, msg: 'Initialisiere Gilde...' });
+      setSyncStatus({ current: 0, total: 0, msg: 'Initializing guild sync...' });
 
       const initRes = await fetch(`/api/guild/${guild.id}/sync`, { method: 'POST' });
       const initData = (await initRes.json()) as ApiEnvelope<{ imported: number; total: number }>;
 
       if (!initRes.ok || !initData.ok) {
-        throw new Error(initData.ok ? 'Gilden-Import fehlgeschlagen.' : initData.error);
+        throw new Error(initData.ok ? 'Guild import failed.' : initData.error);
       }
 
       const membersRes = await fetch(`/api/guild/${guild.id}/members`);
@@ -94,20 +141,18 @@ export default function DashboardPage() {
       }>;
 
       if (!membersRes.ok || !membersData.ok) {
-        throw new Error(
-          membersData.ok ? 'Mitglieder konnten nicht geladen werden.' : membersData.error
-        );
+        throw new Error(membersData.ok ? 'Members could not be loaded.' : membersData.error);
       }
 
       const members = membersData.data.members;
-      if (!members || members.length === 0) {
-        throw new Error('Keine Mitglieder gefunden.');
+      if (members.length === 0) {
+        throw new Error('No guild members found.');
       }
 
       setSyncStatus({
         current: 0,
         total: members.length,
-        msg: 'Starte Roster-Sync...',
+        msg: 'Starting roster sync...',
       });
 
       let count = 0;
@@ -116,17 +161,17 @@ export default function DashboardPage() {
         setSyncStatus({
           current: count,
           total: members.length,
-          msg: `Sync: ${member.player_name}...`,
+          msg: `Syncing ${member.player_name}...`,
         });
 
-        const res = await fetch(`/api/guild/${guild.id}/sync?allyCode=${member.ally_code}`, {
+        const response = await fetch(`/api/guild/${guild.id}/sync?allyCode=${member.ally_code}`, {
           method: 'POST',
         });
-        const data = (await res.json()) as ApiEnvelope<{ syncedUnits: number }>;
+        const payload = (await response.json()) as ApiEnvelope<{ syncedUnits: number }>;
 
-        if (!res.ok || !data.ok) {
+        if (!response.ok || !payload.ok) {
           throw new Error(
-            data.ok ? `Roster-Sync fehlgeschlagen fuer ${member.player_name}` : data.error
+            payload.ok ? `Roster sync failed for ${member.player_name}.` : payload.error
           );
         }
       }
@@ -134,22 +179,23 @@ export default function DashboardPage() {
       setSyncStatus({
         current: members.length,
         total: members.length,
-        msg: 'Sync erfolgreich abgeschlossen.',
+        msg: 'Roster sync completed.',
       });
 
       const dashboard = await fetchDashboard();
       setGuild(dashboard.guild);
       setActiveTb(dashboard.activeTb);
       setLastRosterSync(dashboard.lastRosterSync);
+      setStrategicReadiness(dashboard.strategicReadiness);
       setNotice({
         tone: 'success',
-        message: 'Roster-Sync erfolgreich abgeschlossen.',
+        message: 'Roster sync completed successfully.',
       });
 
       window.setTimeout(() => setSyncStatus(null), 2500);
-    } catch (err: unknown) {
+    } catch (syncError: unknown) {
       const message =
-        err instanceof Error ? err.message : 'Synchronisierung fehlgeschlagen';
+        syncError instanceof Error ? syncError.message : 'Roster synchronization failed.';
 
       setNotice({
         tone: 'error',
@@ -159,7 +205,13 @@ export default function DashboardPage() {
     }
   };
 
-  const rosterState = getRosterState(guild?.memberCount ?? 0, lastRosterSync);
+  const rosterState = getRosterState(
+    guild?.memberCount ?? 0,
+    guild?.rosteredMembers ?? 0,
+    lastRosterSync
+  );
+  const topBlocker = strategicReadiness?.topMissingUnits[0] ?? null;
+  const summary = strategicReadiness?.summary ?? null;
 
   if (loading) {
     return (
@@ -171,8 +223,8 @@ export default function DashboardPage() {
             <div className="mt-3 h-4 w-56 animate-pulse rounded bg-gray-800" />
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, index) => (
               <div
                 key={index}
                 className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5"
@@ -200,20 +252,28 @@ export default function DashboardPage() {
               No guild connected yet
             </h1>
             <p className="mt-3 text-base text-gray-400">
-              Connect or create a guild first so the dashboard can show planning context and
-              roster status.
+              Strategic platoon planning starts with a guild roster. Connect a guild to analyze
+              bottlenecks, or use the demo planner to review the new readiness workflow.
             </p>
             {error && (
               <div className="mx-auto mt-6 max-w-xl rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-left text-sm text-red-200">
                 {error}
               </div>
             )}
-            <Link
-              href="/guild/create"
-              className="mt-8 inline-flex rounded-xl border border-blue-500 bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-            >
-              Open guild setup
-            </Link>
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <Link
+                href="/planning/platoons?fixture=demo"
+                className="inline-flex rounded-xl border border-blue-500 bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              >
+                Open demo planner
+              </Link>
+              <Link
+                href="/login"
+                className="inline-flex rounded-xl border border-gray-700 bg-gray-900 px-5 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
+              >
+                Back to login
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -227,22 +287,25 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
-                Guild operations
+                Strategic TB Readiness
               </p>
               <h1 className="mt-3 truncate text-3xl font-semibold tracking-tight sm:text-4xl">
                 {guild.name}
               </h1>
               <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                <DashboardPill label={`Slug: ${guild.slug}`} />
-                <DashboardPill
-                  label={
-                    guild.swgoh_gg_id
-                      ? `swgoh.gg: ${guild.swgoh_gg_id}`
-                      : 'swgoh.gg ID not linked'
-                  }
-                />
+                {guild.slug && <DashboardPill label={`Slug: ${guild.slug}`} />}
                 <DashboardPill label={rosterState.label} tone={rosterState.tone} />
+                {strategicReadiness?.reference && (
+                  <DashboardPill
+                    label={`Reference: ${strategicReadiness.reference.name}`}
+                    tone="info"
+                  />
+                )}
               </div>
+              <p className="mt-4 max-w-3xl text-sm text-gray-300">
+                Focus the guild on the units that unlock the most platoon coverage. This dashboard
+                stays useful even without an active Territory Battle instance.
+              </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -251,41 +314,28 @@ export default function DashboardPage() {
                 disabled={Boolean(syncStatus)}
                 className="rounded-xl border border-emerald-500 bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
               >
-                {syncStatus ? 'Synchronisiere...' : 'Roster synchronisieren'}
+                {syncStatus ? 'Syncing...' : 'Sync roster'}
               </button>
               <Link
-                href={`/gilde/${guild.slug}`}
-                className="rounded-xl border border-gray-700 bg-gray-900/80 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
+                href="/planning/platoons"
+                className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
               >
-                Open guild board
+                Open strategic planner
               </Link>
               {activeTb && (
                 <Link
                   href={`/tb/${activeTb.id}/phase/1`}
-                  className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+                  className="rounded-xl border border-gray-700 bg-gray-900/80 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
                 >
-                  Open TB planner
+                  Open live TB planner
                 </Link>
               )}
             </div>
           </div>
         </section>
 
-        {error && (
-          <Banner
-            tone="error"
-            message={error}
-            className="mt-6"
-          />
-        )}
-
-        {notice && (
-          <Banner
-            tone={notice.tone}
-            message={notice.message}
-            className="mt-6"
-          />
-        )}
+        {error && <Banner tone="error" message={error} className="mt-6" />}
+        {notice && <Banner tone={notice.tone} message={notice.message} className="mt-6" />}
 
         {syncStatus && (
           <section className="mt-6 rounded-2xl border border-blue-900 bg-blue-950/30 p-4">
@@ -314,15 +364,11 @@ export default function DashboardPage() {
           </section>
         )}
 
-        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <MetricCard
             title="Guild members"
             value={`${guild.memberCount}`}
-            detail={
-              guild.memberCount > 0
-                ? 'Imported members currently available in the database'
-                : 'No member roster imported yet'
-            }
+            detail={`${guild.rosteredMembers} members currently contribute relevant roster data`}
             tone="neutral"
           />
           <MetricCard
@@ -332,36 +378,194 @@ export default function DashboardPage() {
             tone={rosterState.tone}
           />
           <MetricCard
-            title="Active TB"
-            value={activeTb ? activeTb.name : 'None'}
+            title="Coverable slots"
+            value={summary ? `${summary.coverableSlots}/${summary.totalSlots}` : 'Waiting'}
             detail={
-              activeTb
-                ? `Status: ${formatStatus(activeTb.status)}`
-                : 'No planning or active TB is linked to this guild right now'
+              summary
+                ? `${summary.coveragePercent}% of imported platoon slots are currently coverable`
+                : 'Reference or roster data is still incomplete'
             }
-            tone={activeTb ? 'info' : 'neutral'}
+            tone={summary ? 'info' : 'warning'}
           />
           <MetricCard
-            title="Next step"
-            value={getNextActionTitle(guild.memberCount, activeTb, lastRosterSync)}
-            detail={getNextActionDetail(guild.memberCount, activeTb, lastRosterSync)}
-            tone="neutral"
+            title="Missing slots"
+            value={summary ? `${summary.missingSlots}` : 'Waiting'}
+            detail={
+              summary
+                ? `${summary.blockedZones} blocked zones and ${summary.blockedPlatoons} blocked platoons`
+                : 'Strategic readiness becomes available once data is present'
+            }
+            tone={summary && summary.missingSlots > 0 ? 'danger' : 'neutral'}
+          />
+          <MetricCard
+            title="Top bottleneck"
+            value={topBlocker ? topBlocker.unitName : 'None'}
+            detail={
+              topBlocker
+                ? `${topBlocker.missingSlots} missing slots across ${topBlocker.blockedZones} zones`
+                : 'No guild-wide blocker detected'
+            }
+            tone={topBlocker ? 'danger' : 'positive'}
           />
         </section>
 
         <section className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Planning context
+              Strategic snapshot
             </p>
+
+            {summary ? (
+              <>
+                <h2 className="mt-3 text-2xl font-semibold text-white">
+                  Platoon coverage at guild level
+                </h2>
+                <p className="mt-2 text-sm text-gray-400">
+                  The current roster can fully cover {summary.estimatedCoverablePlatoons} of{' '}
+                  {summary.totalPlatoons} platoons in the imported reference set.
+                </p>
+
+                <div className="mt-5 space-y-3">
+                  {strategicReadiness?.topMissingUnits.slice(0, 4).map((unit) => (
+                    <div
+                      key={unit.unitName}
+                      className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3"
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-white">{unit.unitName}</p>
+                          <p className="mt-1 text-sm text-gray-400">
+                            Missing {unit.missingSlots} slot{unit.missingSlots === 1 ? '' : 's'}{' '}
+                            across {unit.blockedZones} zone{unit.blockedZones === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-amber-900 bg-amber-950/50 px-3 py-1 text-xs text-amber-200">
+                          Near misses {unit.nearMissOwners}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+
+                  {strategicReadiness?.topMissingUnits.length === 0 && (
+                    <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
+                      No strategic blockers detected with current data.
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="mt-3 text-2xl font-semibold text-white">
+                  Strategic planner waiting for data
+                </h2>
+                <p className="mt-2 text-sm text-gray-400">
+                  Import TB reference data and sync rosters to rank missing units and blocked
+                  zones.
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Highest-pressure zones
+            </p>
+
+            {strategicReadiness?.zones.length ? (
+              <div className="mt-4 space-y-3">
+                {strategicReadiness.zones.map((zone) => (
+                  <div
+                    key={`${zone.phase}-${zone.zoneName}`}
+                    className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Phase {zone.phase} {zone.zoneName}
+                        </p>
+                        <p className="mt-1 text-sm text-gray-400">
+                          {zone.estimatedCoverablePlatoons}/{zone.totalPlatoons} platoons coverable
+                          with {zone.missingSlots} missing slot
+                          {zone.missingSlots === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          zone.status === 'ready'
+                            ? 'border-emerald-900 bg-emerald-950/50 text-emerald-200'
+                            : zone.status === 'partial'
+                              ? 'border-amber-900 bg-amber-950/50 text-amber-200'
+                              : 'border-red-900 bg-red-950/50 text-red-200'
+                        }`}
+                      >
+                        {zone.status}
+                      </span>
+                    </div>
+
+                    {zone.blockers.length > 0 && (
+                      <p className="mt-3 text-sm text-gray-500">
+                        Blocking units: {zone.blockers.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-400">
+                Zone readiness will appear here once the strategic planner has enough data.
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Recommended actions
+            </p>
+            <div className="mt-4 space-y-3">
+              {(strategicReadiness?.recommendedActions.length
+                ? strategicReadiness.recommendedActions
+                : ['Open the strategic planner to review guild-level platoon readiness.']
+              ).map((action, index) => (
+                <div
+                  key={`${action}-${index}`}
+                  className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-200"
+                >
+                  {action}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Link
+                href="/planning/platoons"
+                className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              >
+                Open strategic planner
+              </Link>
+              <Link
+                href="/planning/platoons?fixture=demo"
+                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
+              >
+                Review demo mode
+              </Link>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Operational planner
+            </p>
+
             {activeTb ? (
               <>
                 <h2 className="mt-3 text-2xl font-semibold text-white">{activeTb.name}</h2>
                 <p className="mt-2 text-sm text-gray-400">
-                  The current planner is ready to review zone progress, fill open slots, and
-                  confirm assignments for the active phase.
+                  Live Territory Battle operations remain available, but they are now a secondary
+                  workflow after guild-level strategic readiness.
                 </p>
-                <div className="mt-5 flex flex-wrap gap-3">
+                <div className="mt-5 flex flex-wrap gap-2 text-sm">
                   <DashboardPill
                     label={`Status: ${formatStatus(activeTb.status)}`}
                     tone={activeTb.status === 'active' ? 'positive' : 'info'}
@@ -370,48 +574,20 @@ export default function DashboardPage() {
                 </div>
                 <Link
                   href={`/tb/${activeTb.id}/phase/1`}
-                  className="mt-6 inline-flex rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+                  className="mt-6 inline-flex rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
                 >
-                  Go to planner
+                  Open live planner
                 </Link>
               </>
             ) : (
               <>
-                <h2 className="mt-3 text-2xl font-semibold text-white">No active planning board</h2>
+                <h2 className="mt-3 text-2xl font-semibold text-white">No live TB instance linked</h2>
                 <p className="mt-2 text-sm text-gray-400">
-                  Once a Territory Battle instance exists for this guild, it will show up here.
+                  Strategic planning is still fully available from roster plus reference data, so
+                  the dashboard remains useful between events.
                 </p>
               </>
             )}
-          </div>
-
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Recommended actions
-            </p>
-            <div className="mt-4 space-y-3">
-              <ActionRow
-                title="Review guild board"
-                description="Check the public-facing guild overview and current assignments."
-                href={`/gilde/${guild.slug}`}
-                label="Open guild board"
-              />
-              <ActionRow
-                title="Refresh roster data"
-                description="Use a manual sync when you need the latest roster ownership and relic state."
-                buttonLabel={syncStatus ? 'Synchronisiere...' : 'Start roster sync'}
-                onClick={() => void handleSync()}
-                disabled={Boolean(syncStatus)}
-              />
-              {activeTb && (
-                <ActionRow
-                  title="Inspect planner"
-                  description="Open the current Territory Battle planner and resolve remaining gaps."
-                  href={`/tb/${activeTb.id}/phase/1`}
-                  label="Open planner"
-                />
-              )}
-            </div>
           </div>
         </section>
       </div>
@@ -420,36 +596,40 @@ export default function DashboardPage() {
 }
 
 async function fetchDashboard() {
-  const res = await fetch('/api/dashboard');
-  const payload = (await res.json()) as ApiEnvelope<DashboardData>;
+  const response = await fetch('/api/dashboard');
+  const payload = (await response.json()) as ApiEnvelope<DashboardData>;
 
-  if (!res.ok || !payload.ok) {
-    throw new Error(payload.ok ? 'Dashboard konnte nicht geladen werden' : payload.error);
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.ok ? 'Dashboard could not be loaded.' : payload.error);
   }
 
   return payload.data;
 }
 
-function getRosterState(memberCount: number, lastRosterSync: string | null) {
+function getRosterState(
+  memberCount: number,
+  rosteredMembers: number,
+  lastRosterSync: string | null
+) {
   if (memberCount === 0) {
     return {
-      label: 'Roster import pending',
-      detail: 'Import guild members before assignment planning can rely on roster data.',
+      label: 'Guild import pending',
+      detail: 'Import guild members first so readiness analysis can use real roster data.',
       tone: 'danger' as const,
     };
   }
 
-  if (!lastRosterSync) {
+  if (rosteredMembers === 0 || !lastRosterSync) {
     return {
       label: 'Roster sync recommended',
-      detail: 'Members exist, but no completed roster sync timestamp is stored yet.',
+      detail: 'Guild members exist, but no current roster cache is available for strategic planning.',
       tone: 'warning' as const,
     };
   }
 
   return {
     label: 'Roster data available',
-    detail: `Last completed sync: ${formatSyncDisplay(lastRosterSync)}`,
+    detail: `${rosteredMembers} members currently contribute roster data.`,
     tone: 'positive' as const,
   };
 }
@@ -474,46 +654,6 @@ function formatStatus(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-function getNextActionTitle(
-  memberCount: number,
-  activeTb: DashboardTb | null,
-  lastRosterSync: string | null
-) {
-  if (memberCount === 0) {
-    return 'Import guild data';
-  }
-
-  if (!lastRosterSync) {
-    return 'Run roster sync';
-  }
-
-  if (activeTb) {
-    return 'Review planner';
-  }
-
-  return 'Open guild board';
-}
-
-function getNextActionDetail(
-  memberCount: number,
-  activeTb: DashboardTb | null,
-  lastRosterSync: string | null
-) {
-  if (memberCount === 0) {
-    return 'Members are required before roster ownership and assignments become useful.';
-  }
-
-  if (!lastRosterSync) {
-    return 'Roster ownership has not been refreshed yet for the current guild data.';
-  }
-
-  if (activeTb) {
-    return 'Use the planner to resolve remaining open slots and conflicts.';
-  }
-
-  return 'No active TB is available, but the guild board is ready for review.';
-}
-
 function Banner({
   tone,
   message,
@@ -528,7 +668,11 @@ function Banner({
     error: 'border-red-900 bg-red-950/40 text-red-200',
   };
 
-  return <div className={`rounded-2xl border px-4 py-3 text-sm ${toneClasses[tone]} ${className ?? ''}`}>{message}</div>;
+  return (
+    <div className={`rounded-2xl border px-4 py-3 text-sm ${toneClasses[tone]} ${className ?? ''}`}>
+      {message}
+    </div>
+  );
 }
 
 function DashboardPill({
@@ -573,48 +717,6 @@ function MetricCard({
       <p className="text-sm text-gray-400">{title}</p>
       <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
       <p className="mt-3 text-sm text-gray-500">{detail}</p>
-    </div>
-  );
-}
-
-function ActionRow({
-  title,
-  description,
-  href,
-  label,
-  buttonLabel,
-  onClick,
-  disabled = false,
-}: {
-  title: string;
-  description: string;
-  href?: string;
-  label?: string;
-  buttonLabel?: string;
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
-      <p className="text-sm font-medium text-white">{title}</p>
-      <p className="mt-1 text-sm text-gray-400">{description}</p>
-      {href && label && (
-        <Link
-          href={href}
-          className="mt-4 inline-flex rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-        >
-          {label}
-        </Link>
-      )}
-      {!href && onClick && buttonLabel && (
-        <button
-          onClick={onClick}
-          disabled={disabled}
-          className="mt-4 inline-flex rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {buttonLabel}
-        </button>
-      )}
     </div>
   );
 }
