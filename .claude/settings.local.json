@@ -8,7 +8,9 @@
       "WebFetch(domain:deploy-swgoh-comlink-p3su.onrender.com)",
       "Bash(curl -s --max-time 30 \"https://deploy-swgoh-comlink-p3su.onrender.com/openapi.json\")",
       "Bash(ls -la \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/\")",
-      "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager\" -type f -name *.env*)"
+      "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager\" -type f -name *.env*)",
+      "Bash(npx tsc:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

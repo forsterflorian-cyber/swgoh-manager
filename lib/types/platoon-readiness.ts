@@ -46,6 +46,8 @@ export interface StrategicPlannerRosterInput {
   unitName: string;
   relicTier: number;
   rarity: number;
+  /** Comlink currentTier: 0 = ship (no relic requirement), 1–13 = character gear level, -1 = unknown */
+  gearLevel: number;
 }
 
 export interface StrategicPlannerMemberInput {

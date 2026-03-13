@@ -18,6 +18,7 @@ type DemoUnit = {
   unitName: string;
   relicTier: number;
   rarity?: number;
+  gearLevel?: number;
 };
 
 const DEMO_MEMBERS: DemoMember[] = [
@@ -68,6 +69,7 @@ function own(memberId: string, units: DemoUnit[]): StrategicPlannerRosterInput[]
     unitName: unit.unitName,
     relicTier: unit.relicTier,
     rarity: unit.rarity ?? 7,
+    gearLevel: unit.gearLevel ?? 1,
   }));
 }
 

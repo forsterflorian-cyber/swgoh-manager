@@ -69,6 +69,7 @@ type RosterRow = {
   unit_name: string;
   relic_tier: string | number | null;
   rarity: string | number | null;
+  gear_level: string | number | null;
 };
 
 type GuildMemberRow = {
@@ -337,13 +338,19 @@ function ownerKey(owner: StrategicPlannerRosterInput) {
   return owner.memberId;
 }
 
+function isShip(owner: StrategicPlannerRosterInput) {
+  return owner.gearLevel === 0;
+}
+
 function qualifies(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
-  return owner.relicTier >= slot.requiredRelicTier && owner.rarity >= slot.requiredRarity;
+  if (owner.rarity < slot.requiredRarity) return false;
+  if (isShip(owner)) return true; // ships have no relic requirement
+  return owner.relicTier >= slot.requiredRelicTier;
 }
 
 function getDeficits(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
   return {
-    relicDeficit: Math.max(slot.requiredRelicTier - owner.relicTier, 0),
+    relicDeficit: isShip(owner) ? 0 : Math.max(slot.requiredRelicTier - owner.relicTier, 0),
     rarityDeficit: Math.max(slot.requiredRarity - owner.rarity, 0),
   };
 }
@@ -682,7 +689,7 @@ function getCandidateReadiness(
     };
   }
 
-  const missingRelicTiers = Math.max(requirement.minRelic - owner.relicTier, 0);
+  const missingRelicTiers = isShip(owner) ? 0 : Math.max(requirement.minRelic - owner.relicTier, 0);
   const missingRarity = Math.max(requirement.minRarity - owner.rarity, 0);
 
   if (missingRelicTiers === 0 && missingRarity === 0) {
@@ -1666,7 +1673,7 @@ async function loadSlotsForReference(
     slotNumber: toNumber(row.slot_number),
     unitBaseId: row.unit_base_id,
     unitName: row.unit_name,
-    requiredRelicTier: toNumber(row.required_relic_tier),
+    requiredRelicTier: Math.max(0, toNumber(row.required_relic_tier) - 2),
     requiredRarity: toNumber(row.required_rarity, 7),
     planetCategory: inferPlanetCategory({
       tbKey: reference.tbKey,
@@ -1689,7 +1696,8 @@ async function loadRosterFromPlayerRoster(
         pr.unit_base_id,
         pr.unit_base_id AS unit_name,
         pr.relic_tier,
-        pr.rarity
+        pr.rarity,
+        pr.gear_level
       FROM player_roster pr
       JOIN guild_members gm
         ON gm.player_id = pr.player_id
@@ -1709,6 +1717,7 @@ async function loadRosterFromPlayerRoster(
     unitName: row.unit_name,
     relicTier: toNumber(row.relic_tier),
     rarity: toNumber(row.rarity, 7),
+    gearLevel: toNumber(row.gear_level, -1),
   }));
 }
 
@@ -1745,6 +1754,7 @@ async function loadRosterFromRosterCache(
     unitName: row.unit_name,
     relicTier: toNumber(row.relic_tier),
     rarity: toNumber(row.rarity, 7),
+    gearLevel: -1, // roster_cache has no gear_level; -1 = unknown (treated as character)
   }));
 }
 
