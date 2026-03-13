@@ -269,9 +269,17 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
   }
 
   if (rawUnits.length === 0) {
-    // The response keys log above will show what was actually returned.
+    const unitsType = Array.isArray(rawUnitsCandidate)
+      ? `array(len=0)`
+      : rawUnitsCandidate === null
+      ? 'null'
+      : rawUnitsCandidate === undefined
+      ? 'undefined'
+      : typeof rawUnitsCandidate === 'object'
+      ? `object{${Object.keys(rawUnitsCandidate as object).slice(0, 10).join(',')}}`
+      : `${typeof rawUnitsCandidate}`;
     throw new Error(
-      `Comlink /data returned no units — response keys: [${Object.keys(raw).join(', ')}]`
+      `Comlink /data returned no units — raw.units=${unitsType} — response keys: [${Object.keys(raw).join(', ')}]`
     );
   }
 
