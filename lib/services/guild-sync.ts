@@ -74,11 +74,20 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
     // xmax = 0 means the row was freshly inserted; non-zero means it was updated.
     let inserted = 0;
     let updated = 0;
+    let skipped = 0;
 
     await client.sql`BEGIN`;
 
     try {
       for (const member of members) {
+        // Defence-in-depth: the client already filters these, but guard again so a
+        // bad ally code can never corrupt the UNIQUE(guild_id, ally_code) key.
+        if (!member.allyCode || member.allyCode === '0') {
+          console.warn(`[guild-sync] skipping member with no ally code: ${member.playerName}`);
+          skipped++;
+          continue;
+        }
+
         const result = await client.sql<{ is_insert: boolean }>`
           INSERT INTO guild_members (id, guild_id, player_name, ally_code, galactic_power, last_synced, created_at, updated_at)
           VALUES (
@@ -114,10 +123,10 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
     }
 
     console.log(
-      `[guild-sync] Finished for guild ${guildId}: inserted=${inserted} updated=${updated}`
+      `[guild-sync] Finished for guild ${guildId}: inserted=${inserted} updated=${updated} skipped=${skipped}`
     );
 
-    return { guildId, inserted, updated, skipped: 0 };
+    return { guildId, inserted, updated, skipped };
   } finally {
     client.release();
   }

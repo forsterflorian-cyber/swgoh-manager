@@ -95,6 +95,15 @@ export async function fetchComlinkGuild(guildId: string): Promise<ComlinkGuildMe
   }
 
   const json = (await response.json()) as unknown;
+
+  // Diagnostic: log the first raw member before Zod parsing to verify actual field names.
+  // Remove once the schema is confirmed correct.
+  const rawMemberList = (json as { guild?: { member?: unknown[] } } | null)?.guild?.member;
+  console.log(
+    '[comlink] guild member sample:',
+    JSON.stringify(Array.isArray(rawMemberList) ? rawMemberList[0] : rawMemberList, null, 2)
+  );
+
   const parsed = guildResponseSchema.safeParse(json);
 
   if (!parsed.success) {
@@ -109,14 +118,26 @@ export async function fetchComlinkGuild(guildId: string): Promise<ComlinkGuildMe
     throw new Error('Comlink guild returned no members');
   }
 
-  return members.map((m) => {
+  const mapped: ComlinkGuildMember[] = [];
+
+  for (const m of members) {
+    // allyCode === 0 means the field was absent or unparseable (Zod .catch(0) fired).
+    // Skip these — writing "0" as the ally code causes all members to collide on the
+    // same UNIQUE(guild_id, ally_code) key.
+    if (m.allyCode === 0) {
+      console.warn('[comlink] skipping member with missing or unparseable ally code:', m.playerName);
+      continue;
+    }
+
     const gpEntry = m.memberContribution?.find((c) => c.type === GALACTIC_POWER_TYPE);
     const galacticPower = gpEntry ? (parseInt(gpEntry.currentValue, 10) || 0) : 0;
 
-    return {
+    mapped.push({
       playerName: m.playerName,
       allyCode: String(m.allyCode),
       galacticPower,
-    };
-  });
+    });
+  }
+
+  return mapped;
 }
