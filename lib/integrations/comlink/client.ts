@@ -83,8 +83,8 @@ type UnitValidationResult = { ok: true } | { ok: false; reason: string };
  * Valid ranges after normalization:
  *   rarity    1–7    (0 impossible for an owned unit in SWGOH)
  *   gearLevel 0–13   (0 = ship, 1–13 = character gear tier)
- *   relicTier 0–9    (0 = no relic, 9 = R9; formula Math.max(0, raw-2) bounds this)
- *   level     1–85
+ *   relicTier 0–10    (0 = no relic, 9 = R9; formula Math.max(0, raw-2) bounds this)
+ *   level     1-85
  *
  * Ship rule: gearLevel === 0 → relicTier must be 0 (ships have no relic track)
  */
@@ -98,7 +98,7 @@ export function validateNormalizedRosterUnit(unit: ComlinkRosterUnit): UnitValid
   if (!Number.isInteger(unit.gearLevel) || unit.gearLevel < 0 || unit.gearLevel > 13) {
     return { ok: false, reason: `gear_level_out_of_range:${unit.gearLevel}` };
   }
-  if (!Number.isInteger(unit.relicTier) || unit.relicTier < 0 || unit.relicTier > 9) {
+  if (!Number.isInteger(unit.relicTier) || unit.relicTier < 0 || unit.relicTier > 10) {
     return { ok: false, reason: `relic_tier_out_of_range:${unit.relicTier}` };
   }
   if (!Number.isInteger(unit.level) || unit.level < 1 || unit.level > 85) {
