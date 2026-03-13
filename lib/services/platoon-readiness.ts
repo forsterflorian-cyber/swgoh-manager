@@ -1495,6 +1495,16 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
     0
   );
   const missingSlots = Math.max(totalSlots - coverableSlots, 0);
+
+  if (dataset.mode === 'live') {
+    console.log(
+      `[planner] analysis complete mode=${dataset.mode} ` +
+      `total_slots=${totalSlots} coverable=${coverableSlots} missing=${missingSlots} ` +
+      `coverage=${totalSlots > 0 ? Math.round((coverableSlots / totalSlots) * 100) : 0}% ` +
+      `roster_rows=${dataset.roster.length}`
+    );
+  }
+
   const summary = {
     totalZones: zones.length,
     totalPlatoons: allPlatoons.length,
@@ -1666,14 +1676,46 @@ async function loadSlotsForReference(
   }));
 }
 
-async function loadRosterForUnits(
+async function loadRosterFromPlayerRoster(
   guildId: string,
   unitBaseIds: string[]
 ): Promise<StrategicPlannerRosterInput[]> {
-  if (unitBaseIds.length === 0) {
-    return [];
-  }
+  const result = await sql.query<RosterRow>(
+    `
+      SELECT
+        gm.id          AS member_id,
+        COALESCE(gm.ally_code, gm.player_id) AS ally_code,
+        gm.player_name,
+        pr.unit_base_id,
+        pr.unit_base_id AS unit_name,
+        pr.relic_tier,
+        pr.rarity
+      FROM player_roster pr
+      JOIN guild_members gm
+        ON gm.player_id = pr.player_id
+       AND gm.guild_id  = pr.guild_id
+      WHERE pr.guild_id    = $1
+        AND pr.unit_base_id = ANY($2::text[])
+      ORDER BY pr.unit_base_id ASC, pr.relic_tier DESC, pr.rarity DESC, gm.player_name ASC
+    `,
+    [guildId, unitBaseIds]
+  );
 
+  return result.rows.map((row) => ({
+    memberId: row.member_id,
+    allyCode: row.ally_code,
+    playerName: row.player_name,
+    unitBaseId: row.unit_base_id,
+    unitName: row.unit_name,
+    relicTier: toNumber(row.relic_tier),
+    rarity: toNumber(row.rarity, 7),
+  }));
+}
+
+async function loadRosterFromRosterCache(
+  guildId: string,
+  unitBaseIds: string[]
+): Promise<StrategicPlannerRosterInput[]> {
   const result = await sql.query<RosterRow>(
     `
       SELECT
@@ -1687,8 +1729,8 @@ async function loadRosterForUnits(
       FROM roster_cache rc
       JOIN guild_members gm
         ON gm.ally_code = rc.ally_code
-       AND gm.guild_id = rc.guild_id
-      WHERE rc.guild_id = $1
+       AND gm.guild_id  = rc.guild_id
+      WHERE rc.guild_id    = $1
         AND rc.unit_base_id = ANY($2::text[])
       ORDER BY rc.unit_base_id ASC, rc.relic_tier DESC, rc.rarity DESC, gm.player_name ASC
     `,
@@ -1704,6 +1746,43 @@ async function loadRosterForUnits(
     relicTier: toNumber(row.relic_tier),
     rarity: toNumber(row.rarity, 7),
   }));
+}
+
+async function loadRosterForUnits(
+  guildId: string,
+  unitBaseIds: string[]
+): Promise<StrategicPlannerRosterInput[]> {
+  if (unitBaseIds.length === 0) {
+    return [];
+  }
+
+  // Primary source: player_roster (Comlink-synced via /api/guild/roster-sync).
+  // Falls back to roster_cache (swgoh.gg-synced) if player_roster is empty for this guild.
+  const fromPlayerRoster = await loadRosterFromPlayerRoster(guildId, unitBaseIds);
+  const rosterSource = fromPlayerRoster.length > 0 ? 'player_roster' : 'roster_cache';
+  const roster =
+    fromPlayerRoster.length > 0
+      ? fromPlayerRoster
+      : await loadRosterFromRosterCache(guildId, unitBaseIds);
+
+  // ---- Part D diagnostics -----------------------------------------------
+  const distinctUnitsRequired = unitBaseIds.length;
+  const unitsWithAtLeastOneOwner = new Set(roster.map((r) => r.unitBaseId)).size;
+  const distinctMembersInRoster  = new Set(roster.map((r) => r.memberId)).size;
+  const missingUnitsInRoster     = distinctUnitsRequired - unitsWithAtLeastOneOwner;
+
+  console.log(
+    `[planner] roster source=${rosterSource} ` +
+    `guild=${guildId} ` +
+    `required_unit_types=${distinctUnitsRequired} ` +
+    `roster_rows=${roster.length} ` +
+    `distinct_members=${distinctMembersInRoster} ` +
+    `units_with_owner=${unitsWithAtLeastOneOwner} ` +
+    `units_no_owner=${missingUnitsInRoster}`
+  );
+  // -----------------------------------------------------------------------
+
+  return roster;
 }
 
 async function loadGuildMembers(guildId: string): Promise<StrategicPlannerMemberInput[]> {
@@ -1779,6 +1858,12 @@ async function loadLiveDataset(
 
   const slots = await loadSlotsForReference(reference);
   const unitBaseIds = [...new Set(slots.map((slot) => slot.unitBaseId))];
+
+  console.log(
+    `[planner] loading live dataset guild=${guildRow.id} ` +
+    `total_slots=${slots.length} distinct_unit_types=${unitBaseIds.length}`
+  );
+
   const [roster, members, strategicAssignments] = await Promise.all([
     loadRosterForUnits(guildRow.id, unitBaseIds),
     loadGuildMembers(guildRow.id),
