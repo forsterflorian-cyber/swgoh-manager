@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { fetchWithTimeout } from '@/lib/utils/fetch-with-timeout';
-import type { ComlinkGuildMember, ComlinkPlayerDetail, ComlinkPlayerProfile, ComlinkRosterUnit } from './types';
+import type { ComlinkGuildMember, ComlinkPlayerDetail, ComlinkPlayerProfile, ComlinkRosterUnit, ComlinkUnitMetadata } from './types';
 
 function getBaseUrl(): string {
   const url = process.env.COMLINK_BASE_URL?.trim();
@@ -69,6 +69,19 @@ const playerResponseSchema = z
     name: z.string().trim().min(1).catch('Unknown Player'),
   })
   .passthrough();
+
+// ---------------------------------------------------------------------------
+// Unit metadata schema  POST /data { collection: ['units'] }
+// ---------------------------------------------------------------------------
+
+// Each entry in the 'unit' array of the /data response.
+// combatType: 1 = character, 2 = ship — always present for playable units.
+const unitMetadataSchema = z.object({
+  id: z.string().trim().min(1),
+  baseId: z.string().trim().min(1),
+  combatType: z.coerce.number().int().min(1),
+  nameKey: z.string().optional(),
+});
 
 // ---------------------------------------------------------------------------
 // Normalized roster unit validation  (PART B)
@@ -178,6 +191,54 @@ export async function checkComlinkReady(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Unit metadata endpoint  POST /data
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches the 'units' collection from Comlink /data and returns a Map keyed
+ * by baseId (e.g. "SCYTHE") for O(1) lookup during roster normalization.
+ *
+ * combatType in this metadata is authoritative for ship vs character:
+ *   1 = character, 2 = ship
+ *
+ * This must be fetched once per sync batch (not once per player).
+ */
+export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUnitMetadata>> {
+  const json = await postJson('/data', { collection: ['units'] }, 30000);
+
+  const raw = json as Record<string, unknown>;
+  // Comlink wraps the collection under the collection name: { unit: [...] }
+  const rawUnits: unknown[] = Array.isArray(raw.unit) ? (raw.unit as unknown[]) : [];
+
+  console.log(`[comlink] /data units raw count: ${rawUnits.length}`);
+
+  if (rawUnits.length === 0) {
+    throw new Error('Comlink /data returned no units — check collection name or service version');
+  }
+
+  const unitsById = new Map<string, ComlinkUnitMetadata>();
+  let skipped = 0;
+
+  for (const rawUnit of rawUnits) {
+    const parsed = unitMetadataSchema.safeParse(rawUnit);
+    if (!parsed.success || !parsed.data.baseId) {
+      skipped++;
+      continue;
+    }
+    const meta: ComlinkUnitMetadata = {
+      id: parsed.data.id,
+      baseId: parsed.data.baseId,
+      combatType: parsed.data.combatType,
+      nameKey: parsed.data.nameKey,
+    };
+    unitsById.set(meta.baseId, meta);
+  }
+
+  console.log(`[comlink] unit metadata loaded: ${unitsById.size} entries, ${skipped} skipped`);
+  return unitsById;
+}
+
+// ---------------------------------------------------------------------------
 // Guild endpoint  POST /guild
 // ---------------------------------------------------------------------------
 
@@ -271,9 +332,15 @@ export async function fetchComlinkPlayer(playerId: string): Promise<ComlinkPlaye
  * Fetches a full player profile from Comlink including the rosterUnit array.
  * Same endpoint as fetchComlinkPlayer but parses the complete payload.
  * Timeout is slightly higher (35s) to account for larger roster payloads.
+ *
+ * unitsById — metadata map from fetchComlinkUnitMetadata(), keyed by baseId.
+ * Ship vs character classification is driven exclusively from this map
+ * (unitMeta.combatType === 2 means ship). The payload's own combatType field
+ * is NOT used — it can be absent or unreliable for ship units.
  */
 export async function fetchComlinkPlayerWithRoster(
-  playerId: string
+  playerId: string,
+  unitsById: Map<string, ComlinkUnitMetadata>
 ): Promise<ComlinkPlayerProfile> {
   if (!playerId?.trim()) {
     throw new Error('Missing Comlink player id');
@@ -333,13 +400,24 @@ export async function fetchComlinkPlayerWithRoster(
       continue;
     }
 
-    const rawRelicTier = u.relic?.currentTier ?? 1;
+    // Resolve unit metadata — classification is authoritative from /data, never
+    // from the roster payload (combatType in the player payload can be absent).
+    const unitMeta = unitsById.get(unitBaseId);
+    if (!unitMeta) {
+      // Unit is not in the /data collection — skip it rather than guess its type.
+      // This can happen for newly-added units not yet in the cached metadata.
+      console.warn(
+        `[comlink] ${playerId} unknown unit skipped: definitionId=${u.definitionId} baseId=${unitBaseId}`
+      );
+      emptyBaseIdCount++;
+      continue;
+    }
 
-    // combatType === 2 is the authoritative ship discriminator from Comlink.
-    // Ships have no gear tier — currentTier may be 0 or absent in the raw payload.
-    // Using combatType prevents the .catch(1) schema default from silently assigning
-    // gearLevel=1 to ships when currentTier is missing.
-    const isShip = u.combatType === 2;
+    const rawRelicTier = u.relic?.currentTier ?? 0;
+
+    // combatType from /data metadata is the authoritative ship discriminator.
+    // Do NOT use u.combatType from the roster payload — it can be null/absent for ships.
+    const isShip = unitMeta.combatType === 2;
     const gearLevel = isShip ? 0 : u.currentTier;
     const relicTier = isShip ? 0 : Math.max(0, rawRelicTier - 2);
 
@@ -347,8 +425,8 @@ export async function fetchComlinkPlayerWithRoster(
     if (unitBaseId === 'SCYTHE') {
       console.log(
         `[roster-normalize] SCYTHE player=${playerId}: ` +
-        `combatType=${u.combatType ?? null} currentTier=${u.currentTier} ` +
-        `relic.currentTier=${u.relic?.currentTier ?? null} ` +
+        `payloadCombatType=${u.combatType ?? null} metaCombatType=${unitMeta.combatType} ` +
+        `currentTier=${u.currentTier} relic.currentTier=${u.relic?.currentTier ?? null} ` +
         `classified=${isShip ? 'SHIP' : 'CHARACTER'} ` +
         `gearLevel=${gearLevel} relicTier=${relicTier}`
       );
@@ -362,7 +440,7 @@ export async function fetchComlinkPlayerWithRoster(
         `id=${u.definitionId} ` +
         `currentRarity=${u.currentRarity} currentLevel=${u.currentLevel} ` +
         `currentTier=${u.currentTier} relic.currentTier=${u.relic?.currentTier ?? null} ` +
-        `combatType=${u.combatType ?? null} isShip=${isShip}`
+        `payloadCombatType=${u.combatType ?? null} metaCombatType=${unitMeta.combatType} isShip=${isShip}`
       );
     }
 

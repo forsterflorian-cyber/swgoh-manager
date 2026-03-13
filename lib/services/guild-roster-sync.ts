@@ -2,10 +2,11 @@ import { db, sql } from '@vercel/postgres';
 
 import {
   checkComlinkReady,
+  fetchComlinkUnitMetadata,
   fetchComlinkPlayerWithRoster,
   validateNormalizedRosterUnit,
 } from '@/lib/integrations/comlink/client';
-import type { ComlinkPlayerProfile } from '@/lib/integrations/comlink/types';
+import type { ComlinkPlayerProfile, ComlinkUnitMetadata } from '@/lib/integrations/comlink/types';
 
 // ---------------------------------------------------------------------------
 // Readiness — mirrors the pattern in guild-sync.ts
@@ -288,6 +289,18 @@ export async function syncGuildRosters(
     // 2. Wait for Comlink (handles Render cold starts)
     await waitForComlink();
 
+    // 3a. Fetch unit metadata once — used for authoritative ship/character classification.
+    //     Ships have combatType=2 in /data. The player roster payload's combatType is
+    //     unreliable (can be absent for ships), so we never use it for classification.
+    let unitsById: Map<string, ComlinkUnitMetadata>;
+    try {
+      unitsById = await fetchComlinkUnitMetadata();
+      console.log(`[roster-sync] unit metadata ready: ${unitsById.size} entries`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      throw new Error(`[roster-sync] Failed to load unit metadata from Comlink /data — cannot classify ships safely: ${msg}`);
+    }
+
     // 3. Fetch full player profile (with rosterUnit[]) for each member in the batch
     let timeouts = 0;
     let retried = 0;
@@ -298,7 +311,7 @@ export async function syncGuildRosters(
         let lastError: unknown;
         for (let attempt = 0; attempt <= ROSTER_MAX_RETRIES; attempt++) {
           try {
-            return await fetchComlinkPlayerWithRoster(m.player_id);
+            return await fetchComlinkPlayerWithRoster(m.player_id, unitsById);
           } catch (error: unknown) {
             lastError = error;
             if (!isTransientError(error) || attempt === ROSTER_MAX_RETRIES) {

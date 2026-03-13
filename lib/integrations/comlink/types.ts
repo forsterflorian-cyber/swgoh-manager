@@ -20,6 +20,18 @@ export type ComlinkMember = {
   galacticPower: number;
 };
 
+/**
+ * Unit metadata entry from POST /data { collection: ['units'] }.
+ * combatType is the authoritative ship discriminator: 1 = character, 2 = ship.
+ * This is never missing from the data collection for any playable unit.
+ */
+export type ComlinkUnitMetadata = {
+  id: string;       // same as baseId — e.g. "SCYTHE"
+  baseId: string;   // e.g. "SCYTHE"
+  combatType: number; // 1 = character, 2 = ship
+  nameKey?: string; // optional — used only for diagnostics
+};
+
 /** Single normalized roster unit from POST /player full profile */
 export type ComlinkRosterUnit = {
   unitBaseId: string;  // e.g. "GRANDMASTERLUKE"
