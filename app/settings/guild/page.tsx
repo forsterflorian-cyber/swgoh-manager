@@ -7,8 +7,10 @@ import { getAuthenticatedUser } from '@/lib/api/auth';
 import {
   getPrimaryGuildSettingsForUser,
   getGuildMemberList,
+  getRosterSyncStats,
   isGuildManagerRole,
   type GuildMemberRow,
+  type RosterSyncStats,
 } from '@/lib/services/guild-settings';
 import { getAppBaseUrl } from '@/lib/utils/base-url';
 
@@ -22,6 +24,7 @@ export default async function GuildSettingsPage() {
   const guild = await getPrimaryGuildSettingsForUser(user.id);
   const appBaseUrl = getAppBaseUrl();
   const members: GuildMemberRow[] = guild ? await getGuildMemberList(guild.id) : [];
+  const rosterStats: RosterSyncStats | null = guild ? await getRosterSyncStats(guild.id) : null;
 
   if (!guild) {
     return (
@@ -95,6 +98,44 @@ export default async function GuildSettingsPage() {
             />
           </div>
         </section>
+
+        {rosterStats !== null && (
+          <section className="mt-6 rounded-3xl border border-gray-800 bg-gray-900/70 p-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
+              Roster Sync
+            </p>
+            <h2 className="mt-3 text-xl font-semibold tracking-tight">
+              {rosterStats.membersSynced > 0 ? 'Roster data available' : 'No roster data yet'}
+            </h2>
+            <div className="mt-4 flex flex-wrap gap-6 text-sm text-gray-400">
+              <span>
+                <span className="font-medium text-white">{rosterStats.membersSynced}</span>
+                {' / '}
+                <span>{rosterStats.totalMembersEligible}</span>
+                {' members synced'}
+              </span>
+              <span>
+                <span className="font-medium text-white">
+                  {rosterStats.totalRosterRows.toLocaleString('en-US')}
+                </span>
+                {' roster rows'}
+              </span>
+              {rosterStats.lastSyncedAt && (
+                <span>
+                  {'Last synced '}
+                  <span className="font-medium text-white">
+                    {new Date(rosterStats.lastSyncedAt).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
 
         {members.length > 0 && (
           <section className="mt-6 rounded-3xl border border-gray-800 bg-gray-900/70 p-8">

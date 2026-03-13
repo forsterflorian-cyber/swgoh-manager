@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { fetchWithTimeout } from '@/lib/utils/fetch-with-timeout';
-import type { ComlinkGuildMember, ComlinkPlayerDetail } from './types';
+import type { ComlinkGuildMember, ComlinkPlayerDetail, ComlinkPlayerProfile, ComlinkRosterUnit } from './types';
 
 function getBaseUrl(): string {
   const url = process.env.COMLINK_BASE_URL?.trim();
@@ -14,6 +14,36 @@ function getBaseUrl(): string {
 // ---------------------------------------------------------------------------
 // Schemas — derived from confirmed OpenAPI spec v0.38.5
 // ---------------------------------------------------------------------------
+
+// Roster unit inside a full POST /player response.
+// definitionId format: "UNITBASEID:SEVEN_STAR" — split on ':' to extract base ID.
+// currentStar  = stars (1-7, integer field, not an enum)
+// currentTier  = gear tier (1-13, 0 for ships)
+// currentLevel = character level (1-85)
+// relic.currentTier = raw relic tier (1 = no relic, 3 = R1, ..., 11 = R9)
+//   normalized: Math.max(0, currentTier - 2)
+const rosterUnitSchema = z
+  .object({
+    definitionId: z.string().trim().min(1),
+    currentLevel: z.coerce.number().int().nonnegative().catch(1),
+    currentTier: z.coerce.number().int().nonnegative().catch(1),
+    currentStar: z.coerce.number().int().nonnegative().catch(0),
+    relic: z
+      .object({
+        currentTier: z.coerce.number().int().nonnegative().catch(1),
+      })
+      .nullish(),
+  })
+  .passthrough();
+
+const playerWithRosterSchema = z
+  .object({
+    playerId: z.string().trim().min(1),
+    allyCode: z.coerce.number().int().nonnegative(),
+    name: z.string().trim().min(1).catch('Unknown Player'),
+    rosterUnit: z.array(rosterUnitSchema).catch([]),
+  })
+  .passthrough();
 
 const guildMemberSchema = z
   .object({
@@ -175,5 +205,57 @@ export async function fetchComlinkPlayer(playerId: string): Promise<ComlinkPlaye
     playerId: parsed.data.playerId,
     allyCode: String(parsed.data.allyCode),
     name: parsed.data.name,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Player endpoint (full profile)  POST /player
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches a full player profile from Comlink including the rosterUnit array.
+ * Same endpoint as fetchComlinkPlayer but parses the complete payload.
+ * Timeout is slightly higher (35s) to account for larger roster payloads.
+ */
+export async function fetchComlinkPlayerWithRoster(
+  playerId: string
+): Promise<ComlinkPlayerProfile> {
+  if (!playerId?.trim()) {
+    throw new Error('Missing Comlink player id');
+  }
+
+  const json = await postJson('/player', { playerId: playerId.trim() }, 35000);
+  const parsed = playerWithRosterSchema.safeParse(json);
+
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path?.join('.') ?? 'root';
+    throw new Error(
+      `Comlink player roster response was malformed at ${path} for playerId ${playerId}`
+    );
+  }
+
+  const rosterUnits: ComlinkRosterUnit[] = [];
+
+  for (const raw of parsed.data.rosterUnit) {
+    const parts = raw.definitionId.split(':');
+    const unitBaseId = parts[0];
+    if (!unitBaseId) continue;
+
+    const rawRelicTier = raw.relic?.currentTier ?? 1;
+    rosterUnits.push({
+      unitBaseId,
+      rarity: raw.currentStar,
+      level: raw.currentLevel,
+      gearLevel: raw.currentTier,
+      relicTier: Math.max(0, rawRelicTier - 2),
+    });
+  }
+
+  return {
+    playerId: parsed.data.playerId,
+    allyCode: String(parsed.data.allyCode),
+    name: parsed.data.name,
+    rosterUnits,
   };
 }

@@ -93,6 +93,45 @@ export async function getGuildMemberList(guildDbId: string): Promise<GuildMember
   }));
 }
 
+export type RosterSyncStats = {
+  totalMembersEligible: number;
+  membersSynced: number;
+  totalRosterRows: number;
+  lastSyncedAt: Date | null;
+};
+
+type RosterSyncStatsRow = {
+  total_eligible: number;
+  members_synced: number;
+  total_rows: number;
+  last_synced_at: Date | null;
+};
+
+export async function getRosterSyncStats(guildDbId: string): Promise<RosterSyncStats> {
+  try {
+    const result = await sql<RosterSyncStatsRow>`
+      SELECT
+        (SELECT COUNT(*)::int FROM guild_members
+         WHERE guild_id = ${guildDbId} AND player_id IS NOT NULL) AS total_eligible,
+        COUNT(DISTINCT pr.player_id)::int AS members_synced,
+        COUNT(pr.id)::int                AS total_rows,
+        MAX(pr.last_synced)              AS last_synced_at
+      FROM player_roster pr
+      WHERE pr.guild_id = ${guildDbId}
+    `;
+    const row = result.rows[0];
+    return {
+      totalMembersEligible: row?.total_eligible ?? 0,
+      membersSynced: row?.members_synced ?? 0,
+      totalRosterRows: row?.total_rows ?? 0,
+      lastSyncedAt: row?.last_synced_at ?? null,
+    };
+  } catch {
+    // player_roster table may not exist yet if migration hasn't run
+    return { totalMembersEligible: 0, membersSynced: 0, totalRosterRows: 0, lastSyncedAt: null };
+  }
+}
+
 type UpdateGuildSettingsInput = {
   guildDbId: string;
   guildId: string;
