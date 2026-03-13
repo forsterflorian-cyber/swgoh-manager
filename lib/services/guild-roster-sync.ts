@@ -84,12 +84,13 @@ async function runConcurrent<T, R>(
 
 export type GuildRosterSyncResult = {
   guildId: string;
-  membersConsidered: number;
+  totalEligibleMembers: number; // all members with player_id across the whole guild
+  membersConsidered: number;    // members in this batch (after offset/limit)
   membersSkipped: number;
   membersFetched: number;
   totalRosterRows: number;
-  totalUpserts: number;       // rows actually committed to DB
-  totalUpsertErrors: number;  // members whose transaction was rolled back
+  totalUpserts: number;         // rows actually committed to DB
+  totalUpsertErrors: number;    // members whose transaction was rolled back
 };
 
 type GuildMemberRow = {
@@ -98,14 +99,23 @@ type GuildMemberRow = {
 };
 
 /**
- * Syncs roster data for all guild members into the player_roster table.
+ * Syncs roster data for a batch of guild members into the player_roster table.
  *
  * Source: guild_members rows with a non-null player_id.
  * Comlink POST /player returns the full profile including rosterUnit[].
  * Each unit is upserted via (guild_id, player_id, unit_base_id) — idempotent.
+ *
+ * offset/limit slice the eligible member list so callers can process in batches
+ * to stay within serverless request timeouts. Omitting both processes everything.
  */
-export async function syncGuildRosters(guildId: string): Promise<GuildRosterSyncResult> {
-  console.log(`[roster-sync] Started for guild ${guildId}`);
+export async function syncGuildRosters(
+  guildId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<GuildRosterSyncResult> {
+  const batchOffset = Math.max(0, options.offset ?? 0);
+  const batchLimit = options.limit ?? Infinity;
+
+  console.log(`[roster-sync] Started for guild ${guildId} offset=${batchOffset} limit=${batchLimit}`);
 
   const client = await db.connect();
 
@@ -128,18 +138,43 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
       ORDER BY player_name
     `;
 
-    const members = membersResult.rows;
-    console.log(`[roster-sync] eligible members: ${members.length}`);
-    if (members.length > 0) {
-      console.log(`[roster-sync] first eligible member:`, members[0]);
-    }
+    const allMembers = membersResult.rows;
+    const totalEligibleMembers = allMembers.length;
+    console.log(`[roster-sync] eligible members: ${totalEligibleMembers}`);
 
-    if (members.length === 0) {
+    if (totalEligibleMembers === 0) {
       console.log(
         `[roster-sync] No members with player_id found for guild ${guildId} — run guild member sync first`
       );
       return {
         guildId,
+        totalEligibleMembers: 0,
+        membersConsidered: 0,
+        membersSkipped: 0,
+        membersFetched: 0,
+        totalRosterRows: 0,
+        totalUpserts: 0,
+        totalUpsertErrors: 0,
+      };
+    }
+
+    // Slice to the requested batch
+    const members = allMembers.slice(
+      batchOffset,
+      batchLimit === Infinity ? undefined : batchOffset + batchLimit
+    );
+    console.log(
+      `[roster-sync] batch: offset=${batchOffset} limit=${batchLimit} size=${members.length}`
+    );
+    if (members.length > 0) {
+      console.log(`[roster-sync] first eligible member:`, members[0]);
+    }
+
+    if (members.length === 0) {
+      // offset is past the end — caller asked for a range beyond available members
+      return {
+        guildId,
+        totalEligibleMembers,
         membersConsidered: 0,
         membersSkipped: 0,
         membersFetched: 0,
@@ -152,7 +187,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
     // 2. Wait for Comlink (handles Render cold starts)
     await waitForComlink();
 
-    // 3. Fetch full player profile (with rosterUnit[]) for each member
+    // 3. Fetch full player profile (with rosterUnit[]) for each member in the batch
     let timeouts = 0;
     let retried = 0;
 
@@ -287,6 +322,8 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
     console.log(`[roster-sync] final total upserts: ${totalUpserts}`);
     console.log(
       `[roster-sync] Finished for guild ${guildId}: ` +
+        `totalEligible=${totalEligibleMembers} ` +
+        `offset=${batchOffset} ` +
         `membersConsidered=${members.length} ` +
         `membersSkipped=${membersSkipped} ` +
         `membersFetched=${membersFetched} ` +
@@ -297,6 +334,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
 
     return {
       guildId,
+      totalEligibleMembers,
       membersConsidered: members.length,
       membersSkipped,
       membersFetched,

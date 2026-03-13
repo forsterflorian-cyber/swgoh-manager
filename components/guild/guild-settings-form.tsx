@@ -137,27 +137,43 @@ export function GuildSettingsForm({
     setRosterSyncState('loading');
     setRosterSyncMessage(null);
 
-    try {
-      const response = await fetch('/api/guild/roster-sync', { method: 'POST' });
-      const payload = (await response.json()) as ApiEnvelope<{
-        success: boolean;
-        membersConsidered: number;
-        membersFetched: number;
-        membersSkipped: number;
-        totalRosterRows: number;
-        totalUpserts: number;
-        totalUpsertErrors: number;
-      }>;
+    const BATCH_LIMIT = 5;
+    let offset = 0;
+    let totalUpserts = 0;
+    let totalMembers = 0;
 
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.ok ? 'Roster sync failed.' : payload.error);
+    try {
+      while (true) {
+        setRosterSyncMessage(`Syncing rosters… ${offset} / ${totalMembers || '?'} members processed`);
+
+        const response = await fetch(
+          `/api/guild/roster-sync?limit=${BATCH_LIMIT}&offset=${offset}`,
+          { method: 'POST' }
+        );
+        const payload = (await response.json()) as ApiEnvelope<{
+          processedMembers: number;
+          totalEligibleMembers: number;
+          remainingMembers: number;
+          upserts: number;
+          upsertErrors: number;
+          done: boolean;
+          nextOffset: number;
+        }>;
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.ok ? 'Roster sync failed.' : payload.error);
+        }
+
+        totalUpserts += payload.data.upserts;
+        totalMembers = payload.data.totalEligibleMembers;
+        offset = payload.data.nextOffset;
+
+        if (payload.data.done) break;
       }
 
-      const { membersFetched, totalUpserts, membersSkipped } = payload.data;
       setRosterSyncState('success');
       setRosterSyncMessage(
-        `Roster sync complete — ${membersFetched} players, ${totalUpserts} rows upserted` +
-          (membersSkipped > 0 ? `, ${membersSkipped} skipped.` : '.')
+        `Roster sync complete — ${totalMembers} members, ${totalUpserts} rows upserted.`
       );
       window.location.reload();
     } catch (error: unknown) {

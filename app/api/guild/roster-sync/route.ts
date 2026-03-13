@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 import { sql } from '@vercel/postgres';
 
 import { getAuthenticatedUser, userCanManageGuild } from '@/lib/api/auth';
@@ -7,14 +8,20 @@ import { syncGuildRosters } from '@/lib/services/guild-roster-sync';
 
 export const runtime = 'nodejs';
 
+const BATCH_LIMIT_DEFAULT = 5;
+const BATCH_LIMIT_MAX = 20;
+
 /**
- * POST /api/guild/roster-sync
+ * POST /api/guild/roster-sync?limit=5&offset=0
  *
- * Triggers a full roster sync for all guild members from Comlink into player_roster.
- * Requires the user to have a manage role in their guild.
- * Requires guild members to already be synced (guild_members with player_id set).
+ * Syncs one batch of guild member rosters from Comlink into player_roster.
+ * Call repeatedly with increasing offset until done=true.
+ *
+ * Query params:
+ *   limit  — members per batch (default 5, max 20)
+ *   offset — starting index into the eligible member list (default 0)
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
   console.log('[roster-sync] route hit');
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -31,18 +38,30 @@ export async function POST() {
     return jsonError('Not authorized', 403);
   }
 
+  const { searchParams } = new URL(request.url);
+  const limit = Math.min(
+    Math.max(1, parseInt(searchParams.get('limit') ?? String(BATCH_LIMIT_DEFAULT), 10) || BATCH_LIMIT_DEFAULT),
+    BATCH_LIMIT_MAX
+  );
+  const offset = Math.max(0, parseInt(searchParams.get('offset') ?? '0', 10) || 0);
+
+  console.log(`[roster-sync] batch params: limit=${limit} offset=${offset}`);
+
   try {
-    const result = await syncGuildRosters(guild.id);
+    const result = await syncGuildRosters(guild.id, { limit, offset });
+
+    const nextOffset = offset + result.membersConsidered;
+    const done = nextOffset >= result.totalEligibleMembers;
+    const remainingMembers = Math.max(0, result.totalEligibleMembers - nextOffset);
 
     return jsonOk({
-      success: true,
-      guildId: result.guildId,
-      membersConsidered: result.membersConsidered,
-      membersSkipped: result.membersSkipped,
-      membersFetched: result.membersFetched,
-      totalRosterRows: result.totalRosterRows,
-      totalUpserts: result.totalUpserts,
-      totalUpsertErrors: result.totalUpsertErrors,
+      processedMembers: result.membersConsidered,
+      totalEligibleMembers: result.totalEligibleMembers,
+      remainingMembers,
+      upserts: result.totalUpserts,
+      upsertErrors: result.totalUpsertErrors,
+      done,
+      nextOffset,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Roster sync failed';
