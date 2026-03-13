@@ -1,6 +1,15 @@
 import { db } from '@vercel/postgres';
 
-import { checkComlinkReady, fetchComlinkGuild } from '@/lib/integrations/comlink/client';
+import {
+  checkComlinkReady,
+  fetchComlinkGuild,
+  fetchComlinkPlayer,
+} from '@/lib/integrations/comlink/client';
+import type { ComlinkMember } from '@/lib/integrations/comlink/types';
+
+// ---------------------------------------------------------------------------
+// Readiness
+// ---------------------------------------------------------------------------
 
 const READINESS_MAX_RETRIES = 5;
 const READINESS_RETRY_DELAY_MS = 1000;
@@ -23,6 +32,42 @@ async function waitForComlink(): Promise<void> {
   throw new Error('Comlink service is waking up or unavailable');
 }
 
+// ---------------------------------------------------------------------------
+// Concurrency pool
+//
+// Runs fn over all items with at most `concurrency` in-flight at once.
+// Individual failures are captured as rejected results rather than aborting
+// the whole batch — so one bad player fetch doesn't lose everyone else.
+// ---------------------------------------------------------------------------
+
+async function runConcurrent<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency: number
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      try {
+        results[i] = { status: 'fulfilled', value: await fn(items[i]) };
+      } catch (error) {
+        results[i] = { status: 'rejected', reason: error };
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Guild sync
+// ---------------------------------------------------------------------------
+
 export type GuildSyncResult = {
   guildId: string;
   inserted: number;
@@ -36,7 +81,7 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
   const client = await db.connect();
 
   try {
-    // 1. Load local guild and require swgoh_gg_id (used as Comlink external guild id)
+    // 1. Load local guild and require the external Comlink guild id
     const guildResult = await client.sql<{ swgoh_gg_id: string | null }>`
       SELECT swgoh_gg_id
       FROM guilds
@@ -54,55 +99,88 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
       throw new Error('Guild external ID is not configured');
     }
 
-    // 2. Wait for Comlink to be ready (handles Render cold starts)
+    // 2. Wait for Comlink (handles Render cold starts)
     await waitForComlink();
 
-    // 3. Fetch members from Comlink
+    // 3. Fetch guild member list — returns playerId + playerName + galacticPower
     console.log(`[guild-sync] Fetching guild members from Comlink for guild ${guildId}`);
-    let members;
+    let guildMembers;
     try {
-      members = await fetchComlinkGuild(externalId);
+      guildMembers = await fetchComlinkGuild(externalId);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown upstream error';
-      console.error(`[guild-sync] Upstream Comlink failure for guild ${guildId}: ${message}`);
+      console.error(`[guild-sync] Upstream guild fetch failed for guild ${guildId}: ${message}`);
       throw new Error(`Guild sync failed: ${message}`);
     }
 
-    console.log(`[guild-sync] Fetched ${members.length} members from Comlink for guild ${guildId}`);
+    console.log(
+      `[guild-sync] Fetched ${guildMembers.length} members from Comlink; resolving player details`
+    );
 
-    // 4. Upsert all members in a single transaction
-    // xmax = 0 means the row was freshly inserted; non-zero means it was updated.
+    // 4. Resolve allyCode for each member via POST /player (concurrent, max 8 in-flight)
+    const playerResults = await runConcurrent(
+      guildMembers,
+      (m) => fetchComlinkPlayer(m.playerId),
+      8
+    );
+
+    // 5. Merge guild member data with player details
+    const members: ComlinkMember[] = [];
+    let skipped = 0;
+
+    for (let i = 0; i < guildMembers.length; i++) {
+      const gm = guildMembers[i];
+      const result = playerResults[i];
+
+      if (result.status === 'rejected') {
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        console.warn(
+          `[guild-sync] Skipping member ${gm.playerName} (${gm.playerId}): player fetch failed — ${reason}`
+        );
+        skipped++;
+        continue;
+      }
+
+      members.push({
+        playerId: gm.playerId,
+        playerName: gm.playerName,
+        allyCode: result.value.allyCode,
+        galacticPower: gm.galacticPower,
+      });
+    }
+
+    console.log(
+      `[guild-sync] Player details resolved: ${members.length} ready, ${skipped} skipped`
+    );
+
+    // 6. Upsert all resolved members in a single transaction.
+    // The unique key is (guild_id, player_id) — not ally_code.
+    // xmax = 0 on the returned row means it was freshly inserted; non-zero means updated.
     let inserted = 0;
     let updated = 0;
-    let skipped = 0;
 
     await client.sql`BEGIN`;
 
     try {
       for (const member of members) {
-        // Defence-in-depth: the client already filters these, but guard again so a
-        // bad ally code can never corrupt the UNIQUE(guild_id, ally_code) key.
-        if (!member.allyCode || member.allyCode === '0') {
-          console.warn(`[guild-sync] skipping member with no ally code: ${member.playerName}`);
-          skipped++;
-          continue;
-        }
-
         const result = await client.sql<{ is_insert: boolean }>`
-          INSERT INTO guild_members (id, guild_id, player_name, ally_code, galactic_power, last_synced, created_at, updated_at)
+          INSERT INTO guild_members (
+            id, guild_id, player_id, player_name, ally_code,
+            galactic_power, last_synced, created_at, updated_at
+          )
           VALUES (
             gen_random_uuid(),
             ${guildId},
+            ${member.playerId},
             ${member.playerName},
             ${member.allyCode},
             ${member.galacticPower},
-            NOW(),
-            NOW(),
-            NOW()
+            NOW(), NOW(), NOW()
           )
-          ON CONFLICT (guild_id, ally_code)
+          ON CONFLICT (guild_id, player_id)
           DO UPDATE SET
             player_name    = EXCLUDED.player_name,
+            ally_code      = EXCLUDED.ally_code,
             galactic_power = EXCLUDED.galactic_power,
             last_synced    = NOW(),
             updated_at     = NOW()

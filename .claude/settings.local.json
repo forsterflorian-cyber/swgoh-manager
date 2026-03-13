@@ -5,7 +5,8 @@
       "Bash(ls \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app/\")",
       "Bash(ls \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app/api/\")",
       "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app\" -name *.ts -o -name *.tsx)",
-      "WebFetch(domain:deploy-swgoh-comlink-p3su.onrender.com)"
+      "WebFetch(domain:deploy-swgoh-comlink-p3su.onrender.com)",
+      "Bash(curl -s --max-time 30 \"https://deploy-swgoh-comlink-p3su.onrender.com/openapi.json\")"
     ]
   }
 }

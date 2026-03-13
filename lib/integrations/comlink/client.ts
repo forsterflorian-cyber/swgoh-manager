@@ -1,10 +1,7 @@
 import { z } from 'zod';
 
 import { fetchWithTimeout } from '@/lib/utils/fetch-with-timeout';
-import type { ComlinkGuildMember } from './types';
-
-// Comlink member contribution type 2 = Galactic Power
-const GALACTIC_POWER_TYPE = 2;
+import type { ComlinkGuildMember, ComlinkPlayerDetail } from './types';
 
 function getBaseUrl(): string {
   const url = process.env.COMLINK_BASE_URL?.trim();
@@ -14,18 +11,17 @@ function getBaseUrl(): string {
   return url.replace(/\/$/, '');
 }
 
-const memberContributionSchema = z
-  .object({
-    type: z.number(),
-    currentValue: z.string(),
-  })
-  .passthrough();
+// ---------------------------------------------------------------------------
+// Schemas — derived from confirmed OpenAPI spec v0.38.5
+// ---------------------------------------------------------------------------
 
-const rawMemberSchema = z
+const guildMemberSchema = z
   .object({
+    // playerId is the stable identity key; allyCode is NOT on this endpoint
+    playerId: z.string().trim().min(1),
     playerName: z.string().trim().min(1).catch('Unknown Player'),
-    allyCode: z.coerce.number().int().nonnegative().catch(0),
-    memberContribution: z.array(memberContributionSchema).optional().default([]),
+    // galacticPower is int64 in the spec; JS number is safe up to 2^53
+    galacticPower: z.coerce.number().int().nonnegative().catch(0),
   })
   .passthrough();
 
@@ -33,17 +29,62 @@ const guildResponseSchema = z
   .object({
     guild: z
       .object({
-        profile: z
-          .object({
-            id: z.string(),
-            name: z.string(),
-          })
-          .passthrough(),
-        member: z.array(rawMemberSchema).catch([]),
+        profile: z.object({ id: z.string(), name: z.string() }).passthrough(),
+        member: z.array(guildMemberSchema).catch([]),
       })
       .passthrough(),
   })
   .passthrough();
+
+const playerResponseSchema = z
+  .object({
+    playerId: z.string().trim().min(1),
+    // allyCode is int64 in the spec; coerce then convert to string for storage
+    allyCode: z.coerce.number().int().nonnegative(),
+    name: z.string().trim().min(1).catch('Unknown Player'),
+  })
+  .passthrough();
+
+// ---------------------------------------------------------------------------
+// Internal fetch helper
+// ---------------------------------------------------------------------------
+
+async function postJson(
+  path: string,
+  payload: Record<string, unknown>,
+  timeoutMs: number
+): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(
+      `${getBaseUrl()}${path}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload, enums: false }),
+        cache: 'no-store',
+      },
+      timeoutMs
+    );
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Comlink ${path} request timed out`);
+    }
+    throw new Error(
+      `Comlink ${path} request failed: ${error instanceof Error ? error.message : 'unknown error'}`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(`Comlink ${path} request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Readiness probe  GET /readyz
+// ---------------------------------------------------------------------------
 
 /**
  * Pings /readyz to check whether the Comlink service is up.
@@ -62,48 +103,21 @@ export async function checkComlinkReady(): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Guild endpoint  POST /guild
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches guild members from Comlink.
+ * Returns playerId, playerName, and galacticPower per member.
+ * allyCode is NOT present on this endpoint — use fetchComlinkPlayer() for it.
+ */
 export async function fetchComlinkGuild(guildId: string): Promise<ComlinkGuildMember[]> {
   if (!guildId?.trim()) {
     throw new Error('Missing Comlink guild id');
   }
 
-  const url = `${getBaseUrl()}/guild`;
-
-  let response: Response;
-  try {
-    response = await fetchWithTimeout(
-      url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payload: { guildId: guildId.trim() }, enums: false }),
-        cache: 'no-store',
-      },
-      20000
-    );
-  } catch (error: unknown) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Comlink guild request timed out');
-    }
-    throw new Error(
-      `Comlink guild request failed: ${error instanceof Error ? error.message : 'unknown error'}`
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(`Comlink guild request failed with status ${response.status}`);
-  }
-
-  const json = (await response.json()) as unknown;
-
-  // Diagnostic: log the first raw member before Zod parsing to verify actual field names.
-  // Remove once the schema is confirmed correct.
-  const rawMemberList = (json as { guild?: { member?: unknown[] } } | null)?.guild?.member;
-  console.log(
-    '[comlink] guild member sample:',
-    JSON.stringify(Array.isArray(rawMemberList) ? rawMemberList[0] : rawMemberList, null, 2)
-  );
-
+  const json = await postJson('/guild', { guildId: guildId.trim() }, 20000);
   const parsed = guildResponseSchema.safeParse(json);
 
   if (!parsed.success) {
@@ -118,26 +132,50 @@ export async function fetchComlinkGuild(guildId: string): Promise<ComlinkGuildMe
     throw new Error('Comlink guild returned no members');
   }
 
-  const mapped: ComlinkGuildMember[] = [];
+  const valid: ComlinkGuildMember[] = [];
 
   for (const m of members) {
-    // allyCode === 0 means the field was absent or unparseable (Zod .catch(0) fired).
-    // Skip these — writing "0" as the ally code causes all members to collide on the
-    // same UNIQUE(guild_id, ally_code) key.
-    if (m.allyCode === 0) {
-      console.warn('[comlink] skipping member with missing or unparseable ally code:', m.playerName);
+    if (!m.playerId) {
+      console.warn('[comlink] skipping guild member with missing playerId:', m.playerName);
       continue;
     }
-
-    const gpEntry = m.memberContribution?.find((c) => c.type === GALACTIC_POWER_TYPE);
-    const galacticPower = gpEntry ? (parseInt(gpEntry.currentValue, 10) || 0) : 0;
-
-    mapped.push({
+    valid.push({
+      playerId: m.playerId,
       playerName: m.playerName,
-      allyCode: String(m.allyCode),
-      galacticPower,
+      galacticPower: m.galacticPower,
     });
   }
 
-  return mapped;
+  return valid;
+}
+
+// ---------------------------------------------------------------------------
+// Player endpoint  POST /player
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches a single player profile from Comlink by playerId.
+ * Returns playerId, allyCode (as string), and name.
+ */
+export async function fetchComlinkPlayer(playerId: string): Promise<ComlinkPlayerDetail> {
+  if (!playerId?.trim()) {
+    throw new Error('Missing Comlink player id');
+  }
+
+  const json = await postJson('/player', { playerId: playerId.trim() }, 10000);
+  const parsed = playerResponseSchema.safeParse(json);
+
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path?.join('.') ?? 'root';
+    throw new Error(
+      `Comlink player response was malformed at ${path} for playerId ${playerId}`
+    );
+  }
+
+  return {
+    playerId: parsed.data.playerId,
+    allyCode: String(parsed.data.allyCode),
+    name: parsed.data.name,
+  };
 }

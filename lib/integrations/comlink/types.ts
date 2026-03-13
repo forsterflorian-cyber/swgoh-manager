@@ -1,29 +1,20 @@
-export type ComlinkMemberContribution = {
-  type: number;
-  currentValue: string;
-  lifetimeValue?: string;
-};
-
-export type ComlinkRawMember = {
+/** Guild member shape returned by POST /guild (guild.member[]) */
+export type ComlinkGuildMember = {
+  playerId: string;
   playerName: string;
-  allyCode: number;
-  memberContribution?: ComlinkMemberContribution[];
+  galacticPower: number;
 };
 
-export type ComlinkGuildProfile = {
-  id: string;
+/** Player detail returned by POST /player */
+export type ComlinkPlayerDetail = {
+  playerId: string;
+  allyCode: string;
   name: string;
 };
 
-export type ComlinkGuildResponse = {
-  guild: {
-    profile: ComlinkGuildProfile;
-    member: ComlinkRawMember[];
-  };
-};
-
-/** Normalised member shape consumed by the sync service */
-export type ComlinkGuildMember = {
+/** Merged member ready for DB upsert */
+export type ComlinkMember = {
+  playerId: string;
   playerName: string;
   allyCode: string;
   galacticPower: number;
