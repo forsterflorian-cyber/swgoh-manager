@@ -29,6 +29,12 @@ import type {
 } from '@/lib/types/platoon-readiness';
 import { toNumber } from '@/lib/utils/to-number';
 
+// ---------------------------------------------------------------------------
+// Debug tracing — set to the exact unitBaseId to trace, or '' to disable.
+// Remove before shipping a production build.
+// ---------------------------------------------------------------------------
+const DEBUG_UNIT = 'SCYTHE';
+
 type AccessibleGuildRow = {
   id: string;
   name: string;
@@ -342,18 +348,65 @@ function ownerKey(owner: StrategicPlannerRosterInput) {
 }
 
 function qualifies(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
+  if (DEBUG_UNIT && slot.unitBaseId === DEBUG_UNIT) {
+    console.log('[qualifies:input]', {
+      ownerMemberId: owner.memberId,
+      ownerUnitBaseId: owner.unitBaseId,
+      ownerRarity: owner.rarity,
+      ownerRelicTier: owner.relicTier,
+      ownerGearLevel: owner.gearLevel,
+      slotUnitBaseId: slot.unitBaseId,
+      slotUnitCategory: slot.unitCategory,
+      slotRequiredRarity: slot.requiredRarity,
+      slotRequiredRelicTier: slot.requiredRelicTier,
+    });
+  }
+
   if (owner.rarity < slot.requiredRarity) return false;
+
   // Ship slots have no relic track — the slot category is the authoritative classifier.
-  if (slot.unitCategory === 'SHIP') return true;
+  if (slot.unitCategory === 'SHIP') {
+    if (DEBUG_UNIT && slot.unitBaseId === DEBUG_UNIT) {
+      console.log('[qualifies:ship-branch]', { result: true, ownerMemberId: owner.memberId });
+    }
+    return true;
+  }
+
+  if (DEBUG_UNIT && slot.unitBaseId === DEBUG_UNIT) {
+    console.log('[qualifies:character-branch]', {
+      ownerMemberId: owner.memberId,
+      ownerRelicTier: owner.relicTier,
+      slotRequiredRelicTier: slot.requiredRelicTier,
+      result: owner.relicTier >= slot.requiredRelicTier,
+    });
+  }
   return owner.relicTier >= slot.requiredRelicTier;
 }
 
 function getDeficits(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
-  return {
-    // Ships have no relic tier — always 0 regardless of what the slot's requiredRelicTier holds.
-    relicDeficit: slot.unitCategory === 'SHIP' ? 0 : Math.max(slot.requiredRelicTier - owner.relicTier, 0),
-    rarityDeficit: Math.max(slot.requiredRarity - owner.rarity, 0),
-  };
+  if (DEBUG_UNIT && slot.unitBaseId === DEBUG_UNIT) {
+    console.log('[deficits:input]', {
+      ownerMemberId: owner.memberId,
+      ownerUnitBaseId: owner.unitBaseId,
+      ownerRarity: owner.rarity,
+      ownerRelicTier: owner.relicTier,
+      slotUnitBaseId: slot.unitBaseId,
+      slotUnitCategory: slot.unitCategory,
+      slotRequiredRarity: slot.requiredRarity,
+      slotRequiredRelicTier: slot.requiredRelicTier,
+    });
+  }
+
+  // Ships have no relic tier — always 0 regardless of what the slot's requiredRelicTier holds.
+  const relicDeficit = slot.unitCategory === 'SHIP' ? 0 : Math.max(slot.requiredRelicTier - owner.relicTier, 0);
+  const rarityDeficit = Math.max(slot.requiredRarity - owner.rarity, 0);
+
+  if (DEBUG_UNIT && slot.unitBaseId === DEBUG_UNIT) {
+    const tag = slot.unitCategory === 'SHIP' ? '[deficits:ship-result]' : '[deficits:character-result]';
+    console.log(tag, { relicDeficit, rarityDeficit, ownerMemberId: owner.memberId });
+  }
+
+  return { relicDeficit, rarityDeficit };
 }
 
 function isNearMiss(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
@@ -693,7 +746,7 @@ function getCandidateReadiness(
   isShipUnit: boolean = false
 ): CandidateReadiness {
   if (!owner) {
-    return {
+    const result: CandidateReadiness = {
       state: 'missing',
       currentRelicTier: null,
       currentRarity: null,
@@ -703,6 +756,21 @@ function getCandidateReadiness(
       missingRelicTiers: isShipUnit ? 0 : requirement.minRelic,
       missingRarity: requirement.minRarity,
     };
+    // No owner — unitBaseId unknown here, log unconditionally when DEBUG_UNIT is set
+    // so missing-owner ship candidates are also visible.
+    if (DEBUG_UNIT && isShipUnit) {
+      console.log('[candidate-readiness:result]', {
+        ownerMemberId: null,
+        ownerUnitBaseId: null,
+        isShipUnit,
+        requirementMinRelic: requirement.minRelic,
+        requirementMinRarity: requirement.minRarity,
+        missingRelicTiers: result.missingRelicTiers,
+        missingRarity: result.missingRarity,
+        state: result.state,
+      });
+    }
+    return result;
   }
 
   // Use slot-derived isShipUnit, not owner.gearLevel, so roster_cache entries (gearLevel = -1)
@@ -711,7 +779,7 @@ function getCandidateReadiness(
   const missingRarity = Math.max(requirement.minRarity - owner.rarity, 0);
 
   if (missingRelicTiers === 0 && missingRarity === 0) {
-    return {
+    const result: CandidateReadiness = {
       state: 'ready',
       currentRelicTier: owner.relicTier,
       currentRarity: owner.rarity,
@@ -720,12 +788,26 @@ function getCandidateReadiness(
       missingRelicTiers,
       missingRarity,
     };
+    if (DEBUG_UNIT && owner.unitBaseId === DEBUG_UNIT) {
+      console.log('[candidate-readiness:result]', {
+        ownerMemberId: owner.memberId,
+        ownerUnitBaseId: owner.unitBaseId,
+        ownerGearLevel: owner.gearLevel,
+        isShipUnit,
+        currentRarity: owner.rarity,
+        currentRelicTier: owner.relicTier,
+        missingRelicTiers,
+        missingRarity,
+        state: result.state,
+      });
+    }
+    return result;
   }
 
   const state =
     missingRelicTiers <= 2 && missingRarity <= 1 ? 'near_miss' : 'owned_shortfall';
 
-  return {
+  const result: CandidateReadiness = {
     state,
     currentRelicTier: owner.relicTier,
     currentRarity: owner.rarity,
@@ -734,6 +816,22 @@ function getCandidateReadiness(
     missingRelicTiers,
     missingRarity,
   };
+
+  if (DEBUG_UNIT && owner.unitBaseId === DEBUG_UNIT) {
+    console.log('[candidate-readiness:result]', {
+      ownerMemberId: owner.memberId,
+      ownerUnitBaseId: owner.unitBaseId,
+      ownerGearLevel: owner.gearLevel,
+      isShipUnit,
+      currentRarity: owner.rarity,
+      currentRelicTier: owner.relicTier,
+      missingRelicTiers,
+      missingRarity,
+      state,
+    });
+  }
+
+  return result;
 }
 
 function calculateCandidateScore(input: {
@@ -1693,27 +1791,45 @@ async function loadSlotsForReference(
     );
   }
 
-  return result.rows.map((row) => ({
-    phase: toNumber(row.phase_number),
-    zoneKey: row.zone_key,
-    zoneName: row.zone_name,
-    zoneSortOrder: toNumber(row.zone_sort_order),
-    platoonKey: row.platoon_key,
-    platoonNumber: toNumber(row.platoon_number),
-    platoonSortOrder: toNumber(row.platoon_sort_order),
-    slotKey: row.slot_key,
-    slotNumber: toNumber(row.slot_number),
-    unitBaseId: row.unit_base_id,
-    unitName: row.unit_name,
-    unitCategory: (shipUnitIds.has(row.unit_base_id) ? 'SHIP' : 'CHARACTER') as UnitCategory,
-    requiredRelicTier: Math.max(0, toNumber(row.required_relic_tier) - 2),
-    requiredRarity: toNumber(row.required_rarity, 7),
-    planetCategory: inferPlanetCategory({
-      tbKey: reference.tbKey,
+  return result.rows.map((row) => {
+    const unitCategory = (shipUnitIds.has(row.unit_base_id) ? 'SHIP' : 'CHARACTER') as UnitCategory;
+    const requiredRelicTier = Math.max(0, toNumber(row.required_relic_tier) - 2);
+    const requiredRarity = toNumber(row.required_rarity, 7);
+
+    if (DEBUG_UNIT && row.unit_base_id === DEBUG_UNIT) {
+      console.log('[slot-load]', {
+        unitBaseId: row.unit_base_id,
+        unitName: row.unit_name,
+        unitCategory,
+        requiredRarity,
+        requiredRelicTier,
+        rawRequiredRelicTier: toNumber(row.required_relic_tier),
+        inShipUnitIds: shipUnitIds.has(row.unit_base_id),
+      });
+    }
+
+    return {
+      phase: toNumber(row.phase_number),
       zoneKey: row.zone_key,
       zoneName: row.zone_name,
-    }),
-  }));
+      zoneSortOrder: toNumber(row.zone_sort_order),
+      platoonKey: row.platoon_key,
+      platoonNumber: toNumber(row.platoon_number),
+      platoonSortOrder: toNumber(row.platoon_sort_order),
+      slotKey: row.slot_key,
+      slotNumber: toNumber(row.slot_number),
+      unitBaseId: row.unit_base_id,
+      unitName: row.unit_name,
+      unitCategory,
+      requiredRelicTier,
+      requiredRarity,
+      planetCategory: inferPlanetCategory({
+        tbKey: reference.tbKey,
+        zoneKey: row.zone_key,
+        zoneName: row.zone_name,
+      }),
+    };
+  });
 }
 
 async function loadRosterFromPlayerRoster(
