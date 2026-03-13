@@ -160,7 +160,7 @@ export async function fetchComlinkPlayer(playerId: string): Promise<ComlinkPlaye
     throw new Error('Missing Comlink player id');
   }
 
-  const json = await postJson('/player', { playerId: playerId.trim() }, 10000);
+  const json = await postJson('/player', { playerId: playerId.trim() }, 30000);
   const parsed = playerResponseSchema.safeParse(json);
 
   if (!parsed.success) {

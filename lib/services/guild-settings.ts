@@ -66,6 +66,33 @@ export async function getPrimaryGuildSettingsForUser(
   };
 }
 
+export type GuildMemberRow = {
+  playerName: string;
+  allyCode: string | null;
+  galacticPower: number;
+};
+
+type GuildMemberDbRow = {
+  player_name: string;
+  ally_code: string | null;
+  galactic_power: number;
+};
+
+export async function getGuildMemberList(guildDbId: string): Promise<GuildMemberRow[]> {
+  const result = await sql<GuildMemberDbRow>`
+    SELECT player_name, ally_code, galactic_power
+    FROM guild_members
+    WHERE guild_id = ${guildDbId}
+    ORDER BY galactic_power DESC
+  `;
+
+  return result.rows.map((row) => ({
+    playerName: row.player_name,
+    allyCode: row.ally_code,
+    galacticPower: row.galactic_power,
+  }));
+}
+
 type UpdateGuildSettingsInput = {
   guildDbId: string;
   guildId: string;

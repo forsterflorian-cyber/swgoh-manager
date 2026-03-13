@@ -33,6 +33,31 @@ async function waitForComlink(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Player-fetch configuration
+// ---------------------------------------------------------------------------
+
+const PLAYER_CONCURRENCY = 3; // conservative for Render free-tier cold starts
+const PLAYER_MAX_RETRIES = 2;
+const PLAYER_RETRY_DELAY_MS = 2000;
+
+/**
+ * Returns true for transient failures that are worth retrying:
+ *   - request timeouts (AbortError / "timed out")
+ *   - network-level errors ("request failed:")
+ *   - 5xx HTTP errors ("status 5")
+ * Does NOT retry 4xx or schema/validation failures.
+ */
+function isTransientPlayerError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return (
+    msg.includes('timed out') ||
+    msg.includes('request failed:') ||
+    msg.includes('status 5')
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Concurrency pool
 //
 // Runs fn over all items with at most `concurrency` in-flight at once.
@@ -119,12 +144,39 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
 
     console.log('[sync] parsed guild members:', guildMembers.length);
 
-    // 4. Resolve allyCode for each member via POST /player (concurrent, max 8 in-flight)
+    // 4. Resolve allyCode for each member via POST /player
+    //    Concurrency is capped at PLAYER_CONCURRENCY (3) to avoid overwhelming
+    //    the Render free-tier service on cold starts. Each call is retried up to
+    //    PLAYER_MAX_RETRIES times for transient failures (timeout / network / 5xx).
+    let timeouts = 0;
+    let retried = 0;
+
     const playerResults = await runConcurrent(
       guildMembers,
-      (m) => fetchComlinkPlayer(m.playerId),
-      8
+      async (m) => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= PLAYER_MAX_RETRIES; attempt++) {
+          try {
+            return await fetchComlinkPlayer(m.playerId);
+          } catch (error: unknown) {
+            lastError = error;
+            if (!isTransientPlayerError(error) || attempt === PLAYER_MAX_RETRIES) {
+              throw error;
+            }
+            if (error instanceof Error && error.message.includes('timed out')) {
+              timeouts++;
+            }
+            retried++;
+            await new Promise((resolve) => setTimeout(resolve, PLAYER_RETRY_DELAY_MS));
+          }
+        }
+        throw lastError;
+      },
+      PLAYER_CONCURRENCY
     );
+
+    console.log(`[sync] player fetch timeouts: ${timeouts}`);
+    console.log(`[sync] resolved after retry: ${retried}`);
 
     // Collect successful /player responses into a flat array.
     // Using an explicit loop with a null-guard so an unfilled results slot

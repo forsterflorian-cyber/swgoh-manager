@@ -6,7 +6,9 @@ import { GuildSettingsForm } from '@/components/guild/guild-settings-form';
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import {
   getPrimaryGuildSettingsForUser,
+  getGuildMemberList,
   isGuildManagerRole,
+  type GuildMemberRow,
 } from '@/lib/services/guild-settings';
 import { getAppBaseUrl } from '@/lib/utils/base-url';
 
@@ -19,6 +21,7 @@ export default async function GuildSettingsPage() {
 
   const guild = await getPrimaryGuildSettingsForUser(user.id);
   const appBaseUrl = getAppBaseUrl();
+  const members: GuildMemberRow[] = guild ? await getGuildMemberList(guild.id) : [];
 
   if (!guild) {
     return (
@@ -92,6 +95,42 @@ export default async function GuildSettingsPage() {
             />
           </div>
         </section>
+
+        {members.length > 0 && (
+          <section className="mt-6 rounded-3xl border border-gray-800 bg-gray-900/70 p-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
+              Guild Roster
+            </p>
+            <h2 className="mt-3 text-xl font-semibold tracking-tight">
+              {members.length} Members
+            </h2>
+
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-800 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <th className="pb-3 pr-6">Name</th>
+                    <th className="pb-3 pr-6">Ally Code</th>
+                    <th className="pb-3 text-right">Galactic Power</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800/60">
+                  {members.map((m, i) => (
+                    <tr key={i} className="text-gray-300 hover:bg-gray-800/30">
+                      <td className="py-2.5 pr-6 font-medium text-white">{m.playerName}</td>
+                      <td className="py-2.5 pr-6 font-mono text-gray-400">
+                        {m.allyCode ?? '—'}
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums text-gray-300">
+                        {m.galacticPower.toLocaleString('en-US')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

@@ -124,6 +124,7 @@ export function GuildSettingsForm({
       const { inserted, updated } = payload.data;
       setSyncState('success');
       setSyncMessage(`Sync complete — ${inserted} added, ${updated} updated.`);
+      window.location.reload();
     } catch (error: unknown) {
       setSyncState('error');
       setSyncMessage(error instanceof Error ? error.message : 'Guild sync failed.');
