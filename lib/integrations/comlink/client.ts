@@ -232,8 +232,9 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
   console.log(`[comlink] /metadata latestGamedataVersion: ${gameDataVersion}`);
 
   // Step 2: fetch game data with the resolved version.
-  // requestSegment: 0 = all segments; without it some Comlink builds return units: [].
-  const requestPayload = { version: gameDataVersion, requestSegment: 0 };
+  // requestSegment: 1 contains the units collection. Segment 0 (all data) is too large
+  // and causes a 502 from Comlink. Without a segment param, units: [] is returned.
+  const requestPayload = { version: gameDataVersion, requestSegment: 1 };
   console.log('[comlink] /data request body:', JSON.stringify({ payload: requestPayload, enums: false }));
 
   const json = await postJson('/data', requestPayload, 60000);
