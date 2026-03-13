@@ -139,6 +139,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
         membersFetched: 0,
         totalRosterRows: 0,
         totalUpserts: 0,
+        totalUpsertErrors: 0,
       };
     }
 
