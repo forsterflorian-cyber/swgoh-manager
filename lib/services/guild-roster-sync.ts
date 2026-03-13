@@ -88,7 +88,8 @@ export type GuildRosterSyncResult = {
   membersSkipped: number;
   membersFetched: number;
   totalRosterRows: number;
-  totalUpserts: number;
+  totalUpserts: number;       // rows actually committed to DB
+  totalUpsertErrors: number;  // members whose transaction was rolled back
 };
 
 type GuildMemberRow = {
@@ -119,9 +120,13 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
     `;
 
     const members = membersResult.rows;
+    // PART A — checkpoint 1+2
     console.log(
       `[roster-sync] Members considered for roster sync: ${members.length} (guild ${guildId})`
     );
+    if (members.length > 0) {
+      console.log(`[roster-sync] First eligible member sample:`, members[0]);
+    }
 
     if (members.length === 0) {
       console.log(
@@ -204,17 +209,25 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
     // 5. Upsert roster rows per member in individual transactions.
     //    Committing per member means a failure mid-way leaves already-synced members intact.
     //    Re-running is safe because the upsert is idempotent.
+    //    totalUpserts counts rows in *committed* transactions only (not rolled back ones).
     let totalUpserts = 0;
+    let totalUpsertErrors = 0;
 
     for (const profile of profiles) {
       if (profile.rosterUnits.length === 0) {
         console.warn(
-          `[roster-sync] Profile for ${profile.playerId} has 0 roster units — skipping upsert`
+          `[roster-sync] Profile for ${profile.playerId} (${profile.name}) has 0 roster units — skipping upsert`
         );
         continue;
       }
 
+      // PART A — checkpoint 9: upsert attempt count per member
+      console.log(
+        `[roster-sync] Upserting ${profile.rosterUnits.length} units for player ${profile.playerId} (${profile.name})`
+      );
+
       await client.sql`BEGIN`;
+      let memberUpserts = 0;
       try {
         for (const unit of profile.rosterUnits) {
           await client.sql`
@@ -241,16 +254,32 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
               relic_tier  = EXCLUDED.relic_tier,
               last_synced = NOW()
           `;
-          totalUpserts++;
+          memberUpserts++;
         }
         await client.sql`COMMIT`;
+        // Only count after successful COMMIT
+        totalUpserts += memberUpserts;
+        console.log(
+          `[roster-sync] Committed ${memberUpserts} rows for player ${profile.playerId}`
+        );
       } catch (error) {
         await client.sql`ROLLBACK`;
+        totalUpsertErrors++;
+        const msg = error instanceof Error ? error.message : String(error);
         console.error(
-          `[roster-sync] Upsert failed for player ${profile.playerId} — rolled back, continuing:`,
-          error instanceof Error ? error.message : error
+          `[roster-sync] Upsert FAILED for player ${profile.playerId} (${profile.name}) — rolled back: ${msg}`
         );
+        // Table-not-found is a hard failure — no point processing remaining members
+        if (msg.includes('does not exist')) {
+          throw new Error(`player_roster table not found — run migration 008_player_roster.sql: ${msg}`);
+        }
       }
+    }
+
+    if (totalUpsertErrors > 0) {
+      console.warn(
+        `[roster-sync] ${totalUpsertErrors} member(s) had upsert errors out of ${membersFetched} fetched`
+      );
     }
 
     console.log(
@@ -259,7 +288,8 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
         `membersSkipped=${membersSkipped} ` +
         `membersFetched=${membersFetched} ` +
         `totalRosterRows=${totalRosterRows} ` +
-        `totalUpserts=${totalUpserts}`
+        `totalUpserts=${totalUpserts} ` +
+        `totalUpsertErrors=${totalUpsertErrors}`
     );
 
     return {
@@ -269,6 +299,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
       membersFetched,
       totalRosterRows,
       totalUpserts,
+      totalUpsertErrors,
     };
   } finally {
     client.release();

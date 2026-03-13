@@ -40,12 +40,16 @@ export async function POST() {
       membersFetched: result.membersFetched,
       totalRosterRows: result.totalRosterRows,
       totalUpserts: result.totalUpserts,
+      totalUpsertErrors: result.totalUpsertErrors,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Roster sync failed';
 
     if (message === 'Comlink service is waking up or unavailable') {
       return jsonError(message, 503);
+    }
+    if (message.includes('player_roster table not found')) {
+      return jsonError(message, 500);
     }
 
     console.error('[api/guild/roster-sync] Roster sync failed:', error);

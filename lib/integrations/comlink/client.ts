@@ -41,7 +41,8 @@ const playerWithRosterSchema = z
     playerId: z.string().trim().min(1),
     allyCode: z.coerce.number().int().nonnegative(),
     name: z.string().trim().min(1).catch('Unknown Player'),
-    rosterUnit: z.array(rosterUnitSchema).catch([]),
+    // z.unknown() per item: one bad unit never silently discards the entire array
+    rosterUnit: z.array(z.unknown()).catch([]),
   })
   .passthrough();
 
@@ -225,8 +226,23 @@ export async function fetchComlinkPlayerWithRoster(
   }
 
   const json = await postJson('/player', { playerId: playerId.trim() }, 35000);
-  const parsed = playerWithRosterSchema.safeParse(json);
 
+  // PART A — checkpoint 5: raw response top-level keys
+  const raw = json as Record<string, unknown>;
+  console.log(`[comlink] /player raw keys for ${playerId}:`, Object.keys(raw));
+
+  const rawRosterArray = raw.rosterUnit;
+  const rawCount = Array.isArray(rawRosterArray) ? rawRosterArray.length : `not-array (${typeof rawRosterArray})`;
+  // PART A — checkpoint 6: raw rosterUnit count
+  console.log(`[comlink] /player rosterUnit raw count for ${playerId}:`, rawCount);
+  if (Array.isArray(rawRosterArray) && rawRosterArray.length > 0) {
+    console.log(
+      `[comlink] /player first raw rosterUnit sample for ${playerId}:`,
+      JSON.stringify(rawRosterArray[0]).slice(0, 300)
+    );
+  }
+
+  const parsed = playerWithRosterSchema.safeParse(json);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const path = issue?.path?.join('.') ?? 'root';
@@ -235,21 +251,49 @@ export async function fetchComlinkPlayerWithRoster(
     );
   }
 
+  // PART C+D — parse each unit individually so one bad entry never discards the rest
   const rosterUnits: ComlinkRosterUnit[] = [];
+  let skippedUnits = 0;
 
-  for (const raw of parsed.data.rosterUnit) {
-    const parts = raw.definitionId.split(':');
+  for (const rawItem of parsed.data.rosterUnit) {
+    const unitParsed = rosterUnitSchema.safeParse(rawItem);
+    if (!unitParsed.success) {
+      const issue = unitParsed.error.issues[0];
+      console.warn(
+        `[comlink] skipping unit for ${playerId} — schema mismatch at ${issue?.path?.join('.') ?? 'root'}:`,
+        JSON.stringify(rawItem).slice(0, 150)
+      );
+      skippedUnits++;
+      continue;
+    }
+
+    const u = unitParsed.data;
+    const parts = u.definitionId.split(':');
     const unitBaseId = parts[0];
-    if (!unitBaseId) continue;
+    if (!unitBaseId) {
+      console.warn(
+        `[comlink] skipping unit for ${playerId} — empty unitBaseId from definitionId: "${u.definitionId}"`
+      );
+      skippedUnits++;
+      continue;
+    }
 
-    const rawRelicTier = raw.relic?.currentTier ?? 1;
+    const rawRelicTier = u.relic?.currentTier ?? 1;
     rosterUnits.push({
       unitBaseId,
-      rarity: raw.currentStar,
-      level: raw.currentLevel,
-      gearLevel: raw.currentTier,
+      rarity: u.currentStar,
+      level: u.currentLevel,
+      gearLevel: u.currentTier,
       relicTier: Math.max(0, rawRelicTier - 2),
     });
+  }
+
+  // PART A — checkpoint 7+8: normalized row count and sample
+  console.log(
+    `[comlink] /player ${playerId}: ${rosterUnits.length} normalized units, ${skippedUnits} skipped`
+  );
+  if (rosterUnits.length > 0) {
+    console.log(`[comlink] /player sample normalized unit for ${playerId}:`, rosterUnits[0]);
   }
 
   return {
