@@ -70,15 +70,6 @@ const playerResponseSchema = z
   })
   .passthrough();
 
-// ---------------------------------------------------------------------------
-// Metadata schema  POST /metadata
-// ---------------------------------------------------------------------------
-
-const metadataResponseSchema = z
-  .object({
-    latestGamedataVersion: z.string().min(1),
-  })
-  .passthrough();
 
 // ---------------------------------------------------------------------------
 // Unit metadata schema  POST /data
@@ -205,63 +196,64 @@ export async function checkComlinkReady(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Unit metadata endpoint  POST /data
+// Unit metadata  — loaded from swgoh-utils/gamedata (GitHub)
 // ---------------------------------------------------------------------------
+//
+// Comlink /data is intentionally NOT used here.  On this instance the handler
+// returns a generic 400 after schema validation passes, making it unreliable
+// as a dependency for roster sync.  The swgoh-utils/gamedata repo mirrors the
+// same game-data collections and is always available without authentication.
+//
+// File format:  { version: string, data: UnitDef[] }
+//
+// If Comlink /data is ever fixed, it can be re-enabled behind a feature flag
+// by restoring the old implementation from git history.
+
+const GAMEDATA_UNITS_URL =
+  'https://raw.githubusercontent.com/swgoh-utils/gamedata/main/units.json';
+
+const gamedataEnvelopeSchema = z.object({
+  version: z.string().min(1),
+  data: z.array(z.unknown()),
+});
 
 /**
- * Fetches the 'units' collection from Comlink /data and returns a Map keyed
- * by unit.id (the definitionId format, e.g. "SCYTHE:SEVEN_STAR") for O(1)
- * lookup against u.definitionId in the per-player roster payload.
+ * Fetches unit metadata from the swgoh-utils/gamedata GitHub mirror and
+ * returns a Map keyed by unit.id (definitionId format, e.g. "SCYTHE:SEVEN_STAR")
+ * for O(1) lookup against u.definitionId in the per-player roster payload.
  *
- * combatType in this metadata is authoritative for ship vs character:
+ * combatType is authoritative for ship vs character classification:
  *   1 = character, 2 = ship
  *
- * Request shape follows the OpenAPI 0.38.5 contract:
- *   payload.version  — current game data version from /metadata
- *   payload.items    — "units" (collection filter; mutually exclusive with requestSegment)
- *
- * This must be fetched once per sync batch (not once per player).
+ * Fetch once per sync batch, not once per player.
  */
 export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUnitMetadata>> {
-  // Step 1: resolve current game data version from /metadata.
-  // /data rejects requests with a missing or empty version string.
-  const metaJson = await postJson('/metadata', {}, 15000);
-  const metaParsed = metadataResponseSchema.safeParse(metaJson);
-  if (!metaParsed.success) {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(GAMEDATA_UNITS_URL, { cache: 'no-store' }, 30000);
+  } catch (err) {
     throw new Error(
-      `Comlink /metadata response missing latestGamedataVersion: ${metaParsed.error.issues[0]?.message ?? 'unknown'}`
-    );
-  }
-  const gameDataVersion = metaParsed.data.latestGamedataVersion;
-  console.log(`[comlink] /metadata latestGamedataVersion: ${gameDataVersion}`);
-
-  // Step 2: fetch only the units collection via payload.items.
-  // payload.items and payload.requestSegment are mutually exclusive per OpenAPI 0.38.5.
-  const json = await postJson('/data', { version: gameDataVersion, items: 'units' }, 30000);
-  const raw = json as Record<string, unknown>;
-
-  const rawUnitsCandidate = raw.units;
-  const rawUnits: unknown[] = Array.isArray(rawUnitsCandidate) ? rawUnitsCandidate : [];
-  console.log(`[comlink] /data units count: ${rawUnits.length}`);
-
-  if (rawUnits.length === 0) {
-    const unitsType = Array.isArray(rawUnitsCandidate)
-      ? 'array(len=0)'
-      : rawUnitsCandidate === undefined
-      ? 'missing'
-      : rawUnitsCandidate === null
-      ? 'null'
-      : typeof rawUnitsCandidate === 'object'
-      ? `object{${Object.keys(rawUnitsCandidate as object).slice(0, 10).join(',')}}`
-      : String(typeof rawUnitsCandidate);
-    throw new Error(
-      `Comlink /data returned no units — raw.units=${unitsType} — response keys: [${Object.keys(raw).join(', ')}]`
+      `gamedata units fetch failed: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
-  // Key by unit.id — this is the definitionId-format key (e.g. "SCYTHE:SEVEN_STAR")
-  // that matches u.definitionId in the per-player roster payload.
-  // unitMeta.baseId is the plain DB key (e.g. "SCYTHE").
+  if (!response.ok) {
+    const body = await response.text().catch(() => '<unreadable>');
+    throw new Error(
+      `gamedata units fetch returned HTTP ${response.status}: ${body.slice(0, 200)}`
+    );
+  }
+
+  const json: unknown = await response.json();
+  const envelope = gamedataEnvelopeSchema.safeParse(json);
+  if (!envelope.success) {
+    throw new Error(
+      `gamedata units.json unexpected shape: ${envelope.error.issues[0]?.message ?? 'unknown'}`
+    );
+  }
+
+  const { version: gamedataVersion, data: rawUnits } = envelope.data;
+
   const unitsById = new Map<string, ComlinkUnitMetadata>();
   let skipped = 0;
   let firstSkippedSample: string | null = null;
@@ -270,7 +262,6 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
     const parsed = unitMetadataSchema.safeParse(rawUnit);
     if (!parsed.success || !parsed.data.id) {
       if (firstSkippedSample === null) {
-        // Log the first failure so we can see actual UnitDef field names if schema is wrong.
         firstSkippedSample = JSON.stringify(rawUnit).slice(0, 300);
       }
       skipped++;
@@ -285,9 +276,11 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
     unitsById.set(meta.id, meta);
   }
 
-  console.log(`[comlink] unit metadata loaded: ${unitsById.size} entries, ${skipped} skipped`);
+  console.log(
+    `[gamedata] unit metadata loaded: ${unitsById.size} entries, ${skipped} skipped — gamedata version: ${gamedataVersion}`
+  );
   if (skipped > 0 && firstSkippedSample !== null) {
-    console.warn(`[comlink] /data first skipped UnitDef sample (check field names): ${firstSkippedSample}`);
+    console.warn(`[gamedata] first skipped unit sample (check schema): ${firstSkippedSample}`);
   }
   return unitsById;
 }
