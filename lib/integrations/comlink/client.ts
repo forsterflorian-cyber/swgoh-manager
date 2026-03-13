@@ -205,79 +205,6 @@ export async function checkComlinkReady(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
-// Segment probe  POST /data
-// ---------------------------------------------------------------------------
-
-type SegmentProbeResult = { segment: number; rawUnits: unknown[] };
-
-/**
- * Probes requestSegment 1–8 and returns the first segment that contains a
- * non-empty units array.  Logs a one-line summary per segment so the working
- * segment (and any failures) are visible without flooding the logs.
- *
- * requestSegment: 0 (all data) is intentionally excluded — it causes a 502.
- * No-segment requests return units: [] and are therefore also not tried here.
- */
-async function probeComlinkDataSegments(version: string): Promise<SegmentProbeResult> {
-  const segmentResults: string[] = [];
-
-  for (let seg = 1; seg <= 8; seg++) {
-    let status: number | string;
-    let raw: Record<string, unknown> | null = null;
-
-    try {
-      const response = await fetchWithTimeout(
-        `${getBaseUrl()}/data`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: { version, requestSegment: seg }, enums: false }),
-          cache: 'no-store',
-        },
-        30000
-      );
-
-      status = response.status;
-
-      if (response.ok) {
-        raw = (await response.json()) as Record<string, unknown>;
-      } else {
-        const body = await response.text().catch(() => '<unreadable>');
-        segmentResults.push(`seg${seg}: HTTP ${status} — ${body.slice(0, 120)}`);
-        continue;
-      }
-    } catch (err) {
-      status = err instanceof Error ? err.message : 'timeout/network';
-      segmentResults.push(`seg${seg}: error — ${status}`);
-      continue;
-    }
-
-    const candidate = raw.units;
-    let summary: string;
-
-    if (Array.isArray(candidate)) {
-      summary = `units=array(len=${candidate.length})`;
-    } else if (candidate !== null && candidate !== undefined && typeof candidate === 'object') {
-      summary = `units=object{${Object.keys(candidate as object).slice(0, 6).join(',')}}`;
-    } else {
-      summary = `units=${candidate === undefined ? 'missing' : String(candidate)}`;
-    }
-
-    const topKeys = Object.keys(raw).join(', ');
-    console.log(`[comlink] probe seg${seg}: HTTP ${status} — ${summary} — keys: [${topKeys}]`);
-    segmentResults.push(`seg${seg}: HTTP ${status} — ${summary}`);
-
-    if (Array.isArray(candidate) && candidate.length > 0) {
-      return { segment: seg, rawUnits: candidate };
-    }
-  }
-
-  throw new Error(
-    `[comlink] no segment (1–8) contained a non-empty units array.\n${segmentResults.join('\n')}`
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Unit metadata endpoint  POST /data
 // ---------------------------------------------------------------------------
 
@@ -289,11 +216,15 @@ async function probeComlinkDataSegments(version: string): Promise<SegmentProbeRe
  * combatType in this metadata is authoritative for ship vs character:
  *   1 = character, 2 = ship
  *
+ * Request shape follows the OpenAPI 0.38.5 contract:
+ *   payload.version  — current game data version from /metadata
+ *   payload.items    — "units" (collection filter; mutually exclusive with requestSegment)
+ *
  * This must be fetched once per sync batch (not once per player).
  */
 export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUnitMetadata>> {
-  // Step 1: fetch the current game data version from /metadata.
-  // /data requires a real version string — empty string causes a 400 internal error.
+  // Step 1: resolve current game data version from /metadata.
+  // /data rejects requests with a missing or empty version string.
   const metaJson = await postJson('/metadata', {}, 15000);
   const metaParsed = metadataResponseSchema.safeParse(metaJson);
   if (!metaParsed.success) {
@@ -304,12 +235,29 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
   const gameDataVersion = metaParsed.data.latestGamedataVersion;
   console.log(`[comlink] /metadata latestGamedataVersion: ${gameDataVersion}`);
 
-  // Step 2: probe segments 1–8 to find which one contains the units collection.
-  // requestSegment: 0 (all data) causes a 502. Without a segment param, units is
-  // returned as an empty array. Probe each segment and stop at the first hit.
-  const { segment: foundSegment, rawUnits } = await probeComlinkDataSegments(gameDataVersion);
-  console.log(`[comlink] units found in requestSegment: ${foundSegment} (${rawUnits.length} entries)`);
-  console.log('[comlink] /data first unit sample:', JSON.stringify(rawUnits[0]).slice(0, 300));
+  // Step 2: fetch only the units collection via payload.items.
+  // payload.items and payload.requestSegment are mutually exclusive per OpenAPI 0.38.5.
+  const json = await postJson('/data', { version: gameDataVersion, items: 'units' }, 30000);
+  const raw = json as Record<string, unknown>;
+
+  const rawUnitsCandidate = raw.units;
+  const rawUnits: unknown[] = Array.isArray(rawUnitsCandidate) ? rawUnitsCandidate : [];
+  console.log(`[comlink] /data units count: ${rawUnits.length}`);
+
+  if (rawUnits.length === 0) {
+    const unitsType = Array.isArray(rawUnitsCandidate)
+      ? 'array(len=0)'
+      : rawUnitsCandidate === undefined
+      ? 'missing'
+      : rawUnitsCandidate === null
+      ? 'null'
+      : typeof rawUnitsCandidate === 'object'
+      ? `object{${Object.keys(rawUnitsCandidate as object).slice(0, 10).join(',')}}`
+      : String(typeof rawUnitsCandidate);
+    throw new Error(
+      `Comlink /data returned no units — raw.units=${unitsType} — response keys: [${Object.keys(raw).join(', ')}]`
+    );
+  }
 
   // Key by unit.id — this is the definitionId-format key (e.g. "SCYTHE:SEVEN_STAR")
   // that matches u.definitionId in the per-player roster payload.
