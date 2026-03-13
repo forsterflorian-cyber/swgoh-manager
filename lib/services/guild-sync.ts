@@ -5,7 +5,7 @@ import {
   fetchComlinkGuild,
   fetchComlinkPlayer,
 } from '@/lib/integrations/comlink/client';
-import type { ComlinkMember } from '@/lib/integrations/comlink/types';
+import type { ComlinkMember, ComlinkPlayerDetail } from '@/lib/integrations/comlink/types';
 
 // ---------------------------------------------------------------------------
 // Readiness
@@ -117,6 +117,8 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
       `[guild-sync] Fetched ${guildMembers.length} members from Comlink; resolving player details`
     );
 
+    console.log('[sync] parsed guild members:', guildMembers.length);
+
     // 4. Resolve allyCode for each member via POST /player (concurrent, max 8 in-flight)
     const playerResults = await runConcurrent(
       guildMembers,
@@ -124,36 +126,50 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
       8
     );
 
-    // 5. Merge guild member data with player details
-    const members: ComlinkMember[] = [];
+    // Collect successful /player responses into a flat array.
+    // Using an explicit loop with a null-guard so an unfilled results slot
+    // (undefined) never throws on .status access.
+    const resolvedPlayers: ComlinkPlayerDetail[] = [];
     let skipped = 0;
 
     for (let i = 0; i < guildMembers.length; i++) {
-      const gm = guildMembers[i];
       const result = playerResults[i];
 
-      if (result.status === 'rejected') {
-        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      if (result?.status === 'fulfilled') {
+        resolvedPlayers.push(result.value);
+      } else {
+        const reason =
+          result?.status === 'rejected'
+            ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
+            : 'missing result';
         console.warn(
-          `[guild-sync] Skipping member ${gm.playerName} (${gm.playerId}): player fetch failed — ${reason}`
+          `[guild-sync] Skipping ${guildMembers[i].playerName} (${guildMembers[i].playerId}): ${reason}`
         );
         skipped++;
-        continue;
       }
-
-      members.push({
-        playerId: gm.playerId,
-        // Prefer the name from /player as it is the authoritative profile name.
-        // Fall back to the guild roster name if the player fetch returned nothing useful.
-        playerName: result.value.name || gm.playerName || 'Unknown Player',
-        allyCode: result.value.allyCode,
-        galacticPower: gm.galacticPower,
-      });
     }
 
-    console.log(
-      `[guild-sync] Player details resolved: ${members.length} ready, ${skipped} skipped`
-    );
+    console.log('[sync] resolved player details:', resolvedPlayers.length);
+
+    // 5. Merge by playerId — Map-based, fully index-independent.
+    // galacticPower comes from the guild response; allyCode + name come from /player.
+    const playerById = new Map(resolvedPlayers.map((p) => [p.playerId, p]));
+
+    const members: ComlinkMember[] = guildMembers.flatMap((gm) => {
+      const player = playerById.get(gm.playerId);
+      if (!player?.allyCode) return [];
+      return [{
+        playerId: gm.playerId,
+        playerName: player.name || gm.playerName || 'Unknown Player',
+        allyCode: player.allyCode,
+        galacticPower: gm.galacticPower ?? 0,
+      }];
+    });
+
+    console.log('[sync] merged members:', members.length);
+    if (members[0]) {
+      console.log('[sync] merged sample:', members[0]);
+    }
 
     // 6. Upsert all resolved members in a single transaction.
     // The unique key is (guild_id, player_id) — not ally_code.
