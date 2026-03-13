@@ -243,9 +243,19 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
   console.log('[comlink] /data response top-level keys:', Object.keys(raw));
 
   // Per the OpenAPI spec the collection is keyed 'units' (plural) in the response.
-  // 'unit' (singular) is kept as a fallback in case older Comlink builds differ.
-  const rawUnits: unknown[] = Array.isArray(raw.units)
-    ? (raw.units as unknown[])
+  // Some Comlink builds return 'units' as a nested object { unit: [...] } rather than
+  // a top-level array. 'unit' (singular) at the top level is kept as a final fallback.
+  const rawUnitsCandidate = raw.units;
+  console.log(
+    `[comlink] /data raw.units type: ${Array.isArray(rawUnitsCandidate) ? 'array' : typeof rawUnitsCandidate}`,
+    rawUnitsCandidate !== null && typeof rawUnitsCandidate === 'object' && !Array.isArray(rawUnitsCandidate)
+      ? `keys: [${Object.keys(rawUnitsCandidate as object).slice(0, 10).join(', ')}]`
+      : ''
+  );
+  const rawUnits: unknown[] = Array.isArray(rawUnitsCandidate)
+    ? (rawUnitsCandidate as unknown[])
+    : Array.isArray((rawUnitsCandidate as Record<string, unknown>)?.unit)
+    ? ((rawUnitsCandidate as Record<string, unknown>).unit as unknown[])
     : Array.isArray(raw.unit)
     ? (raw.unit as unknown[])
     : [];
