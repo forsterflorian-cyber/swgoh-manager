@@ -1778,9 +1778,13 @@ function MissingUnitCard({
       </div>
 
       <p className="mt-3 text-sm text-gray-500">
-        Shortage depth {shortagePercent}%. Strictest requirement: R
-        {unit.strictestRequirement.minRelic} and {unit.strictestRequirement.minRarity} stars. Near
-        miss pressure affects {unit.nearMissSlots} blocked slot
+        Shortage depth {shortagePercent}%.{' '}
+        {unit.isShipUnit
+          ? unit.strictestRequirement.minRelic > 0
+            ? `Strictest requirement: ${unit.strictestRequirement.minRarity}★ ship (crew relic threshold: R${unit.strictestRequirement.minRelic}).`
+            : `Strictest requirement: ${unit.strictestRequirement.minRarity}★ ship.`
+          : `Strictest requirement: R${unit.strictestRequirement.minRelic} and ${unit.strictestRequirement.minRarity} stars.`}{' '}
+        Near miss pressure affects {unit.nearMissSlots} blocked slot
         {unit.nearMissSlots === 1 ? '' : 's'}.
       </p>
 

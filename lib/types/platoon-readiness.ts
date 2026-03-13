@@ -175,6 +175,8 @@ export interface StrategicRequirementSummary {
 export interface StrategicUnitImpact {
   unitBaseId: string;
   unitName: string;
+  /** True when every known roster owner is a ship. Suppresses character-style relic wording in the UI. */
+  isShipUnit: boolean;
   primaryPlanetCategory: PlanetCategory | null;
   totalRequiredSlots: number;
   coverableSlots: number;

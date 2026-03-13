@@ -90,6 +90,8 @@ const PLANET_CATEGORIES: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
 type UnitAllocation = {
   unitBaseId: string;
   unitName: string;
+  /** True when every known owner is a ship (gearLevel === 0). Used to suppress relic-tier wording. */
+  isShipUnit: boolean;
   totalRequiredSlots: number;
   coverableSlots: number;
   missingSlots: number;
@@ -497,9 +499,29 @@ function allocateRequirements(
   const firstRequirement = sortedRequirements[0];
   const missingSlots = Math.max(sortedRequirements.length - coverableSlots, 0);
 
+  // A unit is treated as a ship when every known roster entry is a ship.
+  // If there are no owners at all we cannot determine type from roster data alone,
+  // so we conservatively fall back to false (character-style display).
+  const isShipUnit = sortedOwners.length > 0 && sortedOwners.every((o) => isShip(o));
+
+  // Debug log: ship-slot evaluation summary (fires once per unit per analysis run).
+  if (isShipUnit || firstRequirement?.requiredRelicTier > 0) {
+    const shipOwners = sortedOwners.filter((o) => isShip(o)).length;
+    const unknownOwners = sortedOwners.filter((o) => o.gearLevel === -1).length;
+    if (isShipUnit || unknownOwners > 0) {
+      console.log(
+        `[planner] ship-slot unit=${firstRequirement?.unitBaseId} ` +
+        `isShipUnit=${isShipUnit} ` +
+        `total_owners=${sortedOwners.length} ship_owners=${shipOwners} unknown_gear_owners=${unknownOwners} ` +
+        `coverable=${coverableSlots} blocked=${blockedSlots} hard_missing=${hardMissingSlots}`
+      );
+    }
+  }
+
   return {
     unitBaseId: firstRequirement?.unitBaseId ?? 'UNKNOWN',
     unitName: firstRequirement?.unitName ?? firstRequirement?.unitBaseId ?? 'Unknown Unit',
+    isShipUnit,
     totalRequiredSlots: sortedRequirements.length,
     coverableSlots,
     missingSlots,
@@ -1021,6 +1043,7 @@ function toImpact(
   const impactWithoutScore = {
     unitBaseId: allocation.unitBaseId,
     unitName: allocation.unitName,
+    isShipUnit: allocation.isShipUnit,
     primaryPlanetCategory,
     totalRequiredSlots: allocation.totalRequiredSlots,
     coverableSlots: allocation.coverableSlots,
@@ -1758,6 +1781,21 @@ async function loadRosterFromRosterCache(
   }));
 }
 
+/**
+ * Returns the set of unitBaseIds that are ships according to *any* guild's player_roster.
+ * gear_level = 0 is an intrinsic game property of ships, not per-guild state, so querying
+ * across guilds is correct and safe. This is only called when the roster_cache fallback is
+ * used (i.e. the guild has never synced via Comlink).
+ */
+async function detectShipUnitIds(unitBaseIds: string[]): Promise<ReadonlySet<string>> {
+  if (unitBaseIds.length === 0) return new Set<string>();
+  const result = await sql.query<{ unit_base_id: string }>(
+    `SELECT DISTINCT unit_base_id FROM player_roster WHERE unit_base_id = ANY($1) AND gear_level = 0`,
+    [unitBaseIds]
+  );
+  return new Set(result.rows.map((r) => r.unit_base_id));
+}
+
 async function loadRosterForUnits(
   guildId: string,
   unitBaseIds: string[]
@@ -1770,10 +1808,29 @@ async function loadRosterForUnits(
   // Falls back to roster_cache (swgoh.gg-synced) if player_roster is empty for this guild.
   const fromPlayerRoster = await loadRosterFromPlayerRoster(guildId, unitBaseIds);
   const rosterSource = fromPlayerRoster.length > 0 ? 'player_roster' : 'roster_cache';
-  const roster =
-    fromPlayerRoster.length > 0
-      ? fromPlayerRoster
-      : await loadRosterFromRosterCache(guildId, unitBaseIds);
+  let roster: StrategicPlannerRosterInput[];
+
+  if (fromPlayerRoster.length > 0) {
+    roster = fromPlayerRoster;
+  } else {
+    const fromCache = await loadRosterFromRosterCache(guildId, unitBaseIds);
+
+    // roster_cache rows are mapped with gearLevel = -1 because swgoh.gg does not expose
+    // gear_level. This causes isShip() to return false for ships, making them fail the relic
+    // check in qualifies() and appear as hard-missing.  Fix: detect ship unit IDs by querying
+    // player_roster globally, then stamp gearLevel = 0 on the affected roster_cache entries.
+    const shipUnitIds = await detectShipUnitIds(unitBaseIds);
+    const entriesFixed = fromCache.filter((e) => shipUnitIds.has(e.unitBaseId)).length;
+    console.log(
+      `[planner] roster_cache ship-fix guild=${guildId} ` +
+      `detected_ship_units=${shipUnitIds.size} of ${unitBaseIds.length} ` +
+      `entries_fixed=${entriesFixed} ` +
+      `ship_unit_ids=${[...shipUnitIds].join(',') || 'none'}`
+    );
+    roster = fromCache.map((entry) =>
+      shipUnitIds.has(entry.unitBaseId) ? { ...entry, gearLevel: 0 } : entry
+    );
+  }
 
   // ---- Part D diagnostics -----------------------------------------------
   const distinctUnitsRequired = unitBaseIds.length;
