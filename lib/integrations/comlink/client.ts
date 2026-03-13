@@ -71,10 +71,20 @@ const playerResponseSchema = z
   .passthrough();
 
 // ---------------------------------------------------------------------------
-// Unit metadata schema  POST /data { collection: ['units'] }
+// Metadata schema  POST /metadata
 // ---------------------------------------------------------------------------
 
-// Each entry in the 'unit' array of the /data response.
+const metadataResponseSchema = z
+  .object({
+    latestGamedataVersion: z.string().min(1),
+  })
+  .passthrough();
+
+// ---------------------------------------------------------------------------
+// Unit metadata schema  POST /data
+// ---------------------------------------------------------------------------
+
+// Each entry in the 'units' array of the /data response.
 // combatType: 1 = character, 2 = ship — always present for playable units.
 const unitMetadataSchema = z.object({
   id: z.string().trim().min(1),
@@ -209,13 +219,20 @@ export async function checkComlinkReady(): Promise<boolean> {
  * This must be fetched once per sync batch (not once per player).
  */
 export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUnitMetadata>> {
-  // Payload schema confirmed from 400 error body (AJV output):
-  //   payload.version   REQUIRED
-  //   additionalProperties: false  → no other fields allowed
-  //
-  // version: '' is the Comlink convention for "return current game data".
-  // postJson wraps this as: { payload: { version: '' }, enums: false }
-  const requestPayload = { version: '' };
+  // Step 1: fetch the current game data version from /metadata.
+  // /data requires a real version string — empty string causes a 400 internal error.
+  const metaJson = await postJson('/metadata', {}, 15000);
+  const metaParsed = metadataResponseSchema.safeParse(metaJson);
+  if (!metaParsed.success) {
+    throw new Error(
+      `Comlink /metadata response missing latestGamedataVersion: ${metaParsed.error.issues[0]?.message ?? 'unknown'}`
+    );
+  }
+  const gameDataVersion = metaParsed.data.latestGamedataVersion;
+  console.log(`[comlink] /metadata latestGamedataVersion: ${gameDataVersion}`);
+
+  // Step 2: fetch game data with the resolved version.
+  const requestPayload = { version: gameDataVersion };
   console.log('[comlink] /data request body:', JSON.stringify({ payload: requestPayload, enums: false }));
 
   const json = await postJson('/data', requestPayload, 30000);
