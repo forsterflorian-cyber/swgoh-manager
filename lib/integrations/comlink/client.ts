@@ -66,6 +66,51 @@ const playerResponseSchema = z
   .passthrough();
 
 // ---------------------------------------------------------------------------
+// Normalized roster unit validation  (PART B)
+// ---------------------------------------------------------------------------
+
+type UnitValidationResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Validates a normalized ComlinkRosterUnit before DB write.
+ * Called on Comlink-sourced units only (gearLevel 0–13, never −1 sentinel).
+ *
+ * Valid ranges after normalization:
+ *   rarity    1–7    (0 impossible for an owned unit in SWGOH)
+ *   gearLevel 0–13   (0 = ship, 1–13 = character gear tier)
+ *   relicTier 0–9    (0 = no relic, 9 = R9; formula Math.max(0, raw-2) bounds this)
+ *   level     1–85
+ *
+ * Ship rule: gearLevel === 0 → relicTier must be 0 (ships have no relic track)
+ */
+export function validateNormalizedRosterUnit(unit: ComlinkRosterUnit): UnitValidationResult {
+  if (!unit.unitBaseId) {
+    return { ok: false, reason: 'empty_unit_base_id' };
+  }
+  if (!Number.isInteger(unit.rarity) || unit.rarity < 1 || unit.rarity > 7) {
+    return { ok: false, reason: `rarity_out_of_range:${unit.rarity}` };
+  }
+  if (!Number.isInteger(unit.gearLevel) || unit.gearLevel < 0 || unit.gearLevel > 13) {
+    return { ok: false, reason: `gear_level_out_of_range:${unit.gearLevel}` };
+  }
+  if (!Number.isInteger(unit.relicTier) || unit.relicTier < 0 || unit.relicTier > 9) {
+    return { ok: false, reason: `relic_tier_out_of_range:${unit.relicTier}` };
+  }
+  if (!Number.isInteger(unit.level) || unit.level < 1 || unit.level > 85) {
+    return { ok: false, reason: `level_out_of_range:${unit.level}` };
+  }
+  // Ships (gearLevel === 0) have no relic track — relicTier must be 0
+  if (unit.gearLevel === 0 && unit.relicTier > 0) {
+    return { ok: false, reason: `ship_with_relic_tier:${unit.relicTier}` };
+  }
+  return { ok: true };
+}
+
+// Max schema-mismatch log lines emitted per player — prevents log spam when
+// the upstream payload shape changes and every unit fails the same check.
+const MAX_UNIT_LOG_SAMPLES = 3;
+
+// ---------------------------------------------------------------------------
 // Internal fetch helper
 // ---------------------------------------------------------------------------
 
@@ -251,19 +296,23 @@ export async function fetchComlinkPlayerWithRoster(
     );
   }
 
-  // PART C+D — parse each unit individually so one bad entry never discards the rest
+  // Parse each unit individually — one bad item never discards the rest (PART A)
   const rosterUnits: ComlinkRosterUnit[] = [];
-  let skippedUnits = 0;
+  let schemaMismatchCount = 0;
+  let emptyBaseIdCount = 0;
 
   for (const rawItem of parsed.data.rosterUnit) {
     const unitParsed = rosterUnitSchema.safeParse(rawItem);
     if (!unitParsed.success) {
-      const issue = unitParsed.error.issues[0];
-      console.warn(
-        `[comlink] skipping unit for ${playerId} — schema mismatch at ${issue?.path?.join('.') ?? 'root'}:`,
-        JSON.stringify(rawItem).slice(0, 150)
-      );
-      skippedUnits++;
+      // Cap log lines per player to avoid log spam when the schema changes globally
+      if (schemaMismatchCount < MAX_UNIT_LOG_SAMPLES) {
+        const issue = unitParsed.error.issues[0];
+        console.warn(
+          `[comlink] unit schema mismatch for ${playerId} at ${issue?.path?.join('.') ?? 'root'}:`,
+          JSON.stringify(rawItem).slice(0, 150)
+        );
+      }
+      schemaMismatchCount++;
       continue;
     }
 
@@ -271,10 +320,7 @@ export async function fetchComlinkPlayerWithRoster(
     const parts = u.definitionId.split(':');
     const unitBaseId = parts[0];
     if (!unitBaseId) {
-      console.warn(
-        `[comlink] skipping unit for ${playerId} — empty unitBaseId from definitionId: "${u.definitionId}"`
-      );
-      skippedUnits++;
+      emptyBaseIdCount++;
       continue;
     }
 
@@ -288,7 +334,18 @@ export async function fetchComlinkPlayerWithRoster(
     });
   }
 
-  console.log(`[comlink] normalized units for ${playerId}: ${rosterUnits.length} (skipped ${skippedUnits})`);
+  if (schemaMismatchCount > MAX_UNIT_LOG_SAMPLES) {
+    console.warn(
+      `[comlink] ${schemaMismatchCount - MAX_UNIT_LOG_SAMPLES} additional schema mismatches suppressed for ${playerId} (${schemaMismatchCount} total)`
+    );
+  }
+
+  const totalSkipped = schemaMismatchCount + emptyBaseIdCount;
+  console.log(
+    `[comlink] ${playerId}: parsed=${rosterUnits.length} skipped=${totalSkipped}` +
+    (schemaMismatchCount > 0 ? ` schema_mismatch=${schemaMismatchCount}` : '') +
+    (emptyBaseIdCount > 0 ? ` empty_base_id=${emptyBaseIdCount}` : '')
+  );
   if (rosterUnits.length > 0) {
     console.log(`[comlink] first normalized unit for ${playerId}:`, rosterUnits[0]);
   }

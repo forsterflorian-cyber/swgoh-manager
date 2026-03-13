@@ -10,7 +10,8 @@
       "Bash(ls -la \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/\")",
       "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager\" -type f -name *.env*)",
       "Bash(npx tsc:*)",
-      "Bash(./node_modules/.bin/tsc --noEmit)"
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(find \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager\" -type f -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.sql\")"
     ]
   }
 }

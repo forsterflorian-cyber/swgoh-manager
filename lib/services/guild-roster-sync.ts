@@ -1,8 +1,9 @@
-import { db } from '@vercel/postgres';
+import { db, sql } from '@vercel/postgres';
 
 import {
   checkComlinkReady,
   fetchComlinkPlayerWithRoster,
+  validateNormalizedRosterUnit,
 } from '@/lib/integrations/comlink/client';
 import type { ComlinkPlayerProfile } from '@/lib/integrations/comlink/types';
 
@@ -43,6 +44,17 @@ function isTransientError(error: unknown): boolean {
     msg.includes('request failed:') ||
     msg.includes('status 5')
   );
+}
+
+/** Classify a fetch/parse error into a short label for structured logs (PART C) */
+function categorizeFetchError(error: unknown): string {
+  if (!(error instanceof Error)) return 'unknown';
+  const msg = error.message;
+  if (msg.includes('timed out')) return 'timeout';
+  if (msg.includes('malformed')) return 'parse_failure';
+  if (msg.includes('status 5')) return 'server_error';
+  if (msg.includes('request failed')) return 'network_error';
+  return 'other';
 }
 
 // ---------------------------------------------------------------------------
@@ -86,9 +98,11 @@ export type GuildRosterSyncResult = {
   guildId: string;
   totalEligibleMembers: number; // all members with player_id across the whole guild
   membersConsidered: number;    // members in this batch (after offset/limit)
-  membersSkipped: number;
+  membersSkipped: number;       // fetch failures (timeout / parse / network)
   membersFetched: number;
-  totalRosterRows: number;
+  membersWithZeroUnits: number; // fetched but 0 valid units after parse+validation
+  totalRosterRows: number;      // raw unit count from Comlink (pre-validation)
+  totalRejectedUnits: number;   // units that passed parse but failed validateNormalizedRosterUnit
   totalUpserts: number;         // rows actually committed to DB
   totalUpsertErrors: number;    // members whose transaction was rolled back
 };
@@ -97,6 +111,89 @@ type GuildMemberRow = {
   player_id: string;
   player_name: string;
 };
+
+// ---------------------------------------------------------------------------
+// Post-sync sanity check  (PART E)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs lightweight sanity queries after a sync batch to surface obviously-wrong data.
+ * Non-fatal: logs warnings but never throws.
+ *
+ * What it checks:
+ *   - Total rows and distinct members in player_roster for this guild
+ *   - Rarity distribution anomalies (rarity=0, rarity>7)
+ *   - Out-of-range relic tiers (relic_tier > 9)
+ *   - Min/max relic tier and ship count
+ *   - Members with suspiciously few roster rows (<50 heuristic)
+ */
+async function runPostSyncSanityCheck(guildId: string): Promise<void> {
+  // Uses sql directly (no transaction needed — read-only diagnostic queries)
+  try {
+    const summary = await sql<{
+      distinct_members: number;
+      total_rows: number;
+      rarity_zero: number;
+      rarity_invalid: number;
+      relic_tier_invalid: number;
+      min_relic: number;
+      max_relic: number;
+      ship_count: number;
+    }>`
+      SELECT
+        COUNT(DISTINCT player_id)::int                   AS distinct_members,
+        COUNT(*)::int                                    AS total_rows,
+        COUNT(*) FILTER (WHERE rarity = 0)::int          AS rarity_zero,
+        COUNT(*) FILTER (WHERE rarity > 7)::int          AS rarity_invalid,
+        COUNT(*) FILTER (WHERE relic_tier > 9)::int      AS relic_tier_invalid,
+        COALESCE(MIN(relic_tier), 0)                     AS min_relic,
+        COALESCE(MAX(relic_tier), 0)                     AS max_relic,
+        COUNT(*) FILTER (WHERE gear_level = 0)::int      AS ship_count
+      FROM player_roster
+      WHERE guild_id = ${guildId}
+    `;
+
+    const s = summary.rows[0];
+    if (!s) return;
+
+    console.log(
+      `[roster-sync] post-sync sanity guild=${guildId}: ` +
+      `distinct_members=${s.distinct_members} total_rows=${s.total_rows} ` +
+      `ships=${s.ship_count} min_relic=${s.min_relic} max_relic=${s.max_relic}`
+    );
+
+    if (s.rarity_zero > 0 || s.rarity_invalid > 0 || s.relic_tier_invalid > 0) {
+      console.warn(
+        `[roster-sync] suspicious values in player_roster: ` +
+        `rarity_zero=${s.rarity_zero} rarity_invalid=${s.rarity_invalid} relic_tier_invalid=${s.relic_tier_invalid}`
+      );
+    }
+
+    // Members with very few rows — heuristic: <50 is likely a partial sync or a fresh account
+    const thinMembers = await sql<{ player_id: string; row_count: number }>`
+      SELECT player_id, COUNT(*)::int AS row_count
+      FROM player_roster
+      WHERE guild_id = ${guildId}
+      GROUP BY player_id
+      HAVING COUNT(*) < 50
+      ORDER BY row_count ASC
+      LIMIT 5
+    `;
+
+    if (thinMembers.rows.length > 0) {
+      console.warn(
+        `[roster-sync] members with thin rosters (<50 units): ` +
+        thinMembers.rows.map((r) => `${r.player_id}:${r.row_count}`).join(', ')
+      );
+    }
+  } catch (error) {
+    // Sanity check is diagnostic-only; never fail the sync because of it
+    console.warn(
+      '[roster-sync] post-sync sanity check failed (non-fatal):',
+      error instanceof Error ? error.message : error
+    );
+  }
+}
 
 /**
  * Syncs roster data for a batch of guild members into the player_roster table.
@@ -152,7 +249,9 @@ export async function syncGuildRosters(
         membersConsidered: 0,
         membersSkipped: 0,
         membersFetched: 0,
+        membersWithZeroUnits: 0,
         totalRosterRows: 0,
+        totalRejectedUnits: 0,
         totalUpserts: 0,
         totalUpsertErrors: 0,
       };
@@ -178,7 +277,9 @@ export async function syncGuildRosters(
         membersConsidered: 0,
         membersSkipped: 0,
         membersFetched: 0,
+        membersWithZeroUnits: 0,
         totalRosterRows: 0,
+        totalRejectedUnits: 0,
         totalUpserts: 0,
         totalUpsertErrors: 0,
       };
@@ -217,7 +318,7 @@ export async function syncGuildRosters(
 
     console.log(`[roster-sync] Fetch timeouts: ${timeouts}, retried after transient error: ${retried}`);
 
-    // 4. Collect successful fetch results
+    // 4. Collect successful fetch results; categorize failures for diagnosability (PART C)
     const profiles: ComlinkPlayerProfile[] = [];
     let membersSkipped = 0;
 
@@ -228,15 +329,14 @@ export async function syncGuildRosters(
         const profile = result.value;
         profiles.push(profile);
         console.log(
-          `[roster-sync] Fetched ${profile.rosterUnits.length} units for ${members[i].player_name} (${members[i].player_id})`
+          `[roster-sync] fetch_ok player=${members[i].player_id} name=${members[i].player_name} raw_units=${profile.rosterUnits.length}`
         );
       } else {
-        const reason =
-          result?.status === 'rejected'
-            ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
-            : 'missing result';
+        const error = result?.status === 'rejected' ? result.reason : undefined;
+        const category = categorizeFetchError(error);
+        const msg = error instanceof Error ? error.message : String(error ?? 'missing result');
         console.warn(
-          `[roster-sync] Skipping ${members[i].player_name} (${members[i].player_id}): ${reason}`
+          `[roster-sync] fetch_fail category=${category} player=${members[i].player_id} name=${members[i].player_name}: ${msg}`
         );
         membersSkipped++;
       }
@@ -248,27 +348,58 @@ export async function syncGuildRosters(
       `[roster-sync] Successfully fetched ${membersFetched} profiles — ${totalRosterRows} total roster rows to upsert`
     );
 
-    // 5. Upsert roster rows per member in individual transactions.
+    // 5. Validate normalized units and upsert per member in individual transactions.
+    //    Validation (PART B): rejects units with out-of-range values before any DB write.
     //    Committing per member means a failure mid-way leaves already-synced members intact.
     //    Re-running is safe because the upsert is idempotent.
     //    totalUpserts counts rows in *committed* transactions only (not rolled back ones).
     let totalUpserts = 0;
     let totalUpsertErrors = 0;
+    let totalRejectedUnits = 0;
+    let membersWithZeroUnits = 0;
 
     for (const profile of profiles) {
-      if (profile.rosterUnits.length === 0) {
+      // ---- PART B: validate each normalized unit before DB write ----
+      const validUnits = [];
+      const rejectionBuckets: Record<string, number> = {};
+
+      for (const unit of profile.rosterUnits) {
+        const validation = validateNormalizedRosterUnit(unit);
+        if (!validation.ok) {
+          const bucket = validation.reason.split(':')[0]; // e.g. "rarity_out_of_range"
+          rejectionBuckets[bucket] = (rejectionBuckets[bucket] ?? 0) + 1;
+        } else {
+          validUnits.push(unit);
+        }
+      }
+
+      const rejectedCount = profile.rosterUnits.length - validUnits.length;
+      totalRejectedUnits += rejectedCount;
+
+      if (rejectedCount > 0) {
+        // Log one sample of the rejected units to aid debugging
+        const sampleUnit = profile.rosterUnits.find(
+          (u) => !validateNormalizedRosterUnit(u).ok
+        );
         console.warn(
-          `[roster-sync] Profile for ${profile.playerId} (${profile.name}) has 0 roster units — skipping upsert`
+          `[roster-sync] validation_rejected player=${profile.playerId} count=${rejectedCount} buckets=${JSON.stringify(rejectionBuckets)} sample=${JSON.stringify(sampleUnit)}`
+        );
+      }
+
+      if (validUnits.length === 0) {
+        membersWithZeroUnits++;
+        console.warn(
+          `[roster-sync] zero_valid_units player=${profile.playerId} name=${profile.name} raw=${profile.rosterUnits.length} rejected=${rejectedCount} — skipping upsert`
         );
         continue;
       }
+      // ---------------------------------------------------------------
 
-      console.log(`[roster-sync] upserting units for ${profile.playerId}: ${profile.rosterUnits.length}`);
-
+      const playerStartMs = Date.now();
       await client.sql`BEGIN`;
       let memberUpserts = 0;
       try {
-        for (const unit of profile.rosterUnits) {
+        for (const unit of validUnits) {
           await client.sql`
             INSERT INTO player_roster (
               id, guild_id, player_id, unit_base_id,
@@ -296,15 +427,17 @@ export async function syncGuildRosters(
           memberUpserts++;
         }
         await client.sql`COMMIT`;
-        // Only count after successful COMMIT
+        // Only count after successful COMMIT (PART C)
         totalUpserts += memberUpserts;
-        console.log(`[roster-sync] committed rows for ${profile.playerId}: ${memberUpserts}`);
+        console.log(
+          `[roster-sync] commit_ok player=${profile.playerId} rows=${memberUpserts} rejected=${rejectedCount} duration_ms=${Date.now() - playerStartMs}`
+        );
       } catch (error) {
         await client.sql`ROLLBACK`;
         totalUpsertErrors++;
         const msg = error instanceof Error ? error.message : String(error);
         console.error(
-          `[roster-sync] Upsert FAILED for player ${profile.playerId} (${profile.name}) — rolled back: ${msg}`
+          `[roster-sync] db_write_fail player=${profile.playerId} name=${profile.name} — rolled back: ${msg}`
         );
         // Table-not-found is a hard failure — no point processing remaining members
         if (msg.includes('does not exist')) {
@@ -319,17 +452,16 @@ export async function syncGuildRosters(
       );
     }
 
-    console.log(`[roster-sync] final total upserts: ${totalUpserts}`);
+    // ---- PART E: post-sync sanity check ----
+    await runPostSyncSanityCheck(guildId);
+    // ----------------------------------------
+
     console.log(
-      `[roster-sync] Finished for guild ${guildId}: ` +
-        `totalEligible=${totalEligibleMembers} ` +
-        `offset=${batchOffset} ` +
-        `membersConsidered=${members.length} ` +
-        `membersSkipped=${membersSkipped} ` +
-        `membersFetched=${membersFetched} ` +
-        `totalRosterRows=${totalRosterRows} ` +
-        `totalUpserts=${totalUpserts} ` +
-        `totalUpsertErrors=${totalUpsertErrors}`
+      `[roster-sync] run_complete guild=${guildId} ` +
+        `totalEligible=${totalEligibleMembers} offset=${batchOffset} ` +
+        `considered=${members.length} skipped=${membersSkipped} fetched=${membersFetched} ` +
+        `zeroUnits=${membersWithZeroUnits} rawRows=${totalRosterRows} ` +
+        `rejected=${totalRejectedUnits} upserts=${totalUpserts} errors=${totalUpsertErrors}`
     );
 
     return {
@@ -338,7 +470,9 @@ export async function syncGuildRosters(
       membersConsidered: members.length,
       membersSkipped,
       membersFetched,
+      membersWithZeroUnits,
       totalRosterRows,
+      totalRejectedUnits,
       totalUpserts,
       totalUpsertErrors,
     };
