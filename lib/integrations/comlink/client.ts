@@ -16,18 +16,23 @@ function getBaseUrl(): string {
 // ---------------------------------------------------------------------------
 
 // Roster unit inside a full POST /player response.
-// definitionId format: "UNITBASEID:SEVEN_STAR" — split on ':' to extract base ID.
-// currentStar  = stars (1-7, integer field, not an enum)
-// currentTier  = gear tier (1-13, 0 for ships)
-// currentLevel = character level (1-85)
+// definitionId  format: "UNITBASEID:SEVEN_STAR" — split on ':' to extract base ID.
+// currentRarity = stars (1-7)
+// currentTier   = gear tier (1-13, 0 for ships)
+// currentLevel  = character level (1-85)
+// combatType    = 1 character, 2 ship
 // relic.currentTier = raw relic tier (1 = no relic, 3 = R1, ..., 11 = R9)
 //   normalized: Math.max(0, currentTier - 2)
+//
+// NOTE: the field is currentRarity — NOT currentStar.  Using the wrong field name
+// silently produces 0 via .catch(0), which then fails validateNormalizedRosterUnit.
 const rosterUnitSchema = z
   .object({
     definitionId: z.string().trim().min(1),
+    currentRarity: z.coerce.number().int().nonnegative().catch(0),
     currentLevel: z.coerce.number().int().nonnegative().catch(1),
     currentTier: z.coerce.number().int().nonnegative().catch(1),
-    currentStar: z.coerce.number().int().nonnegative().catch(0),
+    combatType: z.coerce.number().int().nonnegative().optional(),
     relic: z
       .object({
         currentTier: z.coerce.number().int().nonnegative().catch(1),
@@ -325,9 +330,22 @@ export async function fetchComlinkPlayerWithRoster(
     }
 
     const rawRelicTier = u.relic?.currentTier ?? 1;
+
+    // Log raw source fields for the first successfully-parsed unit per player so
+    // the mapping can be verified in logs without reading the full payload.
+    if (rosterUnits.length === 0) {
+      console.log(
+        `[comlink] ${playerId} raw sample: ` +
+        `id=${u.definitionId} ` +
+        `currentRarity=${u.currentRarity} currentLevel=${u.currentLevel} ` +
+        `currentTier=${u.currentTier} relic.currentTier=${u.relic?.currentTier ?? null} ` +
+        `combatType=${u.combatType ?? null}`
+      );
+    }
+
     rosterUnits.push({
       unitBaseId,
-      rarity: u.currentStar,
+      rarity: u.currentRarity,
       level: u.currentLevel,
       gearLevel: u.currentTier,
       relicTier: Math.max(0, rawRelicTier - 2),
