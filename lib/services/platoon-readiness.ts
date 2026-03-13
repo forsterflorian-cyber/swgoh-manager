@@ -8,6 +8,7 @@ import {
 } from '@/lib/services/strategic-targets';
 import type {
   PlanetCategory,
+  UnitCategory,
   StrategicMemberAssignmentLoad,
   StrategicPlannerData,
   StrategicPlannerCapacityPressureSummary,
@@ -340,19 +341,17 @@ function ownerKey(owner: StrategicPlannerRosterInput) {
   return owner.memberId;
 }
 
-function isShip(owner: StrategicPlannerRosterInput) {
-  return owner.gearLevel === 0;
-}
-
 function qualifies(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
   if (owner.rarity < slot.requiredRarity) return false;
-  if (isShip(owner)) return true; // ships have no relic requirement
+  // Ship slots have no relic track — the slot category is the authoritative classifier.
+  if (slot.unitCategory === 'SHIP') return true;
   return owner.relicTier >= slot.requiredRelicTier;
 }
 
 function getDeficits(owner: StrategicPlannerRosterInput, slot: StrategicPlannerSlotInput) {
   return {
-    relicDeficit: isShip(owner) ? 0 : Math.max(slot.requiredRelicTier - owner.relicTier, 0),
+    // Ships have no relic tier — always 0 regardless of what the slot's requiredRelicTier holds.
+    relicDeficit: slot.unitCategory === 'SHIP' ? 0 : Math.max(slot.requiredRelicTier - owner.relicTier, 0),
     rarityDeficit: Math.max(slot.requiredRarity - owner.rarity, 0),
   };
 }
@@ -499,23 +498,16 @@ function allocateRequirements(
   const firstRequirement = sortedRequirements[0];
   const missingSlots = Math.max(sortedRequirements.length - coverableSlots, 0);
 
-  // A unit is treated as a ship when every known roster entry is a ship.
-  // If there are no owners at all we cannot determine type from roster data alone,
-  // so we conservatively fall back to false (character-style display).
-  const isShipUnit = sortedOwners.length > 0 && sortedOwners.every((o) => isShip(o));
+  // Derived from the slot definition — the canonical classifier. Never from owner.gearLevel.
+  const isShipUnit = firstRequirement?.unitCategory === 'SHIP';
 
-  // Debug log: ship-slot evaluation summary (fires once per unit per analysis run).
-  if (isShipUnit || firstRequirement?.requiredRelicTier > 0) {
-    const shipOwners = sortedOwners.filter((o) => isShip(o)).length;
-    const unknownOwners = sortedOwners.filter((o) => o.gearLevel === -1).length;
-    if (isShipUnit || unknownOwners > 0) {
-      console.log(
-        `[planner] ship-slot unit=${firstRequirement?.unitBaseId} ` +
-        `isShipUnit=${isShipUnit} ` +
-        `total_owners=${sortedOwners.length} ship_owners=${shipOwners} unknown_gear_owners=${unknownOwners} ` +
-        `coverable=${coverableSlots} blocked=${blockedSlots} hard_missing=${hardMissingSlots}`
-      );
-    }
+  // Debug log: fires for every ship unit so ship-slot evaluation is always observable.
+  if (isShipUnit) {
+    console.log(
+      `[planner] ship-slot unit=${firstRequirement?.unitBaseId} ` +
+      `total_owners=${sortedOwners.length} ` +
+      `coverable=${coverableSlots} blocked=${blockedSlots} hard_missing=${hardMissingSlots}`
+    );
   }
 
   return {
@@ -697,7 +689,8 @@ function getTargetStatePriority(state: StrategicTargetState) {
 
 function getCandidateReadiness(
   owner: StrategicPlannerRosterInput | undefined,
-  requirement: StrategicUnitImpact['strictestRequirement']
+  requirement: StrategicUnitImpact['strictestRequirement'],
+  isShipUnit: boolean = false
 ): CandidateReadiness {
   if (!owner) {
     return {
@@ -706,12 +699,15 @@ function getCandidateReadiness(
       currentRarity: null,
       meetsOwnership: false,
       missingCopies: 1,
-      missingRelicTiers: requirement.minRelic,
+      // Ships have no relic track — never show a relic deficit even for missing owners.
+      missingRelicTiers: isShipUnit ? 0 : requirement.minRelic,
       missingRarity: requirement.minRarity,
     };
   }
 
-  const missingRelicTiers = isShip(owner) ? 0 : Math.max(requirement.minRelic - owner.relicTier, 0);
+  // Use slot-derived isShipUnit, not owner.gearLevel, so roster_cache entries (gearLevel = -1)
+  // are handled correctly.
+  const missingRelicTiers = isShipUnit ? 0 : Math.max(requirement.minRelic - owner.relicTier, 0);
   const missingRarity = Math.max(requirement.minRarity - owner.rarity, 0);
 
   if (missingRelicTiers === 0 && missingRarity === 0) {
@@ -866,7 +862,7 @@ function rankCandidatesForUnit(input: {
       const rosterEntry = input.rosterByMemberUnit.get(
         `${member.memberId}:${input.impact.unitBaseId}`
       );
-      const readiness = getCandidateReadiness(rosterEntry, input.impact.strictestRequirement);
+      const readiness = getCandidateReadiness(rosterEntry, input.impact.strictestRequirement, input.impact.isShipUnit);
       const existingStrategicTargetCount = input.assignmentCounts.get(member.memberId) ?? 0;
       const capacityLoad =
         input.memberAssignmentLoadMap[member.memberId] ?? createEmptyMemberAssignmentLoad();
@@ -1376,10 +1372,8 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
         impact?.unitName ?? unitNameMap.get(assignment.unitBaseId) ?? assignment.unitBaseId;
       const readiness = getCandidateReadiness(
         rosterByMemberUnit.get(`${assignment.guildMemberId}:${assignment.unitBaseId}`),
-        impact?.strictestRequirement ?? {
-          minRelic: 0,
-          minRarity: 0,
-        }
+        impact?.strictestRequirement ?? { minRelic: 0, minRarity: 0 },
+        impact?.isShipUnit ?? false
       );
 
       return {
@@ -1684,6 +1678,21 @@ async function loadSlotsForReference(
     ORDER BY tp.phase_number ASC, tz.sort_order ASC, tpl.sort_order ASC, tps.slot_number ASC
   `;
 
+  // Detect which units are ships before mapping rows.
+  // gear_level = 0 is an intrinsic game property stored in player_roster by Comlink sync.
+  // We query globally (not per-guild) because unit type is not a per-player attribute.
+  // This is the single authoritative classification point; evaluation functions consume
+  // slot.unitCategory and never inspect owner.gearLevel for ship detection.
+  const allUnitBaseIds = [...new Set(result.rows.map((r) => r.unit_base_id))];
+  const shipUnitIds = await detectShipUnitIds(allUnitBaseIds);
+
+  if (shipUnitIds.size > 0) {
+    console.log(
+      `[planner] slot-load ship-detection tb=${reference.tbKey} ` +
+      `ship_units=${shipUnitIds.size}/${allUnitBaseIds.length}: ${[...shipUnitIds].join(',')}`
+    );
+  }
+
   return result.rows.map((row) => ({
     phase: toNumber(row.phase_number),
     zoneKey: row.zone_key,
@@ -1696,6 +1705,7 @@ async function loadSlotsForReference(
     slotNumber: toNumber(row.slot_number),
     unitBaseId: row.unit_base_id,
     unitName: row.unit_name,
+    unitCategory: (shipUnitIds.has(row.unit_base_id) ? 'SHIP' : 'CHARACTER') as UnitCategory,
     requiredRelicTier: Math.max(0, toNumber(row.required_relic_tier) - 2),
     requiredRarity: toNumber(row.required_rarity, 7),
     planetCategory: inferPlanetCategory({
@@ -1806,31 +1816,16 @@ async function loadRosterForUnits(
 
   // Primary source: player_roster (Comlink-synced via /api/guild/roster-sync).
   // Falls back to roster_cache (swgoh.gg-synced) if player_roster is empty for this guild.
+  // Primary source: player_roster (Comlink-synced via /api/guild/roster-sync).
+  // Falls back to roster_cache (swgoh.gg-synced) if player_roster is empty for this guild.
+  // Ship detection is no longer done here — it is stamped onto slot.unitCategory at slot-load
+  // time via detectShipUnitIds(), so gearLevel in roster rows is not used for classification.
   const fromPlayerRoster = await loadRosterFromPlayerRoster(guildId, unitBaseIds);
   const rosterSource = fromPlayerRoster.length > 0 ? 'player_roster' : 'roster_cache';
-  let roster: StrategicPlannerRosterInput[];
-
-  if (fromPlayerRoster.length > 0) {
-    roster = fromPlayerRoster;
-  } else {
-    const fromCache = await loadRosterFromRosterCache(guildId, unitBaseIds);
-
-    // roster_cache rows are mapped with gearLevel = -1 because swgoh.gg does not expose
-    // gear_level. This causes isShip() to return false for ships, making them fail the relic
-    // check in qualifies() and appear as hard-missing.  Fix: detect ship unit IDs by querying
-    // player_roster globally, then stamp gearLevel = 0 on the affected roster_cache entries.
-    const shipUnitIds = await detectShipUnitIds(unitBaseIds);
-    const entriesFixed = fromCache.filter((e) => shipUnitIds.has(e.unitBaseId)).length;
-    console.log(
-      `[planner] roster_cache ship-fix guild=${guildId} ` +
-      `detected_ship_units=${shipUnitIds.size} of ${unitBaseIds.length} ` +
-      `entries_fixed=${entriesFixed} ` +
-      `ship_unit_ids=${[...shipUnitIds].join(',') || 'none'}`
-    );
-    roster = fromCache.map((entry) =>
-      shipUnitIds.has(entry.unitBaseId) ? { ...entry, gearLevel: 0 } : entry
-    );
-  }
+  const roster =
+    fromPlayerRoster.length > 0
+      ? fromPlayerRoster
+      : await loadRosterFromRosterCache(guildId, unitBaseIds);
 
   // ---- Part D diagnostics -----------------------------------------------
   const distinctUnitsRequired = unitBaseIds.length;

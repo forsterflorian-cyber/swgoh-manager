@@ -10,6 +10,9 @@ export interface StrategicPlannerGuild {
 
 export type PlanetCategory = 'LS' | 'DS' | 'MIX' | 'SPECIAL';
 
+/** Whether a platoon slot requires a ship or a character. Derived at slot-load time from game data. */
+export type UnitCategory = 'CHARACTER' | 'SHIP';
+
 export type StrategicPlanetCategoryCounts = Record<PlanetCategory, number>;
 
 export type StrategicMemberAssignmentLoad = StrategicPlanetCategoryCounts & {
@@ -33,6 +36,11 @@ export interface StrategicPlannerSlotInput {
   slotNumber: number;
   unitBaseId: string;
   unitName: string | null;
+  /**
+   * Whether this slot requires a ship or a character.
+   * Derived once at slot-load time; all eligibility checks use this, not owner.gearLevel.
+   */
+  unitCategory: UnitCategory;
   requiredRelicTier: number;
   requiredRarity: number;
   planetCategory: PlanetCategory | null;

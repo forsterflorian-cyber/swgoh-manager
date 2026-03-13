@@ -86,6 +86,7 @@ function buildZoneSlots(input: {
       unitName: string;
       requiredRelicTier: number;
       requiredRarity?: number;
+      unitCategory?: import('@/lib/types/platoon-readiness').UnitCategory;
     }>;
   }>;
 }): StrategicPlannerSlotInput[] {
@@ -104,6 +105,7 @@ function buildZoneSlots(input: {
       slotNumber: index + 1,
       unitBaseId: slot.unitBaseId,
       unitName: slot.unitName,
+      unitCategory: slot.unitCategory ?? 'CHARACTER',
       requiredRelicTier: slot.requiredRelicTier,
       requiredRarity: slot.requiredRarity ?? 7,
       planetCategory: input.planetCategory,
