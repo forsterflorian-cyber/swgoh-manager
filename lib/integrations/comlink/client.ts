@@ -205,6 +205,79 @@ export async function checkComlinkReady(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Segment probe  POST /data
+// ---------------------------------------------------------------------------
+
+type SegmentProbeResult = { segment: number; rawUnits: unknown[] };
+
+/**
+ * Probes requestSegment 1–8 and returns the first segment that contains a
+ * non-empty units array.  Logs a one-line summary per segment so the working
+ * segment (and any failures) are visible without flooding the logs.
+ *
+ * requestSegment: 0 (all data) is intentionally excluded — it causes a 502.
+ * No-segment requests return units: [] and are therefore also not tried here.
+ */
+async function probeComlinkDataSegments(version: string): Promise<SegmentProbeResult> {
+  const segmentResults: string[] = [];
+
+  for (let seg = 1; seg <= 8; seg++) {
+    let status: number | string;
+    let raw: Record<string, unknown> | null = null;
+
+    try {
+      const response = await fetchWithTimeout(
+        `${getBaseUrl()}/data`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: { version, requestSegment: seg }, enums: false }),
+          cache: 'no-store',
+        },
+        30000
+      );
+
+      status = response.status;
+
+      if (response.ok) {
+        raw = (await response.json()) as Record<string, unknown>;
+      } else {
+        const body = await response.text().catch(() => '<unreadable>');
+        segmentResults.push(`seg${seg}: HTTP ${status} — ${body.slice(0, 120)}`);
+        continue;
+      }
+    } catch (err) {
+      status = err instanceof Error ? err.message : 'timeout/network';
+      segmentResults.push(`seg${seg}: error — ${status}`);
+      continue;
+    }
+
+    const candidate = raw.units;
+    let summary: string;
+
+    if (Array.isArray(candidate)) {
+      summary = `units=array(len=${candidate.length})`;
+    } else if (candidate !== null && candidate !== undefined && typeof candidate === 'object') {
+      summary = `units=object{${Object.keys(candidate as object).slice(0, 6).join(',')}}`;
+    } else {
+      summary = `units=${candidate === undefined ? 'missing' : String(candidate)}`;
+    }
+
+    const topKeys = Object.keys(raw).join(', ');
+    console.log(`[comlink] probe seg${seg}: HTTP ${status} — ${summary} — keys: [${topKeys}]`);
+    segmentResults.push(`seg${seg}: HTTP ${status} — ${summary}`);
+
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      return { segment: seg, rawUnits: candidate };
+    }
+  }
+
+  throw new Error(
+    `[comlink] no segment (1–8) contained a non-empty units array.\n${segmentResults.join('\n')}`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Unit metadata endpoint  POST /data
 // ---------------------------------------------------------------------------
 
@@ -231,59 +304,12 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
   const gameDataVersion = metaParsed.data.latestGamedataVersion;
   console.log(`[comlink] /metadata latestGamedataVersion: ${gameDataVersion}`);
 
-  // Step 2: fetch game data with the resolved version.
-  // requestSegment: 1 contains the units collection. Segment 0 (all data) is too large
-  // and causes a 502 from Comlink. Without a segment param, units: [] is returned.
-  const requestPayload = { version: gameDataVersion, requestSegment: 1 };
-  console.log('[comlink] /data request body:', JSON.stringify({ payload: requestPayload, enums: false }));
-
-  const json = await postJson('/data', requestPayload, 60000);
-
-  const raw = json as Record<string, unknown>;
-
-  // Log every top-level key so the response envelope is visible in logs.
-  console.log('[comlink] /data response top-level keys:', Object.keys(raw));
-
-  // Per the OpenAPI spec the collection is keyed 'units' (plural) in the response.
-  // Some Comlink builds return 'units' as a nested object { unit: [...] } rather than
-  // a top-level array. 'unit' (singular) at the top level is kept as a final fallback.
-  const rawUnitsCandidate = raw.units;
-  console.log(
-    `[comlink] /data raw.units type: ${Array.isArray(rawUnitsCandidate) ? 'array' : typeof rawUnitsCandidate}`,
-    rawUnitsCandidate !== null && typeof rawUnitsCandidate === 'object' && !Array.isArray(rawUnitsCandidate)
-      ? `keys: [${Object.keys(rawUnitsCandidate as object).slice(0, 10).join(', ')}]`
-      : ''
-  );
-  const rawUnits: unknown[] = Array.isArray(rawUnitsCandidate)
-    ? (rawUnitsCandidate as unknown[])
-    : Array.isArray((rawUnitsCandidate as Record<string, unknown>)?.unit)
-    ? ((rawUnitsCandidate as Record<string, unknown>).unit as unknown[])
-    : Array.isArray(raw.unit)
-    ? (raw.unit as unknown[])
-    : [];
-
-  console.log(`[comlink] /data units raw count: ${rawUnits.length}`);
-  if (rawUnits.length > 0) {
-    console.log(
-      '[comlink] /data first unit sample:',
-      JSON.stringify(rawUnits[0]).slice(0, 300)
-    );
-  }
-
-  if (rawUnits.length === 0) {
-    const unitsType = Array.isArray(rawUnitsCandidate)
-      ? `array(len=0)`
-      : rawUnitsCandidate === null
-      ? 'null'
-      : rawUnitsCandidate === undefined
-      ? 'undefined'
-      : typeof rawUnitsCandidate === 'object'
-      ? `object{${Object.keys(rawUnitsCandidate as object).slice(0, 10).join(',')}}`
-      : `${typeof rawUnitsCandidate}`;
-    throw new Error(
-      `Comlink /data returned no units — raw.units=${unitsType} — response keys: [${Object.keys(raw).join(', ')}]`
-    );
-  }
+  // Step 2: probe segments 1–8 to find which one contains the units collection.
+  // requestSegment: 0 (all data) causes a 502. Without a segment param, units is
+  // returned as an empty array. Probe each segment and stop at the first hit.
+  const { segment: foundSegment, rawUnits } = await probeComlinkDataSegments(gameDataVersion);
+  console.log(`[comlink] units found in requestSegment: ${foundSegment} (${rawUnits.length} entries)`);
+  console.log('[comlink] /data first unit sample:', JSON.stringify(rawUnits[0]).slice(0, 300));
 
   // Key by unit.id — this is the definitionId-format key (e.g. "SCYTHE:SEVEN_STAR")
   // that matches u.definitionId in the per-player roster payload.
