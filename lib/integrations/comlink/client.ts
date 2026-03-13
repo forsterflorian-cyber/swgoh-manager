@@ -335,6 +335,25 @@ export async function fetchComlinkPlayerWithRoster(
 
     const rawRelicTier = u.relic?.currentTier ?? 1;
 
+    // combatType === 2 is the authoritative ship discriminator from Comlink.
+    // Ships have no gear tier — currentTier may be 0 or absent in the raw payload.
+    // Using combatType prevents the .catch(1) schema default from silently assigning
+    // gearLevel=1 to ships when currentTier is missing.
+    const isShip = u.combatType === 2;
+    const gearLevel = isShip ? 0 : u.currentTier;
+    const relicTier = isShip ? 0 : Math.max(0, rawRelicTier - 2);
+
+    // [roster-normalize] targeted debug for SCYTHE — remove after confirmed clean sync
+    if (unitBaseId === 'SCYTHE') {
+      console.log(
+        `[roster-normalize] SCYTHE player=${playerId}: ` +
+        `combatType=${u.combatType ?? null} currentTier=${u.currentTier} ` +
+        `relic.currentTier=${u.relic?.currentTier ?? null} ` +
+        `classified=${isShip ? 'SHIP' : 'CHARACTER'} ` +
+        `gearLevel=${gearLevel} relicTier=${relicTier}`
+      );
+    }
+
     // Log raw source fields for the first successfully-parsed unit per player so
     // the mapping can be verified in logs without reading the full payload.
     if (rosterUnits.length === 0) {
@@ -343,7 +362,7 @@ export async function fetchComlinkPlayerWithRoster(
         `id=${u.definitionId} ` +
         `currentRarity=${u.currentRarity} currentLevel=${u.currentLevel} ` +
         `currentTier=${u.currentTier} relic.currentTier=${u.relic?.currentTier ?? null} ` +
-        `combatType=${u.combatType ?? null}`
+        `combatType=${u.combatType ?? null} isShip=${isShip}`
       );
     }
 
@@ -351,8 +370,8 @@ export async function fetchComlinkPlayerWithRoster(
       unitBaseId,
       rarity: u.currentRarity,
       level: u.currentLevel,
-      gearLevel: u.currentTier,
-      relicTier: Math.max(0, rawRelicTier - 2),
+      gearLevel,
+      relicTier,
     });
   }
 

@@ -365,6 +365,18 @@ export async function syncGuildRosters(
 
       for (const unit of profile.rosterUnits) {
         const validation = validateNormalizedRosterUnit(unit);
+
+        // [roster-validate] targeted debug for SCYTHE — remove after confirmed clean sync
+        if (unit.unitBaseId === 'SCYTHE') {
+          console.log(
+            `[roster-validate] SCYTHE player=${profile.playerId}: ` +
+            `gearLevel=${unit.gearLevel} relicTier=${unit.relicTier} ` +
+            `rarity=${unit.rarity} level=${unit.level} ` +
+            `valid=${validation.ok}` +
+            (!validation.ok ? ` reason=${validation.reason}` : '')
+          );
+        }
+
         if (!validation.ok) {
           const bucket = validation.reason.split(':')[0]; // e.g. "rarity_out_of_range"
           rejectionBuckets[bucket] = (rejectionBuckets[bucket] ?? 0) + 1;
