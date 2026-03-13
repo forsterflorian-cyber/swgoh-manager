@@ -143,7 +143,9 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
 
       members.push({
         playerId: gm.playerId,
-        playerName: gm.playerName,
+        // Prefer the name from /player as it is the authoritative profile name.
+        // Fall back to the guild roster name if the player fetch returned nothing useful.
+        playerName: result.value.name || gm.playerName || 'Unknown Player',
         allyCode: result.value.allyCode,
         galacticPower: gm.galacticPower,
       });

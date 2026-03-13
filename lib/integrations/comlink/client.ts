@@ -25,17 +25,6 @@ const guildMemberSchema = z
   })
   .passthrough();
 
-const guildResponseSchema = z
-  .object({
-    guild: z
-      .object({
-        profile: z.object({ id: z.string(), name: z.string() }).passthrough(),
-        member: z.array(guildMemberSchema).catch([]),
-      })
-      .passthrough(),
-  })
-  .passthrough();
-
 const playerResponseSchema = z
   .object({
     playerId: z.string().trim().min(1),
@@ -118,31 +107,40 @@ export async function fetchComlinkGuild(guildId: string): Promise<ComlinkGuildMe
   }
 
   const json = await postJson('/guild', { guildId: guildId.trim() }, 20000);
-  const parsed = guildResponseSchema.safeParse(json);
 
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    const path = issue?.path?.join('.') ?? 'root';
-    throw new Error(`Comlink guild response was malformed at ${path}`);
-  }
+  // Comlink returns either { guild: { member: [...] } } or { member: [...] } depending
+  // on the version / configuration. Handle both shapes before touching individual members.
+  const raw = json as Record<string, unknown>;
+  const guildObj = raw.guild as Record<string, unknown> | undefined;
 
-  const members = parsed.data.guild.member;
+  const rawMembers: unknown[] = Array.isArray(guildObj?.member)
+    ? (guildObj.member as unknown[])
+    : Array.isArray(raw.member)
+    ? (raw.member as unknown[])
+    : [];
 
-  if (members.length === 0) {
+  console.log('[comlink] guild response keys:', Object.keys(raw));
+  console.log('[comlink] member count:', rawMembers.length);
+
+  if (rawMembers.length === 0) {
     throw new Error('Comlink guild returned no members');
   }
 
+  // Validate each member individually so one bad entry never kills the whole list.
   const valid: ComlinkGuildMember[] = [];
 
-  for (const m of members) {
-    if (!m.playerId) {
-      console.warn('[comlink] skipping guild member with missing playerId:', m.playerName);
+  for (const rawMember of rawMembers) {
+    const parsed = guildMemberSchema.safeParse(rawMember);
+
+    if (!parsed.success || !parsed.data.playerId) {
+      console.warn('[comlink] skipping guild member with invalid or missing playerId:', rawMember);
       continue;
     }
+
     valid.push({
-      playerId: m.playerId,
-      playerName: m.playerName,
-      galacticPower: m.galacticPower,
+      playerId: parsed.data.playerId,
+      playerName: parsed.data.playerName,
+      galacticPower: parsed.data.galacticPower,
     });
   }
 
