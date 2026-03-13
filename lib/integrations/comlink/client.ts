@@ -209,49 +209,59 @@ export async function checkComlinkReady(): Promise<boolean> {
  * This must be fetched once per sync batch (not once per player).
  */
 export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUnitMetadata>> {
-  // collection is a string (not an array) — Comlink /data rejects array values with 400.
-  // postJson wraps this as { payload: { collection: 'units' }, enums: false }.
-  const requestPayload = { collection: 'units' };
-  console.log('[comlink] /data request payload:', JSON.stringify(requestPayload));
+  // Payload schema confirmed from 400 error body (AJV output):
+  //   payload.version   REQUIRED
+  //   additionalProperties: false  → no other fields allowed
+  //
+  // version: '' is the Comlink convention for "return current game data".
+  // postJson wraps this as: { payload: { version: '' }, enums: false }
+  const requestPayload = { version: '' };
+  console.log('[comlink] /data request body:', JSON.stringify({ payload: requestPayload, enums: false }));
 
   const json = await postJson('/data', requestPayload, 30000);
 
   const raw = json as Record<string, unknown>;
 
-  // Log the top-level keys so we can confirm the response shape.
+  // Log every top-level key so the response envelope is visible in logs.
   console.log('[comlink] /data response top-level keys:', Object.keys(raw));
 
-  // Comlink wraps the collection result under a key that matches the collection name.
-  // For 'units' the key is 'unit' (singular). Log both candidates so we can diagnose
-  // if the key ever changes across Comlink versions.
-  const rawUnits: unknown[] = Array.isArray(raw.unit)
-    ? (raw.unit as unknown[])
-    : Array.isArray(raw.units)
+  // Per the OpenAPI spec the collection is keyed 'units' (plural) in the response.
+  // 'unit' (singular) is kept as a fallback in case older Comlink builds differ.
+  const rawUnits: unknown[] = Array.isArray(raw.units)
     ? (raw.units as unknown[])
+    : Array.isArray(raw.unit)
+    ? (raw.unit as unknown[])
     : [];
 
   console.log(`[comlink] /data units raw count: ${rawUnits.length}`);
   if (rawUnits.length > 0) {
     console.log(
       '[comlink] /data first unit sample:',
-      JSON.stringify(rawUnits[0]).slice(0, 200)
+      JSON.stringify(rawUnits[0]).slice(0, 300)
     );
   }
 
   if (rawUnits.length === 0) {
+    // The response keys log above will show what was actually returned.
     throw new Error(
       `Comlink /data returned no units — response keys: [${Object.keys(raw).join(', ')}]`
     );
   }
 
   // Key by unit.id — this is the definitionId-format key (e.g. "SCYTHE:SEVEN_STAR")
-  // that matches u.definitionId in the roster payload. Lookup uses u.definitionId directly.
+  // that matches u.definitionId in the per-player roster payload.
+  // unitMeta.baseId is the plain DB key (e.g. "SCYTHE").
   const unitsById = new Map<string, ComlinkUnitMetadata>();
   let skipped = 0;
+  let firstSkippedSample: string | null = null;
 
   for (const rawUnit of rawUnits) {
     const parsed = unitMetadataSchema.safeParse(rawUnit);
     if (!parsed.success || !parsed.data.id) {
+      if (firstSkippedSample === null) {
+        // Log the first failure so we can see actual UnitDef field names if schema is wrong.
+        firstSkippedSample = JSON.stringify(rawUnit).slice(0, 300);
+      }
       skipped++;
       continue;
     }
@@ -265,6 +275,9 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
   }
 
   console.log(`[comlink] unit metadata loaded: ${unitsById.size} entries, ${skipped} skipped`);
+  if (skipped > 0 && firstSkippedSample !== null) {
+    console.warn(`[comlink] /data first skipped UnitDef sample (check field names): ${firstSkippedSample}`);
+  }
   return unitsById;
 }
 
