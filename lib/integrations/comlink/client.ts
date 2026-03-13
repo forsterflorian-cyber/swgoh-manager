@@ -163,7 +163,11 @@ async function postJson(
   }
 
   if (!response.ok) {
-    throw new Error(`Comlink ${path} request failed with status ${response.status}`);
+    // Read the body so the caller can see what Comlink rejected and why.
+    const errorBody = await response.text().catch(() => '<unreadable>');
+    throw new Error(
+      `Comlink ${path} request failed with status ${response.status}: ${errorBody}`
+    );
   }
 
   return response.json();
@@ -196,7 +200,8 @@ export async function checkComlinkReady(): Promise<boolean> {
 
 /**
  * Fetches the 'units' collection from Comlink /data and returns a Map keyed
- * by baseId (e.g. "SCYTHE") for O(1) lookup during roster normalization.
+ * by unit.id (the definitionId format, e.g. "SCYTHE:SEVEN_STAR") for O(1)
+ * lookup against u.definitionId in the per-player roster payload.
  *
  * combatType in this metadata is authoritative for ship vs character:
  *   1 = character, 2 = ship
@@ -204,24 +209,49 @@ export async function checkComlinkReady(): Promise<boolean> {
  * This must be fetched once per sync batch (not once per player).
  */
 export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUnitMetadata>> {
-  const json = await postJson('/data', { collection: ['units'] }, 30000);
+  // collection is a string (not an array) — Comlink /data rejects array values with 400.
+  // postJson wraps this as { payload: { collection: 'units' }, enums: false }.
+  const requestPayload = { collection: 'units' };
+  console.log('[comlink] /data request payload:', JSON.stringify(requestPayload));
+
+  const json = await postJson('/data', requestPayload, 30000);
 
   const raw = json as Record<string, unknown>;
-  // Comlink wraps the collection under the collection name: { unit: [...] }
-  const rawUnits: unknown[] = Array.isArray(raw.unit) ? (raw.unit as unknown[]) : [];
+
+  // Log the top-level keys so we can confirm the response shape.
+  console.log('[comlink] /data response top-level keys:', Object.keys(raw));
+
+  // Comlink wraps the collection result under a key that matches the collection name.
+  // For 'units' the key is 'unit' (singular). Log both candidates so we can diagnose
+  // if the key ever changes across Comlink versions.
+  const rawUnits: unknown[] = Array.isArray(raw.unit)
+    ? (raw.unit as unknown[])
+    : Array.isArray(raw.units)
+    ? (raw.units as unknown[])
+    : [];
 
   console.log(`[comlink] /data units raw count: ${rawUnits.length}`);
-
-  if (rawUnits.length === 0) {
-    throw new Error('Comlink /data returned no units — check collection name or service version');
+  if (rawUnits.length > 0) {
+    console.log(
+      '[comlink] /data first unit sample:',
+      JSON.stringify(rawUnits[0]).slice(0, 200)
+    );
   }
 
+  if (rawUnits.length === 0) {
+    throw new Error(
+      `Comlink /data returned no units — response keys: [${Object.keys(raw).join(', ')}]`
+    );
+  }
+
+  // Key by unit.id — this is the definitionId-format key (e.g. "SCYTHE:SEVEN_STAR")
+  // that matches u.definitionId in the roster payload. Lookup uses u.definitionId directly.
   const unitsById = new Map<string, ComlinkUnitMetadata>();
   let skipped = 0;
 
   for (const rawUnit of rawUnits) {
     const parsed = unitMetadataSchema.safeParse(rawUnit);
-    if (!parsed.success || !parsed.data.baseId) {
+    if (!parsed.success || !parsed.data.id) {
       skipped++;
       continue;
     }
@@ -231,7 +261,7 @@ export async function fetchComlinkUnitMetadata(): Promise<Map<string, ComlinkUni
       combatType: parsed.data.combatType,
       nameKey: parsed.data.nameKey,
     };
-    unitsById.set(meta.baseId, meta);
+    unitsById.set(meta.id, meta);
   }
 
   console.log(`[comlink] unit metadata loaded: ${unitsById.size} entries, ${skipped} skipped`);
@@ -393,25 +423,23 @@ export async function fetchComlinkPlayerWithRoster(
     }
 
     const u = unitParsed.data;
-    const parts = u.definitionId.split(':');
-    const unitBaseId = parts[0];
-    if (!unitBaseId) {
-      emptyBaseIdCount++;
-      continue;
-    }
 
-    // Resolve unit metadata — classification is authoritative from /data, never
-    // from the roster payload (combatType in the player payload can be absent).
-    const unitMeta = unitsById.get(unitBaseId);
+    // Look up metadata by definitionId — the map is keyed by unit.id from /data,
+    // which matches the roster payload's definitionId (e.g. "SCYTHE:SEVEN_STAR").
+    const unitMeta = unitsById.get(u.definitionId);
     if (!unitMeta) {
-      // Unit is not in the /data collection — skip it rather than guess its type.
-      // This can happen for newly-added units not yet in the cached metadata.
+      // Unit is not in the /data collection — skip rather than guess its type.
+      // Can happen for newly-added units not yet in the metadata, or if the
+      // /data collection key format differs from the roster definitionId format.
       console.warn(
-        `[comlink] ${playerId} unknown unit skipped: definitionId=${u.definitionId} baseId=${unitBaseId}`
+        `[comlink] ${playerId} unknown unit skipped: definitionId=${u.definitionId}`
       );
       emptyBaseIdCount++;
       continue;
     }
+
+    // unitMeta.baseId is the plain base ID (e.g. "SCYTHE") used for DB storage.
+    const unitBaseId = unitMeta.baseId;
 
     const rawRelicTier = u.relic?.currentTier ?? 0;
 
@@ -425,6 +453,7 @@ export async function fetchComlinkPlayerWithRoster(
     if (unitBaseId === 'SCYTHE') {
       console.log(
         `[roster-normalize] SCYTHE player=${playerId}: ` +
+        `definitionId=${u.definitionId} ` +
         `payloadCombatType=${u.combatType ?? null} metaCombatType=${unitMeta.combatType} ` +
         `currentTier=${u.currentTier} relic.currentTier=${u.relic?.currentTier ?? null} ` +
         `classified=${isShip ? 'SHIP' : 'CHARACTER'} ` +
@@ -437,7 +466,7 @@ export async function fetchComlinkPlayerWithRoster(
     if (rosterUnits.length === 0) {
       console.log(
         `[comlink] ${playerId} raw sample: ` +
-        `id=${u.definitionId} ` +
+        `definitionId=${u.definitionId} baseId=${unitBaseId} ` +
         `currentRarity=${u.currentRarity} currentLevel=${u.currentLevel} ` +
         `currentTier=${u.currentTier} relic.currentTier=${u.relic?.currentTier ?? null} ` +
         `payloadCombatType=${u.combatType ?? null} metaCombatType=${unitMeta.combatType} isShip=${isShip}`
