@@ -110,6 +110,15 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
   const client = await db.connect();
 
   try {
+    // DB fingerprint — proves which database and dataset the runtime is actually using
+    const fp = await client.sql<{ db_name: string; member_count: number }>`
+      SELECT current_database() AS db_name,
+             (SELECT COUNT(*)::int FROM guild_members) AS member_count
+    `;
+    console.log(
+      `[roster-sync] database fingerprint: db=${fp.rows[0]?.db_name} total_guild_members=${fp.rows[0]?.member_count}`
+    );
+
     // 1. Load guild members that have a stable player_id
     const membersResult = await client.sql<GuildMemberRow>`
       SELECT player_id, player_name
@@ -120,12 +129,9 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
     `;
 
     const members = membersResult.rows;
-    // PART A — checkpoint 1+2
-    console.log(
-      `[roster-sync] Members considered for roster sync: ${members.length} (guild ${guildId})`
-    );
+    console.log(`[roster-sync] eligible members: ${members.length}`);
     if (members.length > 0) {
-      console.log(`[roster-sync] First eligible member sample:`, members[0]);
+      console.log(`[roster-sync] first eligible member:`, members[0]);
     }
 
     if (members.length === 0) {
@@ -222,10 +228,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
         continue;
       }
 
-      // PART A — checkpoint 9: upsert attempt count per member
-      console.log(
-        `[roster-sync] Upserting ${profile.rosterUnits.length} units for player ${profile.playerId} (${profile.name})`
-      );
+      console.log(`[roster-sync] upserting units for ${profile.playerId}: ${profile.rosterUnits.length}`);
 
       await client.sql`BEGIN`;
       let memberUpserts = 0;
@@ -260,9 +263,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
         await client.sql`COMMIT`;
         // Only count after successful COMMIT
         totalUpserts += memberUpserts;
-        console.log(
-          `[roster-sync] Committed ${memberUpserts} rows for player ${profile.playerId}`
-        );
+        console.log(`[roster-sync] committed rows for ${profile.playerId}: ${memberUpserts}`);
       } catch (error) {
         await client.sql`ROLLBACK`;
         totalUpsertErrors++;
@@ -283,6 +284,7 @@ export async function syncGuildRosters(guildId: string): Promise<GuildRosterSync
       );
     }
 
+    console.log(`[roster-sync] final total upserts: ${totalUpserts}`);
     console.log(
       `[roster-sync] Finished for guild ${guildId}: ` +
         `membersConsidered=${members.length} ` +

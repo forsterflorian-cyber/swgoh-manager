@@ -15,8 +15,10 @@ export const runtime = 'nodejs';
  * Requires guild members to already be synced (guild_members with player_id set).
  */
 export async function POST() {
+  console.log('[roster-sync] route hit');
   const user = await getAuthenticatedUser();
   if (!user) {
+    console.warn('[roster-sync] route hit but user not authenticated');
     return jsonError('Not authenticated', 401);
   }
 

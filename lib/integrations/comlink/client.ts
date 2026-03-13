@@ -288,12 +288,9 @@ export async function fetchComlinkPlayerWithRoster(
     });
   }
 
-  // PART A — checkpoint 7+8: normalized row count and sample
-  console.log(
-    `[comlink] /player ${playerId}: ${rosterUnits.length} normalized units, ${skippedUnits} skipped`
-  );
+  console.log(`[comlink] normalized units for ${playerId}: ${rosterUnits.length} (skipped ${skippedUnits})`);
   if (rosterUnits.length > 0) {
-    console.log(`[comlink] /player sample normalized unit for ${playerId}:`, rosterUnits[0]);
+    console.log(`[comlink] first normalized unit for ${playerId}:`, rosterUnits[0]);
   }
 
   return {

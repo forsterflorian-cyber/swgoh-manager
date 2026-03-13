@@ -36,6 +36,8 @@ export function GuildSettingsForm({
   const [saving, setSaving] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('idle');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [rosterSyncState, setRosterSyncState] = useState<SyncState>('idle');
+  const [rosterSyncMessage, setRosterSyncMessage] = useState<string | null>(null);
   const trimmedSavedSlug = savedSlug.trim();
   const publicUrl = trimmedSavedSlug
     ? buildPublicGuildTargetsUrl(trimmedSavedSlug, appBaseUrl)
@@ -131,6 +133,39 @@ export function GuildSettingsForm({
     }
   }
 
+  async function handleRosterSync() {
+    setRosterSyncState('loading');
+    setRosterSyncMessage(null);
+
+    try {
+      const response = await fetch('/api/guild/roster-sync', { method: 'POST' });
+      const payload = (await response.json()) as ApiEnvelope<{
+        success: boolean;
+        membersConsidered: number;
+        membersFetched: number;
+        membersSkipped: number;
+        totalRosterRows: number;
+        totalUpserts: number;
+        totalUpsertErrors: number;
+      }>;
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? 'Roster sync failed.' : payload.error);
+      }
+
+      const { membersFetched, totalUpserts, membersSkipped } = payload.data;
+      setRosterSyncState('success');
+      setRosterSyncMessage(
+        `Roster sync complete — ${membersFetched} players, ${totalUpserts} rows upserted` +
+          (membersSkipped > 0 ? `, ${membersSkipped} skipped.` : '.')
+      );
+      window.location.reload();
+    } catch (error: unknown) {
+      setRosterSyncState('error');
+      setRosterSyncMessage(error instanceof Error ? error.message : 'Roster sync failed.');
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div>
@@ -212,6 +247,34 @@ export function GuildSettingsForm({
             }`}
           >
             {syncMessage}
+          </p>
+        )}
+      </div>
+
+      <hr className="border-gray-800" />
+
+      <div className="space-y-3">
+        <p className="text-sm font-medium text-gray-200">Player Rosters</p>
+        <p className="text-xs text-gray-500">
+          Fetch each member&apos;s full unit roster from Comlink and store it for strategic
+          planning. Run after guild member sync.
+        </p>
+        <button
+          type="button"
+          onClick={handleRosterSync}
+          disabled={rosterSyncState === 'loading'}
+          className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-700 disabled:cursor-not-allowed disabled:border-gray-800 disabled:bg-gray-900 disabled:text-gray-600"
+        >
+          {rosterSyncState === 'loading' ? 'Syncing rosters…' : 'Sync player rosters'}
+        </button>
+
+        {rosterSyncMessage && (
+          <p
+            className={`text-sm ${
+              rosterSyncState === 'success' ? 'text-emerald-300' : 'text-red-300'
+            }`}
+          >
+            {rosterSyncMessage}
           </p>
         )}
       </div>
