@@ -14,6 +14,8 @@ type FormNotice = {
   message: string;
 };
 
+type SyncState = 'idle' | 'loading' | 'success' | 'error';
+
 type GuildSettingsFormProps = {
   appBaseUrl: string;
   initialGuildId: string;
@@ -32,6 +34,8 @@ export function GuildSettingsForm({
   const [savedSlug, setSavedSlug] = useState(initialSlug);
   const [notice, setNotice] = useState<FormNotice | null>(null);
   const [saving, setSaving] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState>('idle');
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const trimmedSavedSlug = savedSlug.trim();
   const publicUrl = trimmedSavedSlug
     ? buildPublicGuildTargetsUrl(trimmedSavedSlug, appBaseUrl)
@@ -100,6 +104,32 @@ export function GuildSettingsForm({
     }
   }
 
+  async function handleSync() {
+    setSyncState('loading');
+    setSyncMessage(null);
+
+    try {
+      const response = await fetch('/api/guild/sync', { method: 'POST' });
+      const payload = (await response.json()) as ApiEnvelope<{
+        success: boolean;
+        inserted: number;
+        updated: number;
+        skipped: number;
+      }>;
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.ok ? 'Guild sync failed.' : payload.error);
+      }
+
+      const { inserted, updated } = payload.data;
+      setSyncState('success');
+      setSyncMessage(`Sync complete — ${inserted} added, ${updated} updated.`);
+    } catch (error: unknown) {
+      setSyncState('error');
+      setSyncMessage(error instanceof Error ? error.message : 'Guild sync failed.');
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div>
@@ -157,6 +187,33 @@ export function GuildSettingsForm({
           {notice.message}
         </p>
       )}
+
+      <hr className="border-gray-800" />
+
+      <div className="space-y-3">
+        <p className="text-sm font-medium text-gray-200">Guild Members</p>
+        <p className="text-xs text-gray-500">
+          Pull the current member list from Comlink and sync it into the local database.
+        </p>
+        <button
+          type="button"
+          onClick={handleSync}
+          disabled={syncState === 'loading'}
+          className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-700 disabled:cursor-not-allowed disabled:border-gray-800 disabled:bg-gray-900 disabled:text-gray-600"
+        >
+          {syncState === 'loading' ? 'Syncing…' : 'Sync guild members'}
+        </button>
+
+        {syncMessage && (
+          <p
+            className={`text-sm ${
+              syncState === 'success' ? 'text-emerald-300' : 'text-red-300'
+            }`}
+          >
+            {syncMessage}
+          </p>
+        )}
+      </div>
     </form>
   );
 }

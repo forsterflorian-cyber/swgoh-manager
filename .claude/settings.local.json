@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager\")",
+      "Bash(ls \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app/\")",
+      "Bash(ls \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app/api/\")",
+      "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app\" -name *.ts -o -name *.tsx)",
+      "WebFetch(domain:deploy-swgoh-comlink-p3su.onrender.com)"
+    ]
+  }
+}
