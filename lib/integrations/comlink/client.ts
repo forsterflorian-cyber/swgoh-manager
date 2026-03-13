@@ -104,6 +104,10 @@ export function validateNormalizedRosterUnit(unit: ComlinkRosterUnit): UnitValid
   if (!Number.isInteger(unit.level) || unit.level < 1 || unit.level > 85) {
     return { ok: false, reason: `level_out_of_range:${unit.level}` };
   }
+  // Relics only exist on G13 characters
+  if (unit.gearLevel < 13 && unit.relicTier > 0) {
+    return { ok: false, reason: `relic_without_g13:${unit.gearLevel}:${unit.relicTier}` };
+  }
   // Ships (gearLevel === 0) have no relic track — relicTier must be 0
   if (unit.gearLevel === 0 && unit.relicTier > 0) {
     return { ok: false, reason: `ship_with_relic_tier:${unit.relicTier}` };
