@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager\" -type f -name \"*.tsx\" -o -name \"*.ts\")",
+      "Bash(ls -la \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/app\")",
+      "Bash(ls -la \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/components/tb\")",
+      "Bash(find \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager\" -type f \\\\\\( -name \"*.ts\" -o -name \"*.tsx\" \\\\\\) ! -path \"*/node_modules/*\")",
+      "Bash(xargs grep:*)",
+      "Bash(wc -l \"e:/Verwaltung/07_IT & Identität/IT Projekte/swgoh-manager/lib/services/platoon-readiness.ts\")"
+    ]
+  }
+}

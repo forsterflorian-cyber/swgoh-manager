@@ -172,6 +172,7 @@ export interface StrategicRequirementSummary {
   minRelic: number;
   minRarity: number;
   planetCategory: PlanetCategory | null;
+  isBonus: boolean;
   satisfyingMembers: number;
   availableMembers: number;
   ownedMembers: number;

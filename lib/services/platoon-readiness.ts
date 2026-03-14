@@ -530,6 +530,7 @@ function allocateRequirements(
       minRelic: requirement.requiredRelicTier,
       minRarity: requirement.requiredRarity,
       planetCategory: requirement.planetCategory,
+      isBonus: requirement.planetCategory === 'SPECIAL',
       satisfyingMembers: satisfyingOwners.length,
       availableMembers: availableOwners.length,
       ownedMembers: sortedOwners.length,

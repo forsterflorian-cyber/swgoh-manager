@@ -1126,6 +1126,9 @@ function PrioritiesView({
                 unit={unit}
                 rank={index + 1}
                 bucket={getUnitEarliestBucket(unit.unitBaseId, slotSummaries)}
+                slotSummaries={slotSummaries}
+                selectedPhase={selectedPhase}
+                selectedZone={selectedZone}
                 candidateLimit={3}
                 canManageTargets={canManageTargets}
                 fixtureMode={fixtureMode}
@@ -1988,10 +1991,34 @@ function TargetOpportunityCard({
   );
 }
 
+function computeUnitDemand(
+  unitBaseId: string,
+  slotSummaries: StrategicRequirementSummary[],
+  scope: { phase: number | 'all'; zoneKey: string | 'all' }
+) {
+  const slots = slotSummaries.filter((s) => s.unitBaseId === unitBaseId);
+
+  const zoneRequired =
+    scope.zoneKey !== 'all' ? slots.filter((s) => s.zoneKey === scope.zoneKey).length : 0;
+
+  const phaseRequired =
+    scope.phase !== 'all' ? slots.filter((s) => s.phase === scope.phase).length : 0;
+
+  const bonusRequired =
+    scope.phase !== 'all'
+      ? slots.filter((s) => s.phase === scope.phase && s.isBonus).length
+      : 0;
+
+  return { zoneRequired, phaseRequired, bonusRequired };
+}
+
 function MissingUnitCard({
   unit,
   rank,
   bucket,
+  slotSummaries,
+  selectedPhase,
+  selectedZone,
   candidateLimit = 4,
   canManageTargets,
   fixtureMode,
@@ -2001,6 +2028,9 @@ function MissingUnitCard({
   unit: StrategicUnitImpact;
   rank: number;
   bucket?: ProgressionBucket;
+  slotSummaries: StrategicRequirementSummary[];
+  selectedPhase: number | 'all';
+  selectedZone: string | 'all';
   candidateLimit?: number;
   canManageTargets: boolean;
   fixtureMode: boolean;
@@ -2014,6 +2044,10 @@ function MissingUnitCard({
   ) => Promise<void>;
 }) {
   const shortagePercent = Math.round(unit.shortageRatio * 100);
+  const demand = computeUnitDemand(unit.unitBaseId, slotSummaries, {
+    phase: selectedPhase,
+    zoneKey: selectedZone,
+  });
 
   return (
     <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-5">
@@ -2044,6 +2078,13 @@ function MissingUnitCard({
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-4">
+        <StatChip label="Zone req" value={`${demand.zoneRequired}`} />
+        <StatChip label="Phase req" value={`${demand.phaseRequired}`} />
+        <StatChip label="Bonus req" value={`${demand.bonusRequired}`} />
+        <StatChip label="Guild" value={`${unit.uniqueOwners}`} />
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-4">
         <StatChip label="Blocked slots" value={`${unit.blockedSlots}`} />
         <StatChip label="Primary zones" value={`${unit.limitingZones}`} />
         <StatChip label="Upgradeable" value={`${unit.estimatedUnlockSlots}`} />
