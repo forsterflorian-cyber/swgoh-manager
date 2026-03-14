@@ -188,20 +188,12 @@ function inferPlanetCategory(input: {
   zoneName: string;
   isBonus?: boolean | null;
 }): PlanetCategory | null {
-  // Explicit DB flag takes precedence over string heuristics.
+  // is_bonus is the authoritative source; no string fallback for SPECIAL.
   if (input.isBonus === true) {
     return 'SPECIAL';
   }
 
   const normalized = `${input.tbKey} ${input.zoneKey} ${input.zoneName}`.toLowerCase();
-
-  if (
-    normalized.includes('special') ||
-    normalized.includes('event') ||
-    normalized.includes('bonus')
-  ) {
-    return 'SPECIAL';
-  }
 
   if (
     normalized.includes('lightside') ||
@@ -223,15 +215,7 @@ function inferPlanetCategory(input: {
     return 'DS';
   }
 
-  if (
-    normalized.includes('mixed') ||
-    normalized.includes('mix') ||
-    normalized.includes('territory_tb3_hero')
-  ) {
-    return 'MIX';
-  }
-
-  return null;
+  return 'MIX';
 }
 
 function getPrimaryPlanetCategory(
