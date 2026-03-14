@@ -14,7 +14,9 @@
       "Bash(find \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager\" -path \"*/node_modules\" -prune -o -type f \\\\\\( -name \"*priority*\" -o -name \"*Priority*\" \\\\\\) -print)",
       "Bash(find \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager/app\" -path */node_modules -prune -o -name *.tsx -type f -print)",
       "Bash(grep -r \"StrategicUnitImpact\\\\|topMissingUnits\" \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager/app\" --include=*.tsx)",
-      "Bash(head -50 \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager/lib/services/platoon-readiness-fixture.ts\")"
+      "Bash(head -50 \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager/lib/services/platoon-readiness-fixture.ts\")",
+      "Bash(find \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager\" -type f -name \"*.ts\")",
+      "Bash(wc -l \"e:\\\\Verwaltung\\\\07_IT & Identität\\\\IT Projekte\\\\swgoh-manager\\\\lib\\\\services\\\\platoon-readiness.ts\")"
     ]
   }
 }
