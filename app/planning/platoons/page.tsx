@@ -844,6 +844,29 @@ function getUnitEarliestBucket(
   return minPhase === Number.MAX_SAFE_INTEGER ? 'later' : getZoneBucket(minPhase);
 }
 
+/**
+ * Returns the minimum zone progression score for this unit across all its blocked slots.
+ * Score = phase * 10000 + zone index within phase (regular zones indexed before bonus zones).
+ * Lower score means earlier in the TB flow; used as secondary sort key after the bucket.
+ *
+ * zoneProgressionOrder is built from groupedZones inside PrioritiesView so it uses
+ * the server-side zone ordering without any additional API calls.
+ */
+function getUnitProgressionScore(
+  unitBaseId: string,
+  slotSummaries: StrategicRequirementSummary[],
+  zoneProgressionOrder: Map<string, number>
+): number {
+  let min = Number.MAX_SAFE_INTEGER;
+  for (const s of slotSummaries) {
+    if (s.unitBaseId === unitBaseId && s.blocked) {
+      const zoneScore = zoneProgressionOrder.get(s.zoneKey) ?? Number.MAX_SAFE_INTEGER;
+      if (zoneScore < min) min = zoneScore;
+    }
+  }
+  return min;
+}
+
 function PrioritiesView({
   summary,
   topMissingUnits,
@@ -930,25 +953,46 @@ function PrioritiesView({
     ? new Set(blockedInScope.map((s) => s.unitBaseId))
     : null;
 
-  // Re-sort by progression bucket first; stable sort preserves original impact-score
-  // order within the same bucket (rule 3: bucket gates, severity decides within bucket).
+  // Build a stable zone progression order from groupedZones (already phase-sorted by
+  // the server). Within each phase, regular zones (no '-bonus-' in key) index before
+  // bonus zones; position within each group approximates the DB sort_order without a
+  // new API call.
+  const zoneProgressionOrder = new Map<string, number>();
+  for (const [phase, zones] of groupedZones) {
+    const regular = zones.filter((z) => !z.zoneKey.includes('-bonus-'));
+    const bonus = zones.filter((z) => z.zoneKey.includes('-bonus-'));
+    [...regular, ...bonus].forEach((z, idx) => {
+      zoneProgressionOrder.set(z.zoneKey, phase * 10000 + idx);
+    });
+  }
+
+  // Sort: bucket first (Now → Next → Later), then earliest TB-flow zone for that unit
+  // (phase, regular-before-bonus, sort_order), then stable original impact-score order.
   const visibleUnits = (
     scopedBlockedUnitIds
       ? topMissingUnits.filter((u) => scopedBlockedUnitIds.has(u.unitBaseId))
       : topMissingUnits
-  ).toSorted(
-    (a, b) =>
+  ).toSorted((a, b) => {
+    const bucketDiff =
       BUCKET_ORDER[getUnitEarliestBucket(a.unitBaseId, slotSummaries)] -
-      BUCKET_ORDER[getUnitEarliestBucket(b.unitBaseId, slotSummaries)]
-  );
+      BUCKET_ORDER[getUnitEarliestBucket(b.unitBaseId, slotSummaries)];
+    if (bucketDiff !== 0) return bucketDiff;
+    return (
+      getUnitProgressionScore(a.unitBaseId, slotSummaries, zoneProgressionOrder) -
+      getUnitProgressionScore(b.unitBaseId, slotSummaries, zoneProgressionOrder)
+    );
+  });
 
-  // Filter zone pressure section.
+  // Filter zone pressure section; regular zones before bonus within each phase group.
   const visibleGroupedZones: Array<[number, StrategicZoneReadiness[]]> = groupedZones
     .filter(([phase]) => selectedPhase === 'all' || phase === selectedPhase)
-    .map(([phase, zones]) => [
-      phase,
-      selectedZone === 'all' ? zones : zones.filter((z) => z.zoneKey === selectedZone),
-    ])
+    .map(([phase, zones]) => {
+      const filtered =
+        selectedZone === 'all' ? zones : zones.filter((z) => z.zoneKey === selectedZone);
+      const regular = filtered.filter((z) => !z.zoneKey.includes('-bonus-'));
+      const bonus = filtered.filter((z) => z.zoneKey.includes('-bonus-'));
+      return [phase, [...regular, ...bonus]] as [number, StrategicZoneReadiness[]];
+    })
     .filter(([, zones]) => zones.length > 0);
 
   if (!summary && topMissingUnits.length === 0 && groupedZones.length === 0) {
