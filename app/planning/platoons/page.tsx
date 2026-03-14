@@ -804,6 +804,46 @@ function OverviewView({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Progression buckets
+// ---------------------------------------------------------------------------
+
+type ProgressionBucket = 'actionable_now' | 'next_up' | 'later';
+
+const BUCKET_ORDER: Record<ProgressionBucket, number> = {
+  actionable_now: 0,
+  next_up: 1,
+  later: 2,
+};
+
+/**
+ * Heuristic bucket for a TB phase.
+ * ROTE has 6 phases: P1-P2 are actively worked, P3-P4 come next, P5-P6 are future.
+ */
+function getZoneBucket(phase: number): ProgressionBucket {
+  if (phase <= 2) return 'actionable_now';
+  if (phase <= 4) return 'next_up';
+  return 'later';
+}
+
+/**
+ * Returns the earliest bucket in which this unit has at least one blocked slot.
+ * Always scans the full slotSummaries (not the filtered scope) so the badge
+ * reflects the unit's true global urgency regardless of any active filter.
+ */
+function getUnitEarliestBucket(
+  unitBaseId: string,
+  slotSummaries: StrategicRequirementSummary[]
+): ProgressionBucket {
+  let minPhase = Number.MAX_SAFE_INTEGER;
+  for (const s of slotSummaries) {
+    if (s.unitBaseId === unitBaseId && s.blocked && s.phase < minPhase) {
+      minPhase = s.phase;
+    }
+  }
+  return minPhase === Number.MAX_SAFE_INTEGER ? 'later' : getZoneBucket(minPhase);
+}
+
 function PrioritiesView({
   summary,
   topMissingUnits,
@@ -890,9 +930,17 @@ function PrioritiesView({
     ? new Set(blockedInScope.map((s) => s.unitBaseId))
     : null;
 
-  const visibleUnits = scopedBlockedUnitIds
-    ? topMissingUnits.filter((u) => scopedBlockedUnitIds.has(u.unitBaseId))
-    : topMissingUnits;
+  // Re-sort by progression bucket first; stable sort preserves original impact-score
+  // order within the same bucket (rule 3: bucket gates, severity decides within bucket).
+  const visibleUnits = (
+    scopedBlockedUnitIds
+      ? topMissingUnits.filter((u) => scopedBlockedUnitIds.has(u.unitBaseId))
+      : topMissingUnits
+  ).toSorted(
+    (a, b) =>
+      BUCKET_ORDER[getUnitEarliestBucket(a.unitBaseId, slotSummaries)] -
+      BUCKET_ORDER[getUnitEarliestBucket(b.unitBaseId, slotSummaries)]
+  );
 
   // Filter zone pressure section.
   const visibleGroupedZones: Array<[number, StrategicZoneReadiness[]]> = groupedZones
@@ -1022,6 +1070,7 @@ function PrioritiesView({
                 key={unit.unitBaseId}
                 unit={unit}
                 rank={index + 1}
+                bucket={getUnitEarliestBucket(unit.unitBaseId, slotSummaries)}
                 candidateLimit={3}
                 canManageTargets={canManageTargets}
                 fixtureMode={fixtureMode}
@@ -1059,7 +1108,10 @@ function PrioritiesView({
             visibleGroupedZones.map(([phase, zones]) => (
               <div key={phase}>
                 <div className="mb-4 flex items-center justify-between">
-                  <h4 className="text-xl font-semibold text-white">Phase {phase}</h4>
+                  <div className="flex items-center gap-3">
+                    <h4 className="text-xl font-semibold text-white">Phase {phase}</h4>
+                    <ProgressionBucketBadge bucket={getZoneBucket(phase)} />
+                  </div>
                   <span className="text-sm text-gray-500">
                     {zones.length} zone{zones.length === 1 ? '' : 's'}
                   </span>
@@ -1082,6 +1134,30 @@ function PrioritiesView({
         </div>
       </section>
     </section>
+  );
+}
+
+const BUCKET_BADGE: Record<ProgressionBucket, { label: string; className: string }> = {
+  actionable_now: {
+    label: 'Now',
+    className: 'border-emerald-800 bg-emerald-950/60 text-emerald-200',
+  },
+  next_up: {
+    label: 'Next',
+    className: 'border-amber-800 bg-amber-950/60 text-amber-200',
+  },
+  later: {
+    label: 'Later',
+    className: 'border-gray-700 bg-gray-900 text-gray-400',
+  },
+};
+
+function ProgressionBucketBadge({ bucket }: { bucket: ProgressionBucket }) {
+  const { label, className } = BUCKET_BADGE[bucket];
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}>
+      {label}
+    </span>
   );
 }
 
@@ -1860,6 +1936,7 @@ function TargetOpportunityCard({
 function MissingUnitCard({
   unit,
   rank,
+  bucket,
   candidateLimit = 4,
   canManageTargets,
   fixtureMode,
@@ -1868,6 +1945,7 @@ function MissingUnitCard({
 }: {
   unit: StrategicUnitImpact;
   rank: number;
+  bucket?: ProgressionBucket;
   candidateLimit?: number;
   canManageTargets: boolean;
   fixtureMode: boolean;
@@ -1900,6 +1978,7 @@ function MissingUnitCard({
               <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
                 {formatConstraintLabel(unit.primaryConstraint)}
               </span>
+              {bucket && <ProgressionBucketBadge bucket={bucket} />}
             </div>
             <p className="mt-2 text-sm text-gray-400">{unit.reasonSummary}</p>
           </div>
