@@ -7,7 +7,8 @@
     "build": "node ./node_modules/next/dist/bin/next build",
     "start": "node ./node_modules/next/dist/bin/next start",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
-    "import:tb": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/import-tb-reference-data.ts"
+    "import:tb": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/import-tb-reference-data.ts",
+    "test": "node --experimental-strip-types --test 'lib/services/__tests__/*.test.ts'"
   },
   "dependencies": {
     "@auth/core": "^0.34.3",

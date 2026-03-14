@@ -12,6 +12,16 @@ export interface PlatoonSlotRequirement {
   zoneKey: string;
 }
 
+/**
+ * Why an unassigned slot could not be (or has not been) filled.
+ *
+ * no_eligible_member   – nobody in the guild qualifies (relic / rarity deficit for all).
+ * eligible_at_capacity – qualified members exist but every one has already reached the
+ *                        10-assignment zone cap.
+ * null                 – slot is either assigned or has open capacity (not yet auto-run).
+ */
+export type SlotOpenReason = 'no_eligible_member' | 'eligible_at_capacity' | null;
+
 export interface GapAnalysisUnit {
   requirement: PlatoonSlotRequirement;
   totalNeeded: number;
@@ -19,6 +29,8 @@ export interface GapAnalysisUnit {
   assignedCount: number;
   gapCount: number;
   status: 'complete' | 'partial' | 'critical' | 'empty';
+  /** Set for unassigned slots only; null when slot is filled or reason is unclear. */
+  openReason: SlotOpenReason;
   qualifiedPlayers: PlayerCandidate[];
   nearMissPlayers: PlayerCandidate[];
   assignedPlayers: AssignedPlayer[];
@@ -43,7 +55,10 @@ export interface AssignedPlayer {
   playerName: string;
   memberId: string;
   relicTier: number;
+  /** 'assigned' (legacy status value preserved as-is) */
   status: string;
+  /** LOCKED = manual, officer-set; FLEX = auto-proposed, rebalanceable. */
+  lockType: 'LOCKED' | 'FLEX';
   hasConflict: boolean;
 }
 
@@ -54,6 +69,7 @@ export interface ZoneGapSummary {
   phase: number;
   zoneKey: string;
   zoneName: string;
+  isBonus: boolean;
   totalSlots: number;
   filledSlots: number;
   readySlots: number;

@@ -234,19 +234,56 @@ export default function PhaseDashboardPage() {
               </div>
             </section>
 
-            <div className="space-y-5">
-              {zones.map((zone) => (
-                <ZoneCard
-                  key={zone.zoneKey}
-                  zone={zone}
-                  instanceId={instanceId}
-                  onAssignmentChange={fetchAnalysis}
-                />
-              ))}
-            </div>
+            <ZoneSection
+              zones={zones.filter((z) => !z.isBonus)}
+              instanceId={instanceId}
+              onAssignmentChange={fetchAnalysis}
+            />
+            {zones.some((z) => z.isBonus) && (
+              <ZoneSection
+                title="Bonus zones"
+                zones={zones.filter((z) => z.isBonus)}
+                instanceId={instanceId}
+                onAssignmentChange={fetchAnalysis}
+              />
+            )}
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+function ZoneSection({
+  title,
+  zones,
+  instanceId,
+  onAssignmentChange,
+}: {
+  title?: string;
+  zones: ZoneGapSummary[];
+  instanceId: string;
+  onAssignmentChange: () => void;
+}) {
+  if (zones.length === 0) return null;
+  return (
+    <div className="space-y-5">
+      {title && (
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-semibold text-gray-300">{title}</h2>
+          <span className="rounded-full border border-amber-800 bg-amber-950/60 px-2 py-0.5 text-xs font-medium text-amber-200">
+            Bonus
+          </span>
+        </div>
+      )}
+      {zones.map((zone) => (
+        <ZoneCard
+          key={zone.zoneKey}
+          zone={zone}
+          instanceId={instanceId}
+          onAssignmentChange={onAssignmentChange}
+        />
+      ))}
     </div>
   );
 }

@@ -91,7 +91,7 @@ export async function DELETE(
       return jsonError('assignmentId is required', 400);
     }
 
-    const result = await TbPlanningService.unassignPlayer(instanceId, assignmentId);
+    const result = await TbPlanningService.unassignPlayer(instanceId, assignmentId, user.id);
     if (!result.success) {
       return jsonError('Assignment not found', 404);
     }

@@ -150,9 +150,21 @@ export function UnitSlotRow({ unit, instanceId, onAssignmentChange }: Props) {
                   ))}
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-gray-400">
-                  No member assigned yet. Review candidates on the right to fill this slot.
-                </p>
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm text-gray-400">
+                    No member assigned yet. Review candidates on the right to fill this slot.
+                  </p>
+                  {unit.openReason === 'no_eligible_member' && (
+                    <span className="inline-block rounded-full border border-red-900 bg-red-950/70 px-2 py-0.5 text-[11px] text-red-200">
+                      No eligible member
+                    </span>
+                  )}
+                  {unit.openReason === 'eligible_at_capacity' && (
+                    <span className="inline-block rounded-full border border-amber-900 bg-amber-950/70 px-2 py-0.5 text-[11px] text-amber-200">
+                      All qualified at cap
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -286,7 +298,11 @@ function getActionSummary(unit: GapAnalysisUnit, rowState: RowState) {
     return 'Only near misses are available. This slot still needs upgrades.';
   }
 
-  return 'No candidate currently meets this requirement.';
+  if (unit.openReason === 'eligible_at_capacity') {
+    return 'Qualified members exist but all have reached the zone cap (10). Run auto-fill to rebalance.';
+  }
+
+  return 'No guild member currently owns this unit at the required level.';
 }
 
 function getRowTone(rowState: RowState) {
@@ -396,8 +412,14 @@ function AssignedPlayerCard({
           >
             R{player.relicTier}
           </span>
-          <span className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-gray-300">
-            {formatStatus(player.status)}
+          <span
+            className={`rounded-full border px-2 py-0.5 ${
+              player.lockType === 'LOCKED'
+                ? 'border-violet-800 bg-violet-950/70 text-violet-200'
+                : 'border-gray-700 bg-gray-900 text-gray-400'
+            }`}
+          >
+            {player.lockType === 'LOCKED' ? 'Locked' : 'Auto'}
           </span>
           <span className="font-mono text-gray-500">{player.allyCode}</span>
         </div>
@@ -493,6 +515,3 @@ function CandidateRow({
   );
 }
 
-function formatStatus(status: string) {
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}

@@ -16,6 +16,7 @@ export type NormalizedTbDefinition = {
       zoneKey: string;
       zoneName: string;
       sortOrder: number;
+      isBonus: boolean;
       platoons: Array<{
         platoonKey: string;
         platoonNumber: number;
@@ -65,6 +66,11 @@ function parsePlatoonNumber(platoonId: string | null | undefined, fallback: numb
 
 function buildZoneKey(phaseNumber: number, conflictNumber: number): string {
   return `rote-p${phaseNumber}-c${conflictNumber}`;
+}
+
+function buildBonusZoneKey(phaseNumber: number, operationId: string): string {
+  const sanitized = operationId.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `rote-p${phaseNumber}-bonus-${sanitized}`;
 }
 
 function findRoteDefinition(
@@ -127,11 +133,8 @@ export function normalizeRoteDefinition(input: {
 
   for (const operation of sortedOperations) {
     const phaseNumber = parseTokenNumber(operation.phase, 'P');
-    const conflictNumber =
-      parseTokenNumber(operation.conflict ?? null, 'C') ??
-      parseConflictNumberFromLinkedId(operation.linkedConflictId);
 
-    if (!phaseNumber || !conflictNumber) {
+    if (!phaseNumber) {
       continue;
     }
 
@@ -140,11 +143,19 @@ export function normalizeRoteDefinition(input: {
       continue;
     }
 
-    const zoneKey = buildZoneKey(phaseNumber, conflictNumber);
+    const conflictNumber =
+      parseTokenNumber(operation.conflict ?? null, 'C') ??
+      parseConflictNumberFromLinkedId(operation.linkedConflictId);
+
+    const isBonus = conflictNumber === null;
+    const zoneKey = isBonus
+      ? buildBonusZoneKey(phaseNumber, operation.id)
+      : buildZoneKey(phaseNumber, conflictNumber!);
+
     const zoneName =
       operation.nameKey?.trim() ||
       linkedZoneNames.get(operation.linkedConflictId ?? '') ||
-      `Phase ${phaseNumber} Zone ${conflictNumber}`;
+      (isBonus ? `Phase ${phaseNumber} Bonus` : `Phase ${phaseNumber} Zone ${conflictNumber}`);
 
     const platoons = [...operation.squads]
       .map((squad, squadIndex) => {
@@ -183,7 +194,8 @@ export function normalizeRoteDefinition(input: {
     phase.zones.push({
       zoneKey,
       zoneName,
-      sortOrder: operation.sort ?? conflictNumber,
+      sortOrder: operation.sort ?? conflictNumber ?? Number.MAX_SAFE_INTEGER,
+      isBonus,
       platoons,
     });
   }

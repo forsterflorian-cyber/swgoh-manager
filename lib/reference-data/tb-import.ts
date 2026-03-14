@@ -214,19 +214,21 @@ async function upsertNormalizedDefinition(
 
       for (const zone of phase.zones) {
         const zoneResult = await client.sql<{ id: string }>`
-          INSERT INTO tb_zones (id, tb_phase_id, zone_key, name, sort_order, updated_at)
+          INSERT INTO tb_zones (id, tb_phase_id, zone_key, name, sort_order, is_bonus, updated_at)
           VALUES (
             gen_random_uuid(),
             ${phaseId},
             ${zone.zoneKey},
             ${zone.zoneName},
             ${zone.sortOrder},
+            ${zone.isBonus},
             NOW()
           )
           ON CONFLICT (tb_phase_id, zone_key)
           DO UPDATE SET
             name = EXCLUDED.name,
             sort_order = EXCLUDED.sort_order,
+            is_bonus = EXCLUDED.is_bonus,
             updated_at = NOW()
           RETURNING id
         `;

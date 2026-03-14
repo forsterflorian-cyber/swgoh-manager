@@ -273,6 +273,7 @@ model TbAssignment {
   unitBaseId             String         @map("unit_base_id")
   assignedById           String?        @map("assigned_by")
   status                 String         @default("assigned")
+  lockType               String         @default("FLEX") @map("lock_type")
   playerRelicAtAssignment Int          @default(0) @map("player_relic_at_assignment")
   notes                  String?
   createdAt              DateTime       @default(now()) @map("created_at")
