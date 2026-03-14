@@ -901,8 +901,10 @@ function PrioritiesView({
 
   const isFiltered = selectedPhase !== 'all' || selectedZone !== 'all';
 
-  // Sorted distinct phases present in the data.
-  const availablePhases = [...new Set(slotSummaries.map((s) => s.phase))].sort((a, b) => a - b);
+  // All phases from the TB reference (via groupedZones, already phase-sorted).
+  // Using groupedZones rather than slotSummaries so phases with no blocked slots
+  // still appear as selectable filter options.
+  const availablePhases = groupedZones.map(([phase]) => phase);
 
   // Zones available for the current phase selection.
   const zonesForPhase: StrategicZoneReadiness[] =
@@ -1024,41 +1026,50 @@ function PrioritiesView({
       </div>
 
       {availablePhases.length > 0 && (
-        <div className="mt-5 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <FilterPill
-              label="All phases"
-              active={selectedPhase === 'all'}
-              onClick={() => handlePhaseSelect('all')}
-            />
-            {availablePhases.map((phase) => (
+        <div className="mt-5 rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                Phase
+              </span>
               <FilterPill
-                key={phase}
-                label={`Phase ${phase}`}
-                active={selectedPhase === phase}
-                onClick={() => handlePhaseSelect(phase)}
+                label="All"
+                active={selectedPhase === 'all'}
+                onClick={() => handlePhaseSelect('all')}
               />
-            ))}
-          </div>
-          {zonesForPhase.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <FilterPill
-                label="All zones"
-                active={selectedZone === 'all'}
-                onClick={() => setSelectedZone('all')}
-                secondary
-              />
-              {zonesForPhase.map((zone) => (
+              {availablePhases.map((phase) => (
                 <FilterPill
-                  key={zone.zoneKey}
-                  label={zone.zoneName}
-                  active={selectedZone === zone.zoneKey}
-                  onClick={() => setSelectedZone(zone.zoneKey)}
-                  secondary
+                  key={phase}
+                  label={`P${phase}`}
+                  active={selectedPhase === phase}
+                  onClick={() => handlePhaseSelect(phase)}
                 />
               ))}
             </div>
-          )}
+
+            {zonesForPhase.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                  Zone
+                </span>
+                <FilterPill
+                  label="All"
+                  active={selectedZone === 'all'}
+                  onClick={() => setSelectedZone('all')}
+                  secondary
+                />
+                {zonesForPhase.map((zone) => (
+                  <FilterPill
+                    key={zone.zoneKey}
+                    label={zone.zoneName}
+                    active={selectedZone === zone.zoneKey}
+                    onClick={() => setSelectedZone(zone.zoneKey)}
+                    secondary
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
