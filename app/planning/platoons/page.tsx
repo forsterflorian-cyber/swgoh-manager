@@ -968,13 +968,40 @@ function PrioritiesView({
     });
   }
 
-  // Sort: bucket first (Now → Next → Later), then earliest TB-flow zone for that unit
-  // (phase, regular-before-bonus, sort_order), then stable original impact-score order.
+  // Precompute scoped demand for every unit once so the sort comparator is O(1).
+  const unitDemandCache = isFiltered
+    ? new Map(
+        topMissingUnits.map((u) => [
+          u.unitBaseId,
+          computeUnitDemand(u.unitBaseId, slotSummaries, {
+            phase: selectedPhase,
+            zoneKey: selectedZone,
+          }),
+        ])
+      )
+    : null;
+
+  // Sort:
+  // - Filtered view: scoped demand desc (zone or phase req), then blockedSlotsInScope desc,
+  //   then blockedPlatoonsInScope desc, then globalImpact as tie-breaker.
+  // - Unfiltered: bucket first (Now → Next → Later), then earliest TB-flow zone for that unit.
   const visibleUnits = (
     scopedBlockedUnitIds
       ? topMissingUnits.filter((u) => scopedBlockedUnitIds.has(u.unitBaseId))
       : topMissingUnits
   ).toSorted((a, b) => {
+    if (isFiltered && unitDemandCache) {
+      const da = unitDemandCache.get(a.unitBaseId)!;
+      const db = unitDemandCache.get(b.unitBaseId)!;
+      const primaryA = selectedZone !== 'all' ? da.zoneRequired : da.phaseRequired;
+      const primaryB = selectedZone !== 'all' ? db.zoneRequired : db.phaseRequired;
+      if (primaryB !== primaryA) return primaryB - primaryA;
+      if (db.blockedSlotsInScope !== da.blockedSlotsInScope)
+        return db.blockedSlotsInScope - da.blockedSlotsInScope;
+      if (db.blockedPlatoonsInScope !== da.blockedPlatoonsInScope)
+        return db.blockedPlatoonsInScope - da.blockedPlatoonsInScope;
+      return b.impactScore - a.impactScore;
+    }
     const bucketDiff =
       BUCKET_ORDER[getUnitEarliestBucket(a.unitBaseId, slotSummaries)] -
       BUCKET_ORDER[getUnitEarliestBucket(b.unitBaseId, slotSummaries)];
@@ -2009,7 +2036,19 @@ function computeUnitDemand(
       ? slots.filter((s) => s.phase === scope.phase && s.isBonus).length
       : 0;
 
-  return { zoneRequired, phaseRequired, bonusRequired };
+  // Scoped blocked metrics for ranking in filtered views.
+  const scopedSlots =
+    scope.zoneKey !== 'all'
+      ? slots.filter((s) => s.zoneKey === scope.zoneKey)
+      : scope.phase !== 'all'
+        ? slots.filter((s) => s.phase === scope.phase)
+        : slots;
+  const blockedSlotsInScope = scopedSlots.filter((s) => s.blocked).length;
+  const blockedPlatoonsInScope = new Set(
+    scopedSlots.filter((s) => s.blocked).map((s) => s.platoonKey)
+  ).size;
+
+  return { zoneRequired, phaseRequired, bonusRequired, blockedSlotsInScope, blockedPlatoonsInScope };
 }
 
 function MissingUnitCard({
@@ -2069,7 +2108,16 @@ function MissingUnitCard({
               </span>
               {bucket && <ProgressionBucketBadge bucket={bucket} />}
             </div>
-            <p className="mt-2 text-sm text-gray-400">{unit.reasonSummary}</p>
+            <p className="mt-2 text-sm text-gray-400">
+              {selectedZone !== 'all'
+                ? `Required in ${demand.zoneRequired} slot${demand.zoneRequired === 1 ? '' : 's'} for this zone`
+                : selectedPhase !== 'all'
+                  ? `Required in ${demand.phaseRequired} slot${demand.phaseRequired === 1 ? '' : 's'} across this phase`
+                  : unit.reasonSummary}
+            </p>
+            {(selectedZone !== 'all' || selectedPhase !== 'all') && (
+              <p className="mt-1 text-xs text-gray-500">{unit.reasonSummary}</p>
+            )}
           </div>
         </div>
         <span className="rounded-full border border-red-900 bg-red-950/50 px-3 py-1 text-sm text-red-200">
@@ -2085,7 +2133,10 @@ function MissingUnitCard({
       </div>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-4">
-        <StatChip label="Blocked slots" value={`${unit.blockedSlots}`} />
+        <StatChip
+          label={selectedZone !== 'all' || selectedPhase !== 'all' ? 'Blocked (scope)' : 'Blocked slots'}
+          value={`${selectedZone !== 'all' || selectedPhase !== 'all' ? demand.blockedSlotsInScope : unit.blockedSlots}`}
+        />
         <StatChip label="Primary zones" value={`${unit.limitingZones}`} />
         <StatChip label="Upgradeable" value={`${unit.estimatedUnlockSlots}`} />
         <StatChip label="Hard missing" value={`${unit.hardMissingSlots}`} />
