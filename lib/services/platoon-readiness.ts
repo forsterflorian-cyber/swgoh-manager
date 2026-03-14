@@ -1,6 +1,7 @@
 import { sql } from '@vercel/postgres';
 
 import { getDemoPlatoonReadinessDataset } from '@/lib/services/platoon-readiness-fixture';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import {
   buildMemberAssignmentLoadMap,
   listGuildUpgradeAssignments,
@@ -330,6 +331,14 @@ function buildEmptyPlannerData(input: {
     },
     permissions: {
       canManageTargets: input.canManageTargets ?? false,
+    },
+    matching: {
+      coverage: [],
+      assignments: [],
+      gaps: [],
+      totalAssigned: 0,
+      totalRequired: 0,
+      coveragePercent: 100,
     },
   };
 }
@@ -1664,6 +1673,7 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
           : 0,
     },
     permissions: dataset.permissions,
+    matching: computePlatoonMatching(dataset),
   };
 }
 

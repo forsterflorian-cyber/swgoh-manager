@@ -262,6 +262,72 @@ export interface StrategicPlannerPermissions {
   canManageTargets: boolean;
 }
 
+// ── Platoon Matching ──────────────────────────────────────────────────────────
+
+/** Why a gap slot cannot be covered and the cheapest known closure path. */
+export type GapActionType = 'use_unused' | 'reassign' | 'upgrade' | 'acquire';
+
+export interface GapPossibleSource {
+  memberId: string;
+  playerName: string;
+  /** `eligible` = qualifies now; `near_miss` = close but needs a small upgrade. */
+  kind: 'eligible' | 'near_miss';
+  missingRelicTiers: number;
+  missingRarity: number;
+}
+
+/** A platoon slot that the matching engine could not fill. */
+export interface PlatoonMatchingGap {
+  requirementId: string;
+  phase: number;
+  zoneKey: string;
+  platoonKey: string;
+  slotNumber: number;
+  unitBaseId: string;
+  unitName: string | null;
+  minRelic: number;
+  minRarity: number;
+  planetCategory: PlanetCategory | null;
+  isBonus: boolean;
+  possibleSources: GapPossibleSource[];
+  recommendedAction: GapActionType;
+}
+
+/** One resolved assignment: a single guild member fills one platoon slot. */
+export interface PlatoonMatchingAssignment {
+  requirementId: string;
+  phase: number;
+  zoneKey: string;
+  platoonKey: string;
+  slotNumber: number;
+  unitBaseId: string;
+  unitName: string | null;
+  memberId: string;
+  playerName: string;
+}
+
+/** Coverage summary for one (phase, planetCategory) group. */
+export interface PlatoonMatchingCoverage {
+  phase: number;
+  category: PlanetCategory;
+  isBonus: boolean;
+  assignedCount: number;
+  requirementCount: number;
+  coveragePercent: number;
+}
+
+/** Full output of the platoon matching engine. */
+export interface PlatoonMatchingResult {
+  coverage: PlatoonMatchingCoverage[];
+  assignments: PlatoonMatchingAssignment[];
+  gaps: PlatoonMatchingGap[];
+  totalAssigned: number;
+  totalRequired: number;
+  coveragePercent: number;
+}
+
+// ── Planner data ──────────────────────────────────────────────────────────────
+
 export interface StrategicPlannerData {
   mode: 'live' | 'fixture';
   fixtureName: string | null;
@@ -277,4 +343,5 @@ export interface StrategicPlannerData {
   recommendedActions: string[];
   dataState: StrategicPlannerDataState;
   permissions: StrategicPlannerPermissions;
+  matching: PlatoonMatchingResult;
 }

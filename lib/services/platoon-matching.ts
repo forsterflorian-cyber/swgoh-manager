@@ -18,11 +18,27 @@
  */
 
 import type {
+  GapActionType,
+  GapPossibleSource,
   PlanetCategory,
+  PlatoonMatchingAssignment,
+  PlatoonMatchingCoverage,
+  PlatoonMatchingGap,
+  PlatoonMatchingResult,
   StrategicPlannerDataset,
   StrategicPlannerRosterInput,
   StrategicPlannerSlotInput,
 } from '@/lib/types/platoon-readiness';
+
+// Re-export so callers can import from either location.
+export type {
+  GapActionType,
+  GapPossibleSource,
+  PlatoonMatchingAssignment,
+  PlatoonMatchingCoverage,
+  PlatoonMatchingGap,
+  PlatoonMatchingResult,
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -36,82 +52,6 @@ const MEMBER_CAP_PER_CATEGORY = 10;
  * by the sort order of requirements fed into the matching.
  */
 const CATEGORY_PROCESSING_ORDER: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
-
-// ── Exported output types ─────────────────────────────────────────────────────
-
-/** Why a gap slot cannot be covered and what the cheapest closure path is. */
-export type GapActionType = 'use_unused' | 'reassign' | 'upgrade' | 'acquire';
-
-/**
- * A guild member who could help close a gap, either immediately or after
- * a small upgrade.
- */
-export interface GapPossibleSource {
-  memberId: string;
-  playerName: string;
-  /**
-   * - `eligible`  : member fully qualifies right now, slot just ran out of owners.
-   * - `near_miss` : member is close but needs a small upgrade.
-   */
-  kind: 'eligible' | 'near_miss';
-  missingRelicTiers: number;
-  missingRarity: number;
-}
-
-/** A platoon slot that could not be filled by the matching engine. */
-export interface PlatoonMatchingGap {
-  requirementId: string;      // slotKey — stable foreign key into slot data
-  phase: number;
-  zoneKey: string;
-  platoonKey: string;
-  slotNumber: number;
-  unitBaseId: string;
-  unitName: string | null;
-  minRelic: number;
-  minRarity: number;
-  planetCategory: PlanetCategory | null;
-  isBonus: boolean;
-  /** Members who could contribute to this slot (best candidates first). */
-  possibleSources: GapPossibleSource[];
-  /** Cheapest closure path for this gap. */
-  recommendedAction: GapActionType;
-}
-
-/** A resolved assignment: one guild member fills one platoon slot. */
-export interface PlatoonMatchingAssignment {
-  requirementId: string;      // slotKey
-  phase: number;
-  zoneKey: string;
-  platoonKey: string;
-  slotNumber: number;
-  unitBaseId: string;
-  unitName: string | null;
-  memberId: string;
-  playerName: string;
-}
-
-/** Coverage summary for one (phase, category) group. */
-export interface PlatoonMatchingCoverage {
-  phase: number;
-  category: PlanetCategory;
-  isBonus: boolean;
-  assignedCount: number;
-  requirementCount: number;
-  coveragePercent: number;
-}
-
-/** Full output of the matching engine. */
-export interface PlatoonMatchingResult {
-  /** Per-(phase, category) coverage summary — planner UI summary cards. */
-  coverage: PlatoonMatchingCoverage[];
-  /** Every resolved slot assignment — planner UI + public target board. */
-  assignments: PlatoonMatchingAssignment[];
-  /** Every unresolved slot with gap analysis — gap recommendation panel. */
-  gaps: PlatoonMatchingGap[];
-  totalAssigned: number;
-  totalRequired: number;
-  coveragePercent: number;
-}
 
 // ── Internal matching state ───────────────────────────────────────────────────
 

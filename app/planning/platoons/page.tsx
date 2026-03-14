@@ -6,7 +6,11 @@ import { useSearchParams } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
 import type {
+  GapActionType,
   PlanetCategory,
+  PlatoonMatchingCoverage,
+  PlatoonMatchingGap,
+  PlatoonMatchingResult,
   StrategicMemberAssignmentLoad,
   StrategicPlannerData,
   StrategicPlannerSummary,
@@ -26,7 +30,7 @@ type Notice = {
   message: string;
 };
 
-type PlannerViewKey = 'overview' | 'priorities' | 'targets';
+type PlannerViewKey = 'overview' | 'priorities' | 'targets' | 'matching';
 
 const MAX_STATIONS_PER_MEMBER_PER_PLANET = 10;
 
@@ -50,10 +54,20 @@ const PLANNER_VIEW_ITEMS: Array<{
     label: 'Member Targets',
     description: 'Assignments, candidate workflow, and ownership planning.',
   },
+  {
+    key: 'matching',
+    label: 'Matching',
+    description: 'Optimal slot assignments by phase and category, with gap closure paths.',
+  },
 ];
 
 function isPlannerViewKey(value: string | null): value is PlannerViewKey {
-  return value === 'overview' || value === 'priorities' || value === 'targets';
+  return (
+    value === 'overview' ||
+    value === 'priorities' ||
+    value === 'targets' ||
+    value === 'matching'
+  );
 }
 
 function buildPlannerViewHref(view: PlannerViewKey, fixture: string | null) {
@@ -460,6 +474,8 @@ function PlatoonReadinessContent() {
             onAssignTarget={handleAssignTarget}
             targetsHref={targetsHref}
           />
+        ) : plannerView === 'matching' ? (
+          <MatchingView matching={planner?.matching ?? null} />
         ) : (
           <MemberTargetsView
             summary={summary}
@@ -499,6 +515,7 @@ function PlannerViewNavigation({
     overview: summary ? `${summary.coveragePercent}% slot coverage` : 'Guild readiness summary',
     priorities: `${missingUnitCount} ranked bottleneck${missingUnitCount === 1 ? '' : 's'}`,
     targets: `${strategicTargetCount} active target${strategicTargetCount === 1 ? '' : 's'}`,
+    matching: 'Optimal assignment and gap analysis',
   };
 
   return (
@@ -518,7 +535,7 @@ function PlannerViewNavigation({
         </p>
       </div>
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+      <div className="mt-5 grid gap-3 lg:grid-cols-4">
         {PLANNER_VIEW_ITEMS.map((item) => {
           const active = item.key === currentView;
 
@@ -1271,6 +1288,269 @@ function FilterPill({
     >
       {label}
     </button>
+  );
+}
+
+// ── Matching view ─────────────────────────────────────────────────────────────
+
+const GAP_ACTION_META: Record<GapActionType, { label: string; className: string; detail: string }> =
+  {
+    use_unused: {
+      label: 'Available',
+      className: 'border-emerald-900 bg-emerald-950/30 text-emerald-200',
+      detail: 'An eligible owner exists with remaining capacity.',
+    },
+    reassign: {
+      label: 'Reassign',
+      className: 'border-amber-900 bg-amber-950/30 text-amber-200',
+      detail: 'All eligible owners are committed elsewhere. Rebalancing could free one up.',
+    },
+    upgrade: {
+      label: 'Upgrade',
+      className: 'border-blue-900 bg-blue-950/30 text-blue-200',
+      detail: 'Near-miss owners exist — small relic or rarity gains close this gap.',
+    },
+    acquire: {
+      label: 'Acquire',
+      className: 'border-red-900 bg-red-950/30 text-red-200',
+      detail: 'No guild member owns or is close to owning this unit at the required level.',
+    },
+  };
+
+function CoverageGrid({ coverage }: { coverage: PlatoonMatchingCoverage[] }) {
+  const phases = [...new Set(coverage.map((c) => c.phase))].sort((a, b) => a - b);
+  const categories: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
+
+  function cellFor(phase: number, category: PlanetCategory) {
+    return coverage.find((c) => c.phase === phase && c.category === category);
+  }
+
+  function cellClass(pct: number) {
+    if (pct >= 100) return 'bg-emerald-950/60 text-emerald-200 border-emerald-900';
+    if (pct >= 75) return 'bg-blue-950/60 text-blue-200 border-blue-900';
+    if (pct >= 40) return 'bg-amber-950/60 text-amber-200 border-amber-900';
+    return 'bg-red-950/60 text-red-200 border-red-900';
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+              Phase
+            </th>
+            {categories.map((cat) => (
+              <th
+                key={cat}
+                className="px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-gray-500"
+              >
+                {cat === 'SPECIAL' ? 'Bonus' : cat}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {phases.map((phase) => (
+            <tr key={phase}>
+              <td className="py-3 pr-4 font-semibold text-white">P{phase}</td>
+              {categories.map((cat) => {
+                const cell = cellFor(phase, cat);
+                if (!cell) {
+                  return (
+                    <td key={cat} className="px-3 py-2 text-center text-gray-700">
+                      —
+                    </td>
+                  );
+                }
+                return (
+                  <td key={cat} className="px-3 py-2 text-center">
+                    <span
+                      className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${cellClass(cell.coveragePercent)}`}
+                    >
+                      {cell.assignedCount}/{cell.requirementCount}
+                    </span>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
+  const meta = GAP_ACTION_META[gap.recommendedAction];
+  return (
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-white">
+              {gap.unitName ?? gap.unitBaseId}
+            </span>
+            <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+              P{gap.phase} · {gap.isBonus ? 'Bonus' : gap.planetCategory ?? '?'}
+            </span>
+            {gap.minRelic > 0 && (
+              <span className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+                R{gap.minRelic}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-gray-500">{gap.zoneKey} · slot {gap.slotNumber}</p>
+        </div>
+        <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${meta.className}`}>
+          {meta.label}
+        </span>
+      </div>
+
+      {gap.possibleSources.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {gap.possibleSources.slice(0, 5).map((src) => (
+            <span
+              key={src.memberId}
+              className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-xs text-gray-300"
+              title={
+                src.kind === 'near_miss'
+                  ? `R+${src.missingRelicTiers} ★+${src.missingRarity} needed`
+                  : 'Eligible now'
+              }
+            >
+              {src.playerName}
+              {src.kind === 'near_miss' &&
+                ` (R+${src.missingRelicTiers}${src.missingRarity > 0 ? ` ★+${src.missingRarity}` : ''})`}
+            </span>
+          ))}
+          {gap.possibleSources.length > 5 && (
+            <span className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-xs text-gray-500">
+              +{gap.possibleSources.length - 5} more
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MatchingView({ matching }: { matching: PlatoonMatchingResult | null }) {
+  const [gapFilter, setGapFilter] = useState<GapActionType | 'all'>('all');
+
+  if (!matching || matching.totalRequired === 0) {
+    return (
+      <section className="mt-6">
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5 text-sm text-gray-400">
+          No platoon slot data available for matching analysis.
+        </div>
+      </section>
+    );
+  }
+
+  const gapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
+  const gapCounts = Object.fromEntries(
+    gapActionOrder.map((a) => [a, matching.gaps.filter((g) => g.recommendedAction === a).length])
+  ) as Record<GapActionType, number>;
+
+  const visibleGaps =
+    gapFilter === 'all'
+      ? [...matching.gaps].sort(
+          (a, b) =>
+            gapActionOrder.indexOf(a.recommendedAction) -
+            gapActionOrder.indexOf(b.recommendedAction)
+        )
+      : matching.gaps.filter((g) => g.recommendedAction === gapFilter);
+
+  return (
+    <section className="mt-6 space-y-8">
+      {/* Coverage grid */}
+      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+              Matching
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white">Phase × Category Coverage</h3>
+          </div>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <span className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-emerald-200">
+              {matching.totalAssigned} assigned
+            </span>
+            <span className="rounded-full border border-red-900 bg-red-950/40 px-3 py-1 text-red-200">
+              {matching.gaps.length} gaps
+            </span>
+            <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+              {matching.coveragePercent}% overall
+            </span>
+          </div>
+        </div>
+        <div className="mt-5">
+          <CoverageGrid coverage={matching.coverage} />
+        </div>
+        <p className="mt-4 text-xs text-gray-500">
+          Each cell shows assigned / required slots. Colour: green ≥ 100% · blue ≥ 75% · amber ≥ 40% · red &lt; 40%.
+          Bonus zone capacity is budgeted independently from main zones.
+        </p>
+      </div>
+
+      {/* Gap panel */}
+      {matching.gaps.length > 0 && (
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                Gap Analysis
+              </p>
+              <h3 className="mt-2 text-2xl font-semibold text-white">
+                {matching.gaps.length} unresolved slot{matching.gaps.length === 1 ? '' : 's'}
+              </h3>
+            </div>
+            <p className="max-w-sm text-sm text-gray-400">
+              Slots that the optimal matching could not fill, with the cheapest known closure path.
+            </p>
+          </div>
+
+          {/* Action filter */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <FilterPill
+              label="All"
+              active={gapFilter === 'all'}
+              onClick={() => setGapFilter('all')}
+            />
+            {gapActionOrder.map((action) =>
+              gapCounts[action] > 0 ? (
+                <FilterPill
+                  key={action}
+                  label={`${GAP_ACTION_META[action].label} (${gapCounts[action]})`}
+                  active={gapFilter === action}
+                  onClick={() => setGapFilter(action)}
+                  secondary
+                />
+              ) : null
+            )}
+          </div>
+
+          {/* Active filter explanation */}
+          {gapFilter !== 'all' && (
+            <p className="mt-3 text-xs text-gray-500">{GAP_ACTION_META[gapFilter].detail}</p>
+          )}
+
+          <div className="mt-4 space-y-2">
+            {visibleGaps.map((gap) => (
+              <GapCard key={gap.requirementId} gap={gap} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {matching.gaps.length === 0 && (
+        <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
+          Every platoon slot has a valid assignment. The guild can fully cover all imported platoon
+          requirements under the matching constraints.
+        </div>
+      )}
+    </section>
   );
 }
 
