@@ -10,6 +10,7 @@ import type {
   StrategicMemberAssignmentLoad,
   StrategicPlannerData,
   StrategicPlannerSummary,
+  StrategicRequirementSummary,
   StrategicTargetAssignment,
   StrategicTargetCandidate,
   StrategicUnitImpact,
@@ -451,6 +452,8 @@ function PlatoonReadinessContent() {
             summary={summary}
             topMissingUnits={priorityUnits}
             groupedZones={groupedZones}
+            slotSummaries={planner?.slotSummaries ?? []}
+            allZones={planner?.zones ?? []}
             canManageTargets={canManageTargets}
             fixtureMode={fixtureMode}
             busyActionKey={busyActionKey}
@@ -805,6 +808,8 @@ function PrioritiesView({
   summary,
   topMissingUnits,
   groupedZones,
+  slotSummaries,
+  allZones,
   canManageTargets,
   fixtureMode,
   busyActionKey,
@@ -814,6 +819,8 @@ function PrioritiesView({
   summary: StrategicPlannerSummary | null;
   topMissingUnits: StrategicUnitImpact[];
   groupedZones: Array<[number, StrategicZoneReadiness[]]>;
+  slotSummaries: StrategicRequirementSummary[];
+  allZones: StrategicZoneReadiness[];
   canManageTargets: boolean;
   fixtureMode: boolean;
   busyActionKey: string | null;
@@ -826,6 +833,76 @@ function PrioritiesView({
   ) => Promise<void>;
   targetsHref: string;
 }) {
+  const [selectedPhase, setSelectedPhase] = useState<number | 'all'>('all');
+  const [selectedZone, setSelectedZone] = useState<string | 'all'>('all');
+
+  const isFiltered = selectedPhase !== 'all' || selectedZone !== 'all';
+
+  // Sorted distinct phases present in the data.
+  const availablePhases = [...new Set(slotSummaries.map((s) => s.phase))].sort((a, b) => a - b);
+
+  // Zones available for the current phase selection.
+  const zonesForPhase: StrategicZoneReadiness[] =
+    selectedPhase === 'all'
+      ? []
+      : allZones.filter((z) => z.phase === selectedPhase);
+
+  function handlePhaseSelect(phase: number | 'all') {
+    setSelectedPhase(phase);
+    // Reset zone if it doesn't belong to the new phase selection.
+    if (phase === 'all') {
+      setSelectedZone('all');
+    } else if (selectedZone !== 'all') {
+      const stillValid = allZones.some((z) => z.phase === phase && z.zoneKey === selectedZone);
+      if (!stillValid) setSelectedZone('all');
+    }
+  }
+
+  // Single source of truth: slot summaries that are in scope AND blocked.
+  // Rule 2: missingSlots = blocked.length (raw count, not distinct).
+  // Rule 3: blockedPlatoons / blockedZones = distinct keys among blocked entries.
+  const blockedInScope: StrategicRequirementSummary[] = isFiltered
+    ? slotSummaries.filter((s) => {
+        if (selectedPhase !== 'all' && s.phase !== selectedPhase) return false;
+        if (selectedZone !== 'all' && s.zoneKey !== selectedZone) return false;
+        return s.blocked;
+      })
+    : [];
+
+  const scopedMetrics = isFiltered
+    ? {
+        missingSlots: blockedInScope.length,
+        blockedPlatoons: new Set(blockedInScope.map((s) => s.platoonKey)).size,
+        blockedZones: new Set(blockedInScope.map((s) => s.zoneKey)).size,
+        bottleneckUnitCount: new Set(blockedInScope.map((s) => s.unitBaseId)).size,
+      }
+    : summary
+      ? {
+          missingSlots: summary.missingSlots,
+          blockedPlatoons: summary.blockedPlatoons,
+          blockedZones: summary.blockedZones,
+          bottleneckUnitCount: summary.bottleneckUnitCount,
+        }
+      : null;
+
+  // Rule 1: a unit is visible only if it has at least one scoped blocked slot summary.
+  const scopedBlockedUnitIds = isFiltered
+    ? new Set(blockedInScope.map((s) => s.unitBaseId))
+    : null;
+
+  const visibleUnits = scopedBlockedUnitIds
+    ? topMissingUnits.filter((u) => scopedBlockedUnitIds.has(u.unitBaseId))
+    : topMissingUnits;
+
+  // Filter zone pressure section.
+  const visibleGroupedZones: Array<[number, StrategicZoneReadiness[]]> = groupedZones
+    .filter(([phase]) => selectedPhase === 'all' || phase === selectedPhase)
+    .map(([phase, zones]) => [
+      phase,
+      selectedZone === 'all' ? zones : zones.filter((z) => z.zoneKey === selectedZone),
+    ])
+    .filter(([, zones]) => zones.length > 0);
+
   if (!summary && topMissingUnits.length === 0 && groupedZones.length === 0) {
     return (
       <PlannerEmptyState
@@ -854,31 +931,70 @@ function PrioritiesView({
         </Link>
       </div>
 
-      {summary && (
+      {availablePhases.length > 0 && (
+        <div className="mt-5 space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <FilterPill
+              label="All phases"
+              active={selectedPhase === 'all'}
+              onClick={() => handlePhaseSelect('all')}
+            />
+            {availablePhases.map((phase) => (
+              <FilterPill
+                key={phase}
+                label={`Phase ${phase}`}
+                active={selectedPhase === phase}
+                onClick={() => handlePhaseSelect(phase)}
+              />
+            ))}
+          </div>
+          {zonesForPhase.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <FilterPill
+                label="All zones"
+                active={selectedZone === 'all'}
+                onClick={() => setSelectedZone('all')}
+                secondary
+              />
+              {zonesForPhase.map((zone) => (
+                <FilterPill
+                  key={zone.zoneKey}
+                  label={zone.zoneName}
+                  active={selectedZone === zone.zoneKey}
+                  onClick={() => setSelectedZone(zone.zoneKey)}
+                  secondary
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {scopedMetrics && (
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Bottleneck units"
-            value={`${summary.bottleneckUnitCount}`}
-            detail="Distinct units currently constraining platoon readiness"
-            tone={summary.bottleneckUnitCount > 0 ? 'warning' : 'positive'}
+            value={`${scopedMetrics.bottleneckUnitCount}`}
+            detail={isFiltered ? 'Distinct bottleneck units in selected scope' : 'Distinct units currently constraining platoon readiness'}
+            tone={scopedMetrics.bottleneckUnitCount > 0 ? 'warning' : 'positive'}
           />
           <MetricCard
             title="Missing slots"
-            value={`${summary.missingSlots}`}
-            detail="Blocked demand still unresolved across the imported reference"
-            tone={summary.missingSlots > 0 ? 'danger' : 'positive'}
+            value={`${scopedMetrics.missingSlots}`}
+            detail={isFiltered ? 'Blocked slots in selected scope' : 'Blocked demand still unresolved across the imported reference'}
+            tone={scopedMetrics.missingSlots > 0 ? 'danger' : 'positive'}
           />
           <MetricCard
             title="Blocked platoons"
-            value={`${summary.blockedPlatoons}`}
-            detail="Platoons still short of required guild inventory"
-            tone={summary.blockedPlatoons > 0 ? 'warning' : 'positive'}
+            value={`${scopedMetrics.blockedPlatoons}`}
+            detail={isFiltered ? 'Platoons with blocked slots in selected scope' : 'Platoons still short of required guild inventory'}
+            tone={scopedMetrics.blockedPlatoons > 0 ? 'warning' : 'positive'}
           />
           <MetricCard
             title="Blocked zones"
-            value={`${summary.blockedZones}`}
-            detail="Zones under structural pressure from missing units"
-            tone={summary.blockedZones > 0 ? 'warning' : 'positive'}
+            value={`${scopedMetrics.blockedZones}`}
+            detail={isFiltered ? 'Zones with blocked slots in selected scope' : 'Zones under structural pressure from missing units'}
+            tone={scopedMetrics.blockedZones > 0 ? 'warning' : 'positive'}
           />
         </section>
       )}
@@ -890,7 +1006,7 @@ function PrioritiesView({
               Ranked Missing Units
             </p>
             <h3 className="mt-2 text-2xl font-semibold text-white">
-              Full bottleneck ranking
+              {isFiltered ? 'Bottlenecks in selected scope' : 'Full bottleneck ranking'}
             </h3>
           </div>
           <p className="max-w-2xl text-sm text-gray-400">
@@ -900,8 +1016,8 @@ function PrioritiesView({
         </div>
 
         <div className="mt-5 space-y-4">
-          {topMissingUnits.length > 0 ? (
-            topMissingUnits.map((unit, index) => (
+          {visibleUnits.length > 0 ? (
+            visibleUnits.map((unit, index) => (
               <MissingUnitCard
                 key={unit.unitBaseId}
                 unit={unit}
@@ -915,7 +1031,9 @@ function PrioritiesView({
             ))
           ) : (
             <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
-              Current roster data covers every imported platoon slot.
+              {isFiltered
+                ? 'No blocked units in the selected scope.'
+                : 'Current roster data covers every imported platoon slot.'}
             </div>
           )}
         </div>
@@ -937,8 +1055,8 @@ function PrioritiesView({
         </div>
 
         <div className="mt-5 space-y-8">
-          {groupedZones.length > 0 ? (
-            groupedZones.map(([phase, zones]) => (
+          {visibleGroupedZones.length > 0 ? (
+            visibleGroupedZones.map(([phase, zones]) => (
               <div key={phase}>
                 <div className="mb-4 flex items-center justify-between">
                   <h4 className="text-xl font-semibold text-white">Phase {phase}</h4>
@@ -956,12 +1074,42 @@ function PrioritiesView({
             ))
           ) : (
             <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5 text-sm text-gray-400">
-              Zone pressure will appear here once the planner has enough readiness data.
+              {isFiltered
+                ? 'No zone pressure data for the selected scope.'
+                : 'Zone pressure will appear here once the planner has enough readiness data.'}
             </div>
           )}
         </div>
       </section>
     </section>
+  );
+}
+
+function FilterPill({
+  label,
+  active,
+  onClick,
+  secondary = false,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  secondary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+        active
+          ? secondary
+            ? 'border-indigo-500 bg-indigo-900/60 text-indigo-200'
+            : 'border-blue-500 bg-blue-900/60 text-blue-200'
+          : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-300'
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
