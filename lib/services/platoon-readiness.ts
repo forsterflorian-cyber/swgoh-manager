@@ -66,6 +66,7 @@ type SlotRow = {
   unit_name: string | null;
   required_relic_tier: string | number | null;
   required_rarity: string | number | null;
+  is_bonus: boolean | null;
 };
 
 type RosterRow = {
@@ -185,7 +186,13 @@ function inferPlanetCategory(input: {
   tbKey: string;
   zoneKey: string;
   zoneName: string;
+  isBonus?: boolean | null;
 }): PlanetCategory | null {
+  // Explicit DB flag takes precedence over string heuristics.
+  if (input.isBonus === true) {
+    return 'SPECIAL';
+  }
+
   const normalized = `${input.tbKey} ${input.zoneKey} ${input.zoneName}`.toLowerCase();
 
   if (
@@ -1759,6 +1766,7 @@ async function loadSlotsForReference(
       tz.zone_key,
       tz.name AS zone_name,
       tz.sort_order AS zone_sort_order,
+      tz.is_bonus,
       tpl.platoon_key,
       tpl.platoon_number,
       tpl.sort_order AS platoon_sort_order,
@@ -1827,6 +1835,7 @@ async function loadSlotsForReference(
         tbKey: reference.tbKey,
         zoneKey: row.zone_key,
         zoneName: row.zone_name,
+        isBonus: row.is_bonus,
       }),
     };
   });
