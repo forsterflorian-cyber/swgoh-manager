@@ -143,19 +143,26 @@ export function normalizeRoteDefinition(input: {
       continue;
     }
 
-    const conflictNumber =
-      parseTokenNumber(operation.conflict ?? null, 'C') ??
-      parseConflictNumberFromLinkedId(operation.linkedConflictId);
+    // const conflictNumber =
+    //   parseTokenNumber(operation.conflict ?? null, 'C') ??
+    //   parseConflictNumberFromLinkedId(operation.linkedConflictId);
 
-    const isBonus = conflictNumber === null;
+    // const isBonus = conflictNumber === null;
+    // const zoneKey = isBonus
+    //   ? buildBonusZoneKey(phaseNumber, operation.id)
+    //   : buildZoneKey(phaseNumber, conflictNumber!);
+    const explicitConflictNumber = parseTokenNumber(operation.conflict ?? null, 'C');
+    const linkedConflictNumber = parseConflictNumberFromLinkedId(operation.linkedConflictId);
+
+    const isBonus = explicitConflictNumber === null;
     const zoneKey = isBonus
-      ? buildBonusZoneKey(phaseNumber, operation.id)
-      : buildZoneKey(phaseNumber, conflictNumber!);
+        ? buildBonusZoneKey(phaseNumber, operation.id)
+        : buildZoneKey(phaseNumber, explicitConflictNumber);
 
     const zoneName =
       operation.nameKey?.trim() ||
       linkedZoneNames.get(operation.linkedConflictId ?? '') ||
-      (isBonus ? `Phase ${phaseNumber} Bonus` : `Phase ${phaseNumber} Zone ${conflictNumber}`);
+      (isBonus ? `Phase ${phaseNumber} Bonus` : `Phase ${phaseNumber} Zone ${explicitConflictNumber}`);
 
     const platoons = [...operation.squads]
       .map((squad, squadIndex) => {
@@ -194,7 +201,10 @@ export function normalizeRoteDefinition(input: {
     phase.zones.push({
       zoneKey,
       zoneName,
-      sortOrder: operation.sort ?? conflictNumber ?? Number.MAX_SAFE_INTEGER,
+      //sortOrder: operation.sort ?? conflictNumber ?? Number.MAX_SAFE_INTEGER,
+      sortOrder: isBonus 
+        ? (operation.sort ?? Number.MAX_SAFE_INTEGER)
+         : (operation.sort ?? explicitConflictNumber ?? Number.MAX_SAFE_INTEGER),
       isBonus,
       platoons,
     });
