@@ -237,16 +237,29 @@ function compareCandidateScore(
   return 0;
 }
 
-const MAX_FINALISTS = 3;
-const MAX_MISSING_SLOTS = 4;
+const MAX_FINALISTS = 5;
+const MAX_MISSING_SLOTS = 999;
 
 function findBestNextFullPlatoonCandidate(
   dataset: StrategicPlannerDataset,
   baseline: PlatoonMatchingResult,
 ): NextFullPlatoonResult | null {
-  const ranked = rankPlatoonsForSimulation(dataset, baseline)
-    .filter((entry) => entry.missingSlots <= MAX_MISSING_SLOTS)
-    .slice(0, MAX_FINALISTS);
+
+
+const rankedAll = rankPlatoonsForSimulation(dataset, baseline);
+
+console.log(
+  '[advisor] ranked candidates',
+  rankedAll.map((entry) => ({
+    targetPlatoonId: entry.targetPlatoonId,
+    totalSlots: entry.totalSlots,
+    coveredSlots: entry.coveredSlots,
+    missingSlots: entry.missingSlots,
+    actions: entry.actions.length,
+  })),
+);
+
+const ranked = rankedAll.slice(0, MAX_FINALISTS);
 
   let best: NextFullPlatoonResult | null = null;
 
