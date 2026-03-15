@@ -37,16 +37,6 @@ function findDatasetSlotForGap(
   );
 }
 
-function getGapId(gap: PlatoonMatchingGap): string {
-  return [
-    gap.phase,
-    gap.zoneKey,
-    gap.platoonKey,
-    gap.slotNumber,
-    gap.unitBaseId,
-  ].join('::');
-}
-
 function getPlatoonIdForGap(gap: PlatoonMatchingGap): string {
   return [gap.phase, gap.zoneKey, gap.platoonKey].join('::');
 }
@@ -64,6 +54,14 @@ function buildActionForGapSource(
   };
 }
 
+function getActionIdentity(action: PlatoonSimulatorAction): string {
+  if (action.type === 'MAKE_SLOT_ELIGIBLE') {
+    return `${action.type}::${action.slotKey}::${action.memberId}`;
+  }
+
+  return `${action.type}::${action.memberId}::${action.unitBaseId}::${action.planetCategory ?? 'null'}::${action.blockType}`;
+}
+
 function dedupeActions(
   actions: PlatoonSimulatorAction[],
 ): PlatoonSimulatorAction[] {
@@ -71,12 +69,7 @@ function dedupeActions(
   const result: PlatoonSimulatorAction[] = [];
 
   for (const action of actions) {
-    let key = action.id;
-
-    if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-      key = `${action.type}::${action.slotKey}::${action.memberId}`;
-    }
-
+    const key = getActionIdentity(action);
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(action);
@@ -209,7 +202,7 @@ function generateActionCombosForPlatoon(
       if (deduped.length !== limitedGaps.length) return;
 
       const comboKey = deduped
-        .map((action) => action.id)
+        .map((action) => getActionIdentity(action))
         .sort((a, b) => a.localeCompare(b))
         .join('||');
 
@@ -250,7 +243,7 @@ function findBestCompletionForPlatoon(
   for (let gapCount = 1; gapCount <= maxGapCount; gapCount += 1) {
     const combos = generateActionCombosForPlatoon(
       dataset,
-      gaps.slice(0, gapCount),
+      gaps,
       perGapLimit,
       gapCount,
     );
