@@ -439,11 +439,11 @@ function buildGaps(
     const freeEligible: GapPossibleSource[] = [];
     const busyEligible: GapPossibleSource[] = [];
     const nearMissSources: GapPossibleSource[] = [];
-
+    const ownedButInsufficient: GapPossibleSource[] = [];
     for (const owner of owners) {
       const oKey = makeOwnerKey(owner.memberId, owner.unitBaseId);
       const playerName = memberNameMap.get(owner.memberId) ?? owner.playerName;
-
+     
       if (ownerQualifies(owner, slot)) {
         const source: GapPossibleSource = {
           memberId: owner.memberId,
@@ -464,7 +464,15 @@ function buildGaps(
         }
         continue;
       }
+      const { missingRelicTiers, missingRarity } = getDeficits(owner, slot);
 
+      ownedButInsufficient.push({
+        memberId: owner.memberId,
+        playerName,
+        kind: 'near_miss',
+        missingRelicTiers,
+        missingRarity,
+      });
       if (isNearMiss(owner, slot)) {
         const { missingRelicTiers, missingRarity } = getDeficits(owner, slot);
         nearMissSources.push({
@@ -485,26 +493,30 @@ function buildGaps(
         a.playerName.localeCompare(b.playerName),
     );
 
+    ownedButInsufficient.sort(
+   (a, b) =>
+    a.missingRelicTiers - b.missingRelicTiers ||
+    a.missingRarity - b.missingRarity ||
+    a.playerName.localeCompare(b.playerName),
+    );
+
     // Deterministic sort for free eligible.
     freeEligible.sort((a, b) => a.playerName.localeCompare(b.playerName));
+    busyEligible.sort((a, b) => a.playerName.localeCompare(b.playerName));
 
     let recommendedAction: GapActionType;
     let possibleSources: GapPossibleSource[];
 
     if (freeEligible.length > 0) {
-      // After optimal MCMF, a free eligible owner means the owner genuinely was not
-      // needed elsewhere — safe to recommend.
       recommendedAction = 'use_unused';
       possibleSources = freeEligible;
-    } else if (nearMissSources.length > 0) {
+    } else if (ownedButInsufficient.length > 0) {
       recommendedAction = 'upgrade';
-      possibleSources = nearMissSources;
+      possibleSources = ownedButInsufficient;
     } else {
       recommendedAction = 'acquire';
-      // Expose busy eligible owners for context but action remains "acquire".
-      possibleSources = busyEligible;
+      possibleSources = [];
     }
-
     return {
       requirementId: slot.slotKey,
       phase: slot.phase,
