@@ -173,10 +173,11 @@ function buildActionsForTargetPlatoon(
   targetPlatoonId: string,
 ): PlatoonSimulatorAction[] {
   const missingSlots = getUncoveredSlotsForPlatoon(dataset, baseline, targetPlatoonId);
+  const safeTargetId = sanitizeSyntheticIdPart(targetPlatoonId);
 
   return missingSlots.map((slot, index) => ({
     type: 'ADD_HYPOTHETICAL_UNIT' as const,
-    memberId: `hypothetical-member-${targetPlatoonId}-${index + 1}`,
+    memberId: `sim_member_${safeTargetId}_${index + 1}`,
     unitBaseId: slot.unitBaseId,
     rarity: slot.requiredRarity ?? 0,
     relicTier: slot.requiredRelicTier ?? 0,
@@ -349,7 +350,9 @@ function findBestNextFullPlatoonCandidate(
 
   return best;
 }
-
+function sanitizeSyntheticIdPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
 export function findSequentialFullPlatoonPlan(
   dataset: StrategicPlannerDataset,
   precomputedBaseline?: PlatoonMatchingResult,

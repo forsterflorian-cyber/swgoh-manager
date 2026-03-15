@@ -281,7 +281,7 @@ function buildSyntheticRosterEntry(
   index: number,
 ): StrategicPlannerDataset['roster'][number] {
   return {
-    memberId: `${action.memberId}__sim__${index}`,
+    memberId: `${action.memberId}_sim_${index}`,
     allyCode: `SIM-${index}`,
     playerName: `[sim] ${action.memberId}`,
     unitBaseId: action.unitBaseId,

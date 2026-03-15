@@ -72,12 +72,15 @@ const INF_COST = 1_000_000_000;
 /** `${memberId}:${unitBaseId}` — uniquely identifies one character instance. */
 type OwnerKey = string;
 
+const OWNER_KEY_SEP = '\u001F';
+const OWNER_CATEGORY_SEP = '\u001E';
+
 function makeOwnerKey(memberId: string, unitBaseId: string): OwnerKey {
-  return `${memberId}:${unitBaseId}`;
+  return `${memberId}${OWNER_KEY_SEP}${unitBaseId}`;
 }
 
 function memberIdFromOwnerKey(key: OwnerKey): string {
-  const idx = key.indexOf(':');
+  const idx = key.indexOf(OWNER_KEY_SEP);
   return idx === -1 ? key : key.slice(0, idx);
 }
 function makeMemberCategoryKey(memberId: string, category: PlanetCategory): string {
@@ -395,13 +398,17 @@ function runMatchingForPhase(
 
   // memberCategory slot nodes -> ownerIn
   // Only connect an owner to category buckets in which that owner has at least one eligible slot.
-  const ownerCategoryKeys = new Set<string>();
-  for (const ce of candidateEdges) {
-    ownerCategoryKeys.add(`${ce.ownerKey}::${ce.category}`);
-  }
+const ownerCategoryKeys = new Set<string>();
+for (const ce of candidateEdges) {
+  ownerCategoryKeys.add(`${ce.ownerKey}${OWNER_CATEGORY_SEP}${ce.category}`);
+}
 
-  for (const ownerCategoryKey of [...ownerCategoryKeys].sort()) {
-    const [ownerKey, category] = ownerCategoryKey.split('::') as [OwnerKey, PlanetCategory];
+for (const ownerCategoryKey of [...ownerCategoryKeys].sort()) {
+  const idx = ownerCategoryKey.lastIndexOf(OWNER_CATEGORY_SEP);
+  if (idx === -1) continue;
+
+  const ownerKey = ownerCategoryKey.slice(0, idx) as OwnerKey;
+  const category = ownerCategoryKey.slice(idx + OWNER_CATEGORY_SEP.length) as PlanetCategory;
     const memberId = memberIdFromOwnerKey(ownerKey);
     const memberCategoryKey = makeMemberCategoryKey(memberId, category);
     const categorySlotNodes = memberCategorySlotNodes.get(memberCategoryKey);
