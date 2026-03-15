@@ -281,7 +281,9 @@ export interface PlatoonMatchingGap {
   requirementId: string;
   phase: number;
   zoneKey: string;
+  zoneName: string;
   platoonKey: string;
+  platoonNumber: number;
   slotNumber: number;
   unitBaseId: string;
   unitName: string | null;

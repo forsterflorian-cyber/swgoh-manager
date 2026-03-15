@@ -1417,7 +1417,9 @@ function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
               </span>
             )}
           </div>
-          <p className="mt-1 text-xs text-gray-500">{gap.zoneKey} · slot {gap.slotNumber}</p>
+          <p className="mt-1 text-xs text-gray-500">
+  {gap.zoneName} · Platoon {gap.platoonNumber} · Slot {gap.slotNumber}
+</p>
         </div>
         <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${meta.className}`}>
           {meta.label}
