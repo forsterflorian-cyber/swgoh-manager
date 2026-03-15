@@ -173,41 +173,25 @@ export function normalizeRoteDefinition(input: {
       parseTokenNumber(operation.conflict ?? null, 'C') ??
       parseConflictNumberFromLinkedId(operation.linkedConflictId);
 
-    const operationType =
-      (operation as { type?: string | null }).type?.trim().toUpperCase() ?? '';
-    if (phaseNumber >= 3) {
-      console.log('[rote op]', {
-        id: operation.id ?? null,
-        phase: operation.phase ?? null,
-        conflict: operation.conflict ?? null,
-        linkedConflictId: operation.linkedConflictId ?? null,
-        nameKey: operation.nameKey ?? null,
-        type: (operation as { type?: string | null }).type ?? null,
-        sort: operation.sort ?? null,
-      });
-    }
+    const normalizedId = operation.id?.trim().toUpperCase() ?? '';
+    const normalizedConflict = operation.conflict?.trim().toUpperCase() ?? '';
+    const normalizedLinkedConflictId = operation.linkedConflictId?.trim().toLowerCase() ?? '';
 
-      const phaseCounts = new Map<number, number>();
-
-    for (const operation of sortedOperations) {
-      const phaseNumber = parseTokenNumber(operation.phase, 'P');
-      if (!phaseNumber) continue;
-      phaseCounts.set(phaseNumber, (phaseCounts.get(phaseNumber) ?? 0) + 1);
-    }
-
-    console.log('[rote phase counts]', [...phaseCounts.entries()]);
     const isBonus =
-      operationType.includes('BONUS') ||
-      operation.id.toLowerCase().includes('bonus') ||
-      (operation.nameKey?.toLowerCase().includes('bonus') ?? false);
+      normalizedId.endsWith('-B') ||
+      normalizedConflict.endsWith('-B') ||
+      normalizedLinkedConflictId.includes('_bonus');
 
-    if (!isBonus && conflictNumber === null) {
-      continue;
+    let zoneKey: string;
+
+    if (isBonus) {
+      zoneKey = buildBonusZoneKey(phaseNumber, operation.id);
+    } else {
+      if (conflictNumber === null) {
+        continue;
+      }
+      zoneKey = buildZoneKey(phaseNumber, conflictNumber);
     }
-
-    const zoneKey = isBonus
-      ? buildBonusZoneKey(phaseNumber, operation.id)
-      : buildZoneKey(phaseNumber, conflictNumber!);
 
     const linkedZone = linkedZones.get(operation.linkedConflictId?.trim() ?? '');
 
