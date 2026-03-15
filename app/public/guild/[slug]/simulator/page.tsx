@@ -68,41 +68,51 @@ export default function PublicGuildSimulatorPage({
     return data.simulation.delta;
   }, [data]);
 
-  function addEligibleAction() {
-    const slotId = window.prompt('slotId?');
-    const ownerKey = window.prompt('ownerKey?');
-    if (!slotId || !ownerKey) return;
+function addEligibleAction() {
+  const slotKey = window.prompt('slotKey?');
+  const memberId = window.prompt('memberId?');
+  if (!slotKey || !memberId) return;
 
-    const nextActions: PlatoonSimulatorAction[] = [
-      ...actions,
-      {
-        id: createActionId(),
-        type: 'MAKE_SLOT_ELIGIBLE',
-        slotId,
-        ownerKey,
-        reason: 'upgrade',
-      },
-    ];
+  const nextActions: PlatoonSimulatorAction[] = [
+    ...actions,
+    {
+      id: createActionId(),
+      type: 'MAKE_SLOT_ELIGIBLE',
+      slotKey,
+      memberId,
+      reason: 'upgrade',
+    },
+  ];
 
-    setActions(nextActions);
-  }
+  setActions(nextActions);
+}
 
-  function addRemoveBlockAction() {
-    const ownerKey = window.prompt('ownerKey?');
-    if (!ownerKey) return;
 
-    const nextActions: PlatoonSimulatorAction[] = [
-      ...actions,
-      {
-        id: createActionId(),
-        type: 'REMOVE_SOURCE_BLOCK',
-        ownerKey,
-        blockType: 'committed',
-      },
-    ];
+function addRemoveBlockAction() {
+  const memberId = window.prompt('memberId?');
+  const unitBaseId = window.prompt('unitBaseId?');
+  const planetCategoryInput = window.prompt('planetCategory? (LS / DS / MIX or empty)');
+  if (!memberId || !unitBaseId) return;
 
-    setActions(nextActions);
-  }
+  const planetCategory =
+    planetCategoryInput === 'LS' || planetCategoryInput === 'DS' || planetCategoryInput === 'MIX'
+      ? planetCategoryInput
+      : null;
+
+  const nextActions: PlatoonSimulatorAction[] = [
+    ...actions,
+    {
+      id: createActionId(),
+      type: 'REMOVE_SOURCE_BLOCK',
+      memberId,
+      unitBaseId,
+      planetCategory,
+      blockType: 'committed',
+    },
+  ];
+
+  setActions(nextActions);
+}
 
   function removeAction(actionId: string) {
     const nextActions = actions.filter((item) => item.id !== actionId);

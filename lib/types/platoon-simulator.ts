@@ -1,17 +1,19 @@
-import type { PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
+import type { PlanetCategory, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
 
 export type PlatoonSimulatorAction =
   | {
       id: string;
       type: 'MAKE_SLOT_ELIGIBLE';
-      slotId: string;
-      ownerKey: string;
+      slotKey: string;
+      memberId: string;
       reason: 'upgrade' | 'unlock' | 'availability';
     }
   | {
       id: string;
       type: 'REMOVE_SOURCE_BLOCK';
-      ownerKey: string;
+      memberId: string;
+      unitBaseId: string;
+      planetCategory: PlanetCategory | null;
       blockType: 'committed' | 'reserved' | 'manual';
     };
 

@@ -1,87 +1,56 @@
 import type {
+  GapPossibleSource,
+  PlatoonMatchingGap,
+  PlatoonMatchingResult,
+  StrategicPlannerDataset,
+  StrategicPlannerSlotInput,
+} from '@/lib/types/platoon-readiness';
+import type {
   NextFullPlatoonResult,
   PlatoonSimulatorAction,
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
-import type {
-  GapPossibleSource,
-  PlatoonMatchingGap,
-  PlatoonMatchingResult,
-} from '@/lib/types/platoon-readiness';
 import {
   applySimulationActions,
   simulatePlatoonScenario,
 } from '@/lib/services/platoon-simulator';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 
-type StrategicPlannerData = any;
-
-function readGapSlotId(gap: PlatoonMatchingGap): string | null {
-  const candidate = gap as unknown as Record<string, unknown>;
-
-  const possibleKeys = [
-    'slotId',
-    'platoonSlotId',
-    'targetSlotId',
-    'requirementId',
-    'id',
-  ];
-
-  for (const key of possibleKeys) {
-    const value = candidate[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function readPossibleSourceOwnerKey(source: GapPossibleSource): string | null {
-  const candidate = source as unknown as Record<string, unknown>;
-
-  const possibleKeys = [
-    'ownerKey',
-    'sourceOwnerKey',
-    'unitOwnerKey',
-    'memberKey',
-    'playerKey',
-    'rosterUnitId',
-    'unitId',
-    'id',
-  ];
-
-  for (const key of possibleKeys) {
-    const value = candidate[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value;
-    }
-  }
-
-  return null;
+function findDatasetSlotForGap(
+  dataset: StrategicPlannerDataset,
+  gap: PlatoonMatchingGap,
+): StrategicPlannerSlotInput | null {
+  return (
+    dataset.slots.find(
+      (slot) =>
+        slot.phase === gap.phase &&
+        slot.zoneKey === gap.zoneKey &&
+        slot.platoonKey === gap.platoonKey &&
+        slot.slotNumber === gap.slotNumber &&
+        slot.unitBaseId === gap.unitBaseId,
+    ) ?? null
+  );
 }
 
 function getTopGapBasedActions(
+  dataset: StrategicPlannerDataset,
   matching: PlatoonMatchingResult,
 ): PlatoonSimulatorAction[] {
   const actions: PlatoonSimulatorAction[] = [];
 
   for (const gap of matching.gaps.slice(0, 10)) {
-    const slotId = readGapSlotId(gap);
-    if (!slotId) continue;
+    const slot = findDatasetSlotForGap(dataset, gap);
+    if (!slot) continue;
 
-    const topSources = gap.possibleSources?.slice(0, 2) ?? [];
+    const topSources: GapPossibleSource[] = gap.possibleSources.slice(0, 2);
 
     for (const source of topSources) {
-      const ownerKey = readPossibleSourceOwnerKey(source);
-      if (!ownerKey) continue;
-
       actions.push({
-        id: `eligible-${slotId}-${ownerKey}`,
+        id: `eligible-${slot.slotKey}-${source.memberId}`,
         type: 'MAKE_SLOT_ELIGIBLE',
-        slotId,
-        ownerKey,
-        reason: 'upgrade',
+        slotKey: slot.slotKey,
+        memberId: source.memberId,
+        reason: source.kind === 'eligible' ? 'availability' : 'upgrade',
       });
     }
   }
@@ -90,10 +59,10 @@ function getTopGapBasedActions(
 }
 
 export function findNextFullPlatoon(
-  dataset: StrategicPlannerData,
+  dataset: StrategicPlannerDataset,
   matching: PlatoonMatchingResult,
 ): NextFullPlatoonResult | null {
-  const candidateActions = getTopGapBasedActions(matching);
+  const candidateActions = getTopGapBasedActions(dataset, matching);
 
   let best: NextFullPlatoonResult | null = null;
 
@@ -114,12 +83,8 @@ export function findNextFullPlatoon(
       displacedAssignmentCount: result.delta.displacedAssignmentCount,
     };
 
-    if (!best) {
-      best = candidate;
-      continue;
-    }
-
     const isBetter =
+      !best ||
       candidate.deltaFullPlatoons > best.deltaFullPlatoons ||
       (candidate.deltaFullPlatoons === best.deltaFullPlatoons &&
         candidate.deltaCoveredSlots > best.deltaCoveredSlots) ||
@@ -127,14 +92,16 @@ export function findNextFullPlatoon(
         candidate.deltaCoveredSlots === best.deltaCoveredSlots &&
         candidate.changedAssignmentCount < best.changedAssignmentCount);
 
-    if (isBetter) best = candidate;
+    if (isBetter) {
+      best = candidate;
+    }
   }
 
   return best;
 }
 
 export function findSequentialFullPlatoonPlan(
-  dataset: StrategicPlannerData,
+  dataset: StrategicPlannerDataset,
 ): SequentialFullPlatoonPlan {
   const baselineMatching = computePlatoonMatching(dataset);
 
