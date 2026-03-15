@@ -12,6 +12,10 @@ type SimulatorApiResponse = {
   advisory: SequentialFullPlatoonPlan;
 };
 
+type ErrorResponse = {
+  error: string;
+};
+
 function getActionKey(action: PlatoonSimulatorAction): string {
   if (action.type === 'MAKE_SLOT_ELIGIBLE') {
     return `${action.type}::${action.slotKey}::${action.memberId}`;
@@ -68,14 +72,11 @@ function CandidateCard({
   if (!candidate) {
     return (
       <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold text-white">{title}</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              Kein vollständiges Platoon mit den aktuell modellierten hypothetischen Aktionen gefunden.
-            </p>
-          </div>
-        </div>
+        <div className="text-sm text-slate-400">{title}</div>
+        <h2 className="mt-1 text-2xl font-semibold text-white">No candidate</h2>
+        <p className="mt-3 text-sm text-slate-400">
+          Kein vollständiges Platoon mit den aktuell modellierten hypothetischen Aktionen gefunden.
+        </p>
       </section>
     );
   }
@@ -179,6 +180,7 @@ export default function PublicGuildSimulatorPage({
   const [actions, setActions] = useState<PlatoonSimulatorAction[]>([]);
   const [data, setData] = useState<SimulatorApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -192,6 +194,7 @@ export default function PublicGuildSimulatorPage({
 
     async function run() {
       setLoading(true);
+      setError(null);
 
       try {
         const res = await fetch(`/api/public/guild/${slug}/simulator`, {
@@ -202,19 +205,21 @@ export default function PublicGuildSimulatorPage({
           body: JSON.stringify({ actions }),
         });
 
-        if (!res.ok) {
-          throw new Error('Simulation request failed');
-        }
+        const json = (await res.json()) as SimulatorApiResponse | ErrorResponse;
 
-        const json = (await res.json()) as SimulatorApiResponse;
+        if (!res.ok) {
+          throw new Error('error' in json ? json.error : 'Simulation request failed');
+        }
 
         if (requestId === requestIdRef.current) {
-          setData(json);
+          setData(json as SimulatorApiResponse);
         }
-      } catch (error) {
-        console.error(error);
+      } catch (err) {
+        console.error(err);
+
         if (requestId === requestIdRef.current) {
           setData(null);
+          setError(err instanceof Error ? err.message : 'Simulation request failed');
         }
       } finally {
         if (requestId === requestIdRef.current) {
@@ -272,32 +277,38 @@ export default function PublicGuildSimulatorPage({
           </button>
         </div>
 
+        {error ? (
+          <div className="mb-8 rounded-3xl border border-rose-900/60 bg-rose-950/30 p-5 text-sm text-rose-200">
+            Simulator API failed: {error}
+          </div>
+        ) : null}
+
         <div className="mb-8 grid gap-4 md:grid-cols-4">
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
             <div className="text-sm text-slate-400">Covered slots</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
-              {summary
-                ? `${summary.simulatedCoveredSlots}`
-                : '—'}
+              {summary ? summary.simulatedCoveredSlots : '—'}
             </div>
             <div className="mt-2 text-sm text-slate-500">
               {summary
                 ? `${summary.baselineCoveredSlots} → ${summary.simulatedCoveredSlots}`
-                : 'No data'}
+                : loading
+                  ? 'Loading…'
+                  : 'No data'}
             </div>
           </div>
 
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
             <div className="text-sm text-slate-400">Full platoons</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
-              {summary
-                ? `${summary.simulatedFullPlatoons}`
-                : '—'}
+              {summary ? summary.simulatedFullPlatoons : '—'}
             </div>
             <div className="mt-2 text-sm text-slate-500">
               {summary
                 ? `${summary.baselineFullPlatoons} → ${summary.simulatedFullPlatoons}`
-                : 'No data'}
+                : loading
+                  ? 'Loading…'
+                  : 'No data'}
             </div>
           </div>
 
@@ -315,10 +326,10 @@ export default function PublicGuildSimulatorPage({
             <div className="text-sm text-slate-400">Newly full</div>
             <div className="mt-3 text-3xl font-semibold tracking-tight text-white">
               {summary?.becameFullPlatoonIds?.length
-                ? `${summary.becameFullPlatoonIds.length}`
+                ? summary.becameFullPlatoonIds.length
                 : '0'}
             </div>
-            <div className="mt-2 text-sm text-slate-500 break-words">
+            <div className="mt-2 break-words text-sm text-slate-500">
               {summary?.becameFullPlatoonIds?.length
                 ? summary.becameFullPlatoonIds.join(', ')
                 : 'No newly completed platoons'}
