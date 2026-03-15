@@ -1560,7 +1560,32 @@ function MatchingView({
   }
 
   const platoonKeys = [...rowsByPlatoon.keys()].sort();
+const discordExport = selectedCoverageCell && selectedCoverage
+  ? [
+      `P${selectedCoverage.phase} · ${
+        selectedCoverage.category === 'SPECIAL' ? 'Bonus' : selectedCoverage.category
+      } — ${selectedCoverage.assignedCount}/${selectedCoverage.requirementCount} assigned, ${selectedGaps.length} open`,
+      '',
+      ...platoonKeys.flatMap((platoonKey, index) => {
+        const rows = [...(rowsByPlatoon.get(platoonKey) ?? [])].sort(
+          (a, b) => a.slotNumber - b.slotNumber
+        );
 
+        return [
+          formatPlatoonTitle(platoonKey, index),
+          ...rows.flatMap((row) =>
+            row.kind === 'assigned'
+              ? [`${row.slotNumber}. ${row.unitName} -> ${row.playerName}`]
+              : [
+                  `${row.slotNumber}. ${row.unitName} -> OPEN`,
+                  `   Best next action: ${row.action}`,
+                ]
+          ),
+          '',
+        ];
+      }),
+    ].join('\n')
+  : '';
   const globalGapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
   const globalGapCounts = Object.fromEntries(
     globalGapActionOrder.map((action) => [
@@ -1697,6 +1722,14 @@ function MatchingView({
                 <h3 className="mt-2 text-2xl font-semibold text-white">
                   Assignments and open slots by platoon
                 </h3>
+                {discordExport && (
+  <button
+    onClick={() => navigator.clipboard.writeText(discordExport)}
+    className="mt-3 rounded-lg border border-indigo-900 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-950/70"
+  >
+    Copy Discord export
+  </button>
+)}
               </div>
               <p className="max-w-sm text-sm text-gray-400">
                 Compact slot view for the selected phase/category.
