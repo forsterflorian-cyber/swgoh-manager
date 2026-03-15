@@ -187,50 +187,82 @@ export default function PublicGuildSimulatorPage({
     params.then((resolved) => setSlug(resolved.slug));
   }, [params]);
 
-  useEffect(() => {
-    if (!slug) return;
+useEffect(() => {
+  if (!slug) return;
 
-    const requestId = ++requestIdRef.current;
+  const requestId = ++requestIdRef.current;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
 
-    async function run() {
-      setLoading(true);
-      setError(null);
+  async function run() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/public/guild/${slug}/simulator`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ actions }),
+        signal: controller.signal,
+      });
+
+      const raw = await res.text();
+
+      let parsed: SimulatorApiResponse | ErrorResponse | null = null;
 
       try {
-        const res = await fetch(`/api/public/guild/${slug}/simulator`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ actions }),
-        });
+        parsed = raw
+          ? (JSON.parse(raw) as SimulatorApiResponse | ErrorResponse)
+          : null;
+      } catch {
+        throw new Error(
+          raw
+            ? `Simulator API returned non-JSON response: ${raw.slice(0, 200)}`
+            : 'Simulator API returned empty response',
+        );
+      }
 
-        const json = (await res.json()) as SimulatorApiResponse | ErrorResponse;
+      if (!res.ok) {
+        throw new Error(
+          parsed && 'error' in parsed
+            ? parsed.error
+            : 'Simulation request failed',
+        );
+      }
 
-        if (!res.ok) {
-          throw new Error('error' in json ? json.error : 'Simulation request failed');
-        }
+      if (requestId === requestIdRef.current) {
+        setData(parsed as SimulatorApiResponse);
+      }
+    } catch (err) {
+      console.error(err);
 
-        if (requestId === requestIdRef.current) {
-          setData(json as SimulatorApiResponse);
-        }
-      } catch (err) {
-        console.error(err);
+      if (requestId === requestIdRef.current) {
+        setData(null);
 
-        if (requestId === requestIdRef.current) {
-          setData(null);
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setError('Simulation request timed out');
+        } else {
           setError(err instanceof Error ? err.message : 'Simulation request failed');
         }
-      } finally {
-        if (requestId === requestIdRef.current) {
-          setLoading(false);
-        }
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
       }
     }
+  }
 
-    run();
-  }, [slug, actions]);
+  run();
 
+  return () => {
+    window.clearTimeout(timeoutId);
+    controller.abort();
+  };
+}, [slug, actions]);
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
