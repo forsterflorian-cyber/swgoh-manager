@@ -1560,7 +1560,7 @@ function MatchingView({
   }
 
   const platoonKeys = [...rowsByPlatoon.keys()].sort();
-const discordExport = selectedCoverageCell && selectedCoverage
+  const discordExport = selectedCoverageCell && selectedCoverage
   ? [
       `P${selectedCoverage.phase} · ${
         selectedCoverage.category === 'SPECIAL' ? 'Bonus' : selectedCoverage.category
@@ -1611,7 +1611,20 @@ const discordExport = selectedCoverageCell && selectedCoverage
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
               Matching
             </p>
-            <h3 className="mt-2 text-2xl font-semibold text-white">Phase × Category Coverage</h3>
+            <div className="flex items-center justify-between">
+  <h3 className="text-sm font-semibold text-indigo-200">
+    Phase × Category Coverage
+  </h3>
+
+  {discordExport && (
+    <button
+      onClick={() => navigator.clipboard.writeText(discordExport)}
+      className="rounded-lg border border-indigo-900 bg-indigo-950/40 px-3 py-1 text-xs font-semibold text-indigo-200 hover:bg-indigo-950/70"
+    >
+      Copy Discord export
+    </button>
+  )}
+</div>
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
             <span className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-emerald-200">
@@ -1722,14 +1735,7 @@ const discordExport = selectedCoverageCell && selectedCoverage
                 <h3 className="mt-2 text-2xl font-semibold text-white">
                   Assignments and open slots by platoon
                 </h3>
-                {discordExport && (
-  <button
-    onClick={() => navigator.clipboard.writeText(discordExport)}
-    className="mt-3 rounded-lg border border-indigo-900 bg-indigo-950/40 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-950/70"
-  >
-    Copy Discord export
-  </button>
-)}
+                
               </div>
               <p className="max-w-sm text-sm text-gray-400">
                 Compact slot view for the selected phase/category.
