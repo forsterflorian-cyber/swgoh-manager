@@ -24,7 +24,7 @@ function parseActions(body: unknown): PlatoonSimulatorAction[] {
 async function withStageTimeout<T>(
   stage: string,
   fn: () => T | Promise<T>,
-  timeoutMs = 5000,
+  timeoutMs: number,
 ): Promise<T> {
   return await Promise.race([
     Promise.resolve().then(fn),
@@ -45,10 +45,16 @@ export async function POST(request: Request, { params }: RouteContext) {
     const body = await request.json();
     const actions = parseActions(body);
 
-    const dataset = await withStageTimeout('load_dataset', () =>
-      loadStrategicPlannerDatasetForGuildSlug(slug),
+    console.log('[route] actionsCount', actions.length);
+    console.log('[route] firstAction', actions[0] ?? null);
+
+    const loadStartedAt = Date.now();
+    const dataset = await withStageTimeout(
+      'load_dataset',
+      () => loadStrategicPlannerDatasetForGuildSlug(slug),
+      120000,
     );
-    timings.load_dataset_ms = Date.now() - startedAt;
+    timings.load_dataset_ms = Date.now() - loadStartedAt;
 
     if (!dataset.guild || !dataset.reference) {
       return NextResponse.json(
@@ -57,20 +63,29 @@ export async function POST(request: Request, { params }: RouteContext) {
       );
     }
 
-const simulationStartedAt = Date.now();
-const simulation = await withStageTimeout('simulation', () =>
-  simulatePlatoonScenario(dataset, actions),
-);
-timings.simulation_ms = Date.now() - simulationStartedAt;
+    const simulationStartedAt = Date.now();
+    const simulation = await withStageTimeout(
+      'simulation',
+      () => simulatePlatoonScenario(dataset, actions),
+      120000,
+    );
+    timings.simulation_ms = Date.now() - simulationStartedAt;
 
-const advisoryStartedAt = Date.now();
-const advisory = await withStageTimeout('advisor', () =>
-  findSequentialFullPlatoonPlan(
-    simulation.simulatedDataset,
-    simulation.simulated,
-  ),
-);
-timings.advisor_ms = Date.now() - advisoryStartedAt;
+    console.log('[route] delta', simulation.delta);
+
+    const advisoryStartedAt = Date.now();
+    const advisory = await withStageTimeout(
+      'advisor',
+      () =>
+        findSequentialFullPlatoonPlan(
+          simulation.simulatedDataset,
+          simulation.simulated,
+        ),
+      120000,
+    );
+    timings.advisor_ms = Date.now() - advisoryStartedAt;
+
+    console.log('[route] advisory', advisory);
 
     timings.total_ms = Date.now() - startedAt;
 
@@ -88,10 +103,7 @@ timings.advisor_ms = Date.now() - advisoryStartedAt;
         unitNames[r.unitBaseId] = r.unitName;
       }
     }
-    console.log('[route] delta', simulation.delta);
-    console.log('[route] actionsCount', actions.length);
-    console.log('[route] firstAction', actions[0] ?? null);
-    console.log('[route] advisory', advisory);
+
     return NextResponse.json(
       {
         simulation: {
@@ -129,7 +141,7 @@ timings.advisor_ms = Date.now() - advisoryStartedAt;
     }
 
     console.error('Simulator API error', error);
-    
+
     return NextResponse.json(
       {
         error: message,
