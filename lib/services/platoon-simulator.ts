@@ -120,19 +120,27 @@ function buildDelta(
   const baselineFullIds = new Set(getFullPlatoonIds(baseline));
   const simulatedFullIds = new Set(getFullPlatoonIds(simulated));
 
-  const becameFullPlatoonIds = [...simulatedFullIds].filter((id) => !baselineFullIds.has(id));
-  const noLongerFullPlatoonIds = [...baselineFullIds].filter((id) => !simulatedFullIds.has(id));
+  const becameFullPlatoonIds = [...simulatedFullIds]
+    .filter((id) => !baselineFullIds.has(id))
+    .sort();
+
+  const noLongerFullPlatoonIds = [...baselineFullIds]
+    .filter((id) => !simulatedFullIds.has(id))
+    .sort();
 
   const baselineAssignments = getAssignmentKeys(baseline);
   const simulatedAssignments = getAssignmentKeys(simulated);
 
-  const changedAssignmentCount =
-    [...baselineAssignments].filter((key) => !simulatedAssignments.has(key)).length +
-    [...simulatedAssignments].filter((key) => !baselineAssignments.has(key)).length;
-
-  const displacedAssignmentCount = [...baselineAssignments].filter(
+  const removedAssignmentCount = [...baselineAssignments].filter(
     (key) => !simulatedAssignments.has(key),
   ).length;
+
+  const addedAssignmentCount = [...simulatedAssignments].filter(
+    (key) => !baselineAssignments.has(key),
+  ).length;
+
+  const changedAssignmentCount = Math.max(removedAssignmentCount, addedAssignmentCount);
+  const displacedAssignmentCount = removedAssignmentCount;
 
   return {
     baselineCoveredSlots,
@@ -147,7 +155,6 @@ function buildDelta(
     noLongerFullPlatoonIds,
   };
 }
-
 function findSlotByKey(
   dataset: StrategicPlannerDataset,
   slotKey: string,
@@ -223,23 +230,48 @@ export function applySimulationActions(
 ): StrategicPlannerDataset {
   const cloned: StrategicPlannerDataset = structuredClone(dataset);
 
+  clearDerivedSimulationState(cloned);
+
   for (const action of actions) {
-    if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-      const slot = findSlotByKey(cloned, action.slotKey);
-      if (!slot) continue;
+    switch (action.type) {
+      case 'MAKE_SLOT_ELIGIBLE': {
+        const slot = findSlotByKey(cloned, action.slotKey);
+        if (!slot) {
+          continue;
+        }
 
-      upsertEligibleRosterEntry(cloned, slot, action.memberId);
-      continue;
-    }
+        upsertEligibleRosterEntry(cloned, slot, action.memberId);
+        break;
+      }
 
-    if (action.type === 'REMOVE_SOURCE_BLOCK') {
-      removeStrategicBlock(cloned, action);
+      case 'REMOVE_SOURCE_BLOCK': {
+        removeStrategicBlock(cloned, action);
+        break;
+      }
+
+      default: {
+        assertNever(action);
+      }
     }
   }
+
+  clearDerivedSimulationState(cloned);
 
   return cloned;
 }
 
+function clearDerivedSimulationState(dataset: StrategicPlannerDataset): void {
+  const mutable = dataset as unknown as Record<string, unknown>;
+
+  delete mutable.matching;
+  delete mutable.readiness;
+  delete mutable.simulation;
+  delete mutable.advisor;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled simulator action: ${JSON.stringify(value)}`);
+}
 function simulateStepEffects(
   dataset: StrategicPlannerDataset,
   actions: PlatoonSimulatorAction[],
