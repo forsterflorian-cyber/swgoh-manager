@@ -1472,6 +1472,16 @@ function MatchingView({
       </section>
     );
   }
+  const slotCategoryMap = new Map(
+  matching.coverage.map((c) => [`${c.phase}-${c.category}`, c.category])
+  );
+  const selectedGaps = selectedCoverageCell
+  ? matching.gaps.filter(
+      (gap) =>
+        gap.phase === selectedCoverageCell.phase &&
+        gap.planetCategory === selectedCoverageCell.category
+    )
+  : [];
 
   const gapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
   const gapCounts = Object.fromEntries(
@@ -1516,12 +1526,15 @@ function MatchingView({
             onSelect={onSelectCoverageCell}
           />
           {selectedCoverageCell && (
-  <div className="mt-3 text-sm text-gray-400">
-    Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
-  </div>
-  
-)}
+            <div className="mt-3 text-sm text-gray-400">
+              Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
+              <div className="mt-2 text-xs text-gray-500">
+                Gaps: {selectedGaps.length}
+              </div>
+            </div>
+          )}
         </div>
+       
         <p className="mt-4 text-xs text-gray-500">
           Each cell shows assigned / required slots. Colour: green ≥ 100% · blue ≥ 75% · amber ≥ 40% · red &lt; 40%.
           Bonus zone capacity is budgeted independently from main zones.
