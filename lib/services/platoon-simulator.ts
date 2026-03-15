@@ -538,6 +538,49 @@ export function simulatePlatoonScenario(
   const baseline = precomputedBaseline ?? computePlatoonMatching(dataset);
 
   const simulatedDataset = applySimulationActions(dataset, actions);
+  const firstAction = actions[0];
+
+if (firstAction?.type === 'ADD_HYPOTHETICAL_UNIT') {
+  const matchingSlots = simulatedDataset.slots.filter((slot) => {
+    const s = slot as unknown as {
+      unitBaseId?: string;
+      eligibleRoster?: Array<{ memberId?: string; unitBaseId?: string }>;
+      requirementId?: string;
+      slotKey?: string;
+      platoonKey?: string;
+      zoneKey?: string;
+      phase?: string | number;
+    };
+
+    return s.unitBaseId === firstAction.unitBaseId;
+  });
+
+  console.log('[sim debug] first action visibility', {
+    actionMemberId: firstAction.memberId,
+    actionUnitBaseId: firstAction.unitBaseId,
+    matchingSlots: matchingSlots.length,
+    firstSlots: matchingSlots.slice(0, 5).map((slot) => {
+      const s = slot as unknown as {
+        requirementId?: string;
+        slotKey?: string;
+        eligibleRoster?: Array<{ memberId?: string; unitBaseId?: string }>;
+      };
+
+      const syntheticEligible = Array.isArray(s.eligibleRoster)
+        ? s.eligibleRoster.filter((entry) =>
+            typeof entry.memberId === 'string' &&
+            entry.memberId.includes('__sim__'),
+          ).map((entry) => entry.memberId)
+        : [];
+
+      return {
+        slotKey: s.requirementId ?? s.slotKey ?? null,
+        syntheticEligibleCount: syntheticEligible.length,
+        syntheticEligible,
+      };
+    }),
+  });
+}
   const simulated = computePlatoonMatching(simulatedDataset);
   const delta = buildDelta(baseline, simulated);
 
