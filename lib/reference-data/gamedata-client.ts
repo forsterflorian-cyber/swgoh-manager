@@ -9,6 +9,7 @@ const allVersionsSchema = z.record(
 
 const territoryBattleZoneSchema = z
   .object({
+    forceAlignment: z.coerce.number().int().nullish(),
     zoneDefinition: z
       .object({
         zoneId: z.string().trim().min(1).nullish(),
@@ -19,16 +20,7 @@ const territoryBattleZoneSchema = z
   })
   .passthrough();
 
-const territoryBattleDefinitionEntrySchema = z
-  .object({
-    id: z.string().trim().min(1),
-    nameKey: z.string().trim().nullish(),
-    roundCount: z.coerce.number().int().positive().nullish(),
-    territoryCategory: z.string().trim().nullish(),
-    forceAlignment: z.coerce.number().int().nullish(),
-    conflictZoneDefinition: z.array(territoryBattleZoneSchema).catch([]),
-  })
-  .passthrough();
+ 
 
 const territoryBattleDefinitionSchema = z
   .object({

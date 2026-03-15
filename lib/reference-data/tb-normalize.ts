@@ -100,13 +100,21 @@ export function normalizeRoteDefinition(input: {
       ? roteDefinition.roundCount
       : 6;
 
-  const linkedZoneNames = new Map<string, string>();
+  const linkedZones = new Map<
+    string,
+    { nameKey: string; forceAlignment: number | null }
+  >();
+
   for (const conflictZone of roteDefinition.conflictZoneDefinition) {
     const zoneId = conflictZone.zoneDefinition.zoneId?.trim();
     const zoneName = conflictZone.zoneDefinition.nameKey?.trim();
+    const forceAlignment = conflictZone.forceAlignment ?? null;
 
     if (zoneId && zoneName) {
-      linkedZoneNames.set(zoneId, zoneName);
+      linkedZones.set(zoneId, {
+        nameKey: zoneName,
+        forceAlignment,
+      });
     }
   }
 
@@ -151,18 +159,22 @@ export function normalizeRoteDefinition(input: {
     // const zoneKey = isBonus
     //   ? buildBonusZoneKey(phaseNumber, operation.id)
     //   : buildZoneKey(phaseNumber, conflictNumber!);
-    const explicitConflictNumber = parseTokenNumber(operation.conflict ?? null, 'C');
-    const linkedConflictNumber = parseConflictNumberFromLinkedId(operation.linkedConflictId);
+    const conflictNumber =
+      parseTokenNumber(operation.conflict ?? null, 'C') ??
+      parseConflictNumberFromLinkedId(operation.linkedConflictId);
 
-    const isBonus = explicitConflictNumber === null;
+    const isBonus = conflictNumber === null;
+
     const zoneKey = isBonus
-        ? buildBonusZoneKey(phaseNumber, operation.id)
-        : buildZoneKey(phaseNumber, explicitConflictNumber);
+      ? buildBonusZoneKey(phaseNumber, operation.id)
+      : buildZoneKey(phaseNumber, conflictNumber);
+
+    const linkedZone = linkedZones.get(operation.linkedConflictId?.trim() ?? '');
 
     const zoneName =
       operation.nameKey?.trim() ||
-      linkedZoneNames.get(operation.linkedConflictId ?? '') ||
-      (isBonus ? `Phase ${phaseNumber} Bonus` : `Phase ${phaseNumber} Zone ${explicitConflictNumber}`);
+      linkedZone?.nameKey ||
+      (isBonus ? `Phase ${phaseNumber} Bonus` : `Phase ${phaseNumber} Zone ${conflictNumber}`);
 
     const platoons = [...operation.squads]
       .map((squad, squadIndex) => {
@@ -201,10 +213,9 @@ export function normalizeRoteDefinition(input: {
     phase.zones.push({
       zoneKey,
       zoneName,
-      //sortOrder: operation.sort ?? conflictNumber ?? Number.MAX_SAFE_INTEGER,
-      sortOrder: isBonus 
+      sortOrder: isBonus
         ? (operation.sort ?? Number.MAX_SAFE_INTEGER)
-         : (operation.sort ?? explicitConflictNumber ?? Number.MAX_SAFE_INTEGER),
+        : (operation.sort ?? conflictNumber ?? Number.MAX_SAFE_INTEGER),
       isBonus,
       platoons,
     });
