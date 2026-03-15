@@ -274,7 +274,7 @@ export default function PublicGuildSimulatorPage({
     async function run() {
       setLoading(true);
       setError(null);
-
+console.log('[client] sending actions', debouncedActions);
       try {
         const res = await fetch(`/api/public/guild/${slug}/simulator`, {
           method: 'POST',
@@ -341,6 +341,7 @@ export default function PublicGuildSimulatorPage({
     };
   }, [slug, debouncedActions]);
 useEffect(() => {
+  console.log('[client] actions state', actions);
   const timeoutId = window.setTimeout(() => {
     setDebouncedActions(actions);
   }, 350);
@@ -353,10 +354,13 @@ useEffect(() => {
   const lookups = data?.lookups;
 
   function applyOne(action: PlatoonSimulatorAction) {
+console.log('[client] applyOne', action);
     setActions((prev) => dedupeActions([...prev, action]));
   }
 
   function applyAll(nextActions: PlatoonSimulatorAction[]) {
+      console.log('[client] applyAll', nextActions);
+
     setActions((prev) => dedupeActions([...prev, ...nextActions]));
   }
 
