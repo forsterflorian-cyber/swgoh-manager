@@ -52,7 +52,10 @@ const MEMBER_CAP_PER_CATEGORY = 10;
  * by the sort order of requirements fed into the matching.
  */
 const CATEGORY_PROCESSING_ORDER: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
-
+const DEBUG_UNITS = new Set([
+  'LOGRAY',
+  'LUKESKYWALKERFARMBOY',
+]);
 // ── Internal matching state ───────────────────────────────────────────────────
 
 /** `${memberId}:${unitBaseId}` — uniquely identifies one character instance. */
@@ -255,10 +258,36 @@ function buildGaps(
     const busyEligible: GapPossibleSource[] = [];
     const nearMissSources: GapPossibleSource[] = [];
 
+
+    
     for (const owner of owners) {
       const oKey = makeOwnerKey(owner.memberId, owner.unitBaseId);
       const playerName = memberNameMap.get(owner.memberId) ?? owner.playerName;
+      if (DEBUG_UNITS.has(slot.unitBaseId)) {
+        const assignedReq = state.ownerToReq.get(oKey);
 
+        console.log('[matching:gap-candidate]', {
+          gapSlot: slot.slotKey,
+          gapUnit: slot.unitBaseId,
+          gapUnitName: slot.unitName,
+
+          candidateMember: owner.memberId,
+          playerName,
+
+          relic: owner.relicTier,
+          rarity: owner.rarity,
+
+          qualifies: ownerQualifies(owner, slot),
+          nearMiss: isNearMiss(owner, slot),
+
+          alreadyAssigned: state.ownerToReq.has(oKey),
+          assignedSlot: assignedReq ?? null,
+
+          memberLoad: state.memberLoad.get(owner.memberId) ?? 0,
+          atCap:
+            (state.memberLoad.get(owner.memberId) ?? 0) >= MEMBER_CAP_PER_CATEGORY,
+        });
+      }
       if (ownerQualifies(owner, slot)) {
         const source: GapPossibleSource = {
           memberId: owner.memberId,
@@ -309,7 +338,23 @@ function buildGaps(
       recommendedAction = 'acquire';
       possibleSources = [];
     }
+    if (DEBUG_UNITS.has(slot.unitBaseId)) {
+      console.log('[matching:gap-result]', {
+        slotKey: slot.slotKey,
+        unit: slot.unitBaseId,
+        action: recommendedAction,
 
+        freeEligible: freeEligible.map((s) => s.playerName),
+
+        busyEligible: busyEligible.map((s) => s.playerName),
+
+        nearMiss: nearMissSources.map((s) => ({
+          player: s.playerName,
+          relic: s.missingRelicTiers,
+          rarity: s.missingRarity,
+        })),
+      });
+    }
     return {
       requirementId: slot.slotKey,
       phase: slot.phase,
@@ -396,10 +441,20 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
 
       // ── Assignments ──────────────────────────────────────────────────────
       const slotIndex = new Map(group.map((s) => [s.slotKey, s]));
+      
       for (const [reqId, oKey] of state.reqToOwner) {
         const slot = slotIndex.get(reqId);
         if (!slot) continue;
         const memberId = memberIdFromOwnerKey(oKey);
+          if (DEBUG_UNITS.has(slot.unitBaseId)) {
+            console.log('[matching:assignment]', {
+              slot: reqId,
+              unit: slot.unitBaseId,
+              unitName: slot.unitName,
+              member: memberId,
+              playerName: memberNameMap.get(memberId) ?? memberId,
+            });
+          }
         allAssignments.push({
           requirementId: reqId,
           phase: slot.phase,
