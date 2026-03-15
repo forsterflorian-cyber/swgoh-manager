@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { applySimulationActions, simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
+import { simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
 import { findSequentialFullPlatoonPlan } from '@/lib/services/platoon-completion-advisor';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 import type { PlatoonSimulatorAction } from '@/lib/types/platoon-simulator';
@@ -57,23 +57,20 @@ export async function POST(request: Request, { params }: RouteContext) {
       );
     }
 
-    const simulationStartedAt = Date.now();
-    const simulation = await withStageTimeout('simulation', () =>
-      simulatePlatoonScenario(dataset, actions),
-    );
-    timings.simulation_ms = Date.now() - simulationStartedAt;
+const simulationStartedAt = Date.now();
+const simulation = await withStageTimeout('simulation', () =>
+  simulatePlatoonScenario(dataset, actions),
+);
+timings.simulation_ms = Date.now() - simulationStartedAt;
 
-    const applyStartedAt = Date.now();
-    const simulatedDataset = await withStageTimeout('apply_actions', () =>
-      applySimulationActions(dataset, actions),
-    );
-    timings.apply_actions_ms = Date.now() - applyStartedAt;
-
-    const advisoryStartedAt = Date.now();
-    const advisory = await withStageTimeout('advisor', () =>
-      findSequentialFullPlatoonPlan(simulatedDataset),
-    );
-    timings.advisor_ms = Date.now() - advisoryStartedAt;
+const advisoryStartedAt = Date.now();
+const advisory = await withStageTimeout('advisor', () =>
+  findSequentialFullPlatoonPlan(
+    simulation.simulatedDataset,
+    simulation.simulated,
+  ),
+);
+timings.advisor_ms = Date.now() - advisoryStartedAt;
 
     timings.total_ms = Date.now() - startedAt;
 

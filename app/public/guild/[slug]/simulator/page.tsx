@@ -249,7 +249,7 @@ export default function PublicGuildSimulatorPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
-
+  const [debouncedActions, setDebouncedActions] = useState<PlatoonSimulatorAction[]>([]);
   useEffect(() => {
     let cancelled = false;
 
@@ -269,7 +269,7 @@ export default function PublicGuildSimulatorPage({
 
     const requestId = ++requestIdRef.current;
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 6000000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
 
     async function run() {
       setLoading(true);
@@ -281,7 +281,7 @@ export default function PublicGuildSimulatorPage({
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ actions }),
+          body: JSON.stringify({ actions: debouncedActions  }),
           signal: controller.signal,
         });
 
@@ -339,8 +339,14 @@ export default function PublicGuildSimulatorPage({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [slug, actions]);
+  }, [slug, debouncedActions]);
+useEffect(() => {
+  const timeoutId = window.setTimeout(() => {
+    setDebouncedActions(actions);
+  }, 350);
 
+  return () => window.clearTimeout(timeoutId);
+}, [actions]);
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;

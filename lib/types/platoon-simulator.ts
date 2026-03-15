@@ -62,10 +62,12 @@ export type PlatoonSimulatorResponse = {
 export type NextFullPlatoonResult = {
   targetPlatoonId: string;
   actions: PlatoonSimulatorAction[];
-  deltaFullPlatoons: number;
   deltaCoveredSlots: number;
+  deltaFullPlatoons: number;
   changedAssignmentCount?: number;
   displacedAssignmentCount?: number;
+  becameFullPlatoonIds?: string[];
+  noLongerFullPlatoonIds?: string[];
   targetCoveredSlotsBefore: number;
   targetCoveredSlotsAfter: number;
   targetMissingSlotsBefore: number;
