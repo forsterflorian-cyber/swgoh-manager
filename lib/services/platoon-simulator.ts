@@ -224,42 +224,59 @@ function removeStrategicBlock(
  * Actions verändern nur den Dataset-Input.
  * Danach wird das Matching vollständig neu berechnet.
  */
+type SimulatedEligibleRosterEntry = Record<string, unknown>;
+
+type SimulatedSlot = StrategicPlannerDataset['slots'][number] & {
+  eligibleRoster?: SimulatedEligibleRosterEntry[];
+};
+
+type SimulatedAssignment = StrategicPlannerDataset['strategicAssignments'][number];
+
 export function applySimulationActions(
   dataset: StrategicPlannerDataset,
   actions: PlatoonSimulatorAction[],
 ): StrategicPlannerDataset {
-  const cloned: StrategicPlannerDataset = structuredClone(dataset);
-
-  clearDerivedSimulationState(cloned);
-
-  for (const action of actions) {
-    switch (action.type) {
-      case 'MAKE_SLOT_ELIGIBLE': {
-        const slot = findSlotByKey(cloned, action.slotKey);
-        if (!slot) {
-          continue;
-        }
-
-        upsertEligibleRosterEntry(cloned, slot, action.memberId);
-        break;
-      }
-
-      case 'REMOVE_SOURCE_BLOCK': {
-        removeStrategicBlock(cloned, action);
-        break;
-      }
-
-      default: {
-        assertNever(action);
-      }
-    }
+  if (actions.length === 0) {
+    return dataset;
   }
 
-  clearDerivedSimulationState(cloned);
+  const cloned: StrategicPlannerDataset = {
+    ...dataset,
+    slots: dataset.slots.map((slot) => cloneSlotForSimulation(slot)),
+    strategicAssignments: Array.isArray(dataset.strategicAssignments)
+      ? dataset.strategicAssignments.map((assignment) => ({ ...assignment }))
+      : ([] as SimulatedAssignment[]),
+  };
+
+  for (const action of actions) {
+    if (action.type === 'MAKE_SLOT_ELIGIBLE') {
+      const slot = findSlotByKey(cloned, action.slotKey) as SimulatedSlot | undefined;
+      if (!slot) continue;
+
+      upsertEligibleRosterEntry(cloned, slot, action.memberId);
+      continue;
+    }
+
+    if (action.type === 'REMOVE_SOURCE_BLOCK') {
+      removeStrategicBlock(cloned, action);
+    }
+  }
 
   return cloned;
 }
 
+function cloneSlotForSimulation(
+  slot: StrategicPlannerDataset['slots'][number],
+): StrategicPlannerDataset['slots'][number] {
+  const simulatedSlot = slot as SimulatedSlot;
+
+  return {
+    ...slot,
+    ...(Array.isArray(simulatedSlot.eligibleRoster)
+      ? { eligibleRoster: [...simulatedSlot.eligibleRoster] }
+      : {}),
+  };
+}
 function clearDerivedSimulationState(dataset: StrategicPlannerDataset): void {
   const mutable = dataset as unknown as Record<string, unknown>;
 
