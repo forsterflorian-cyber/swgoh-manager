@@ -168,15 +168,26 @@ export function normalizeRoteDefinition(input: {
     // const zoneKey = isBonus
     //   ? buildBonusZoneKey(phaseNumber, operation.id)
     //   : buildZoneKey(phaseNumber, conflictNumber!);
+    
     const conflictNumber =
       parseTokenNumber(operation.conflict ?? null, 'C') ??
       parseConflictNumberFromLinkedId(operation.linkedConflictId);
 
-    const isBonus = conflictNumber === null;
+    const operationType =
+      (operation as { type?: string | null }).type?.trim().toUpperCase() ?? '';
+
+    const isBonus =
+      operationType.includes('BONUS') ||
+      operation.id.toLowerCase().includes('bonus') ||
+      (operation.nameKey?.toLowerCase().includes('bonus') ?? false);
+
+    if (!isBonus && conflictNumber === null) {
+      continue;
+    }
 
     const zoneKey = isBonus
       ? buildBonusZoneKey(phaseNumber, operation.id)
-      : buildZoneKey(phaseNumber, conflictNumber);
+      : buildZoneKey(phaseNumber, conflictNumber!);
 
     const linkedZone = linkedZones.get(operation.linkedConflictId?.trim() ?? '');
 
