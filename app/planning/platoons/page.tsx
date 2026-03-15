@@ -1472,56 +1472,114 @@ function MatchingView({
       </section>
     );
   }
-  const slotCategoryMap = new Map(
-  matching.coverage.map((c) => [`${c.phase}-${c.category}`, c.category])
-  );
-  const selectedGaps = selectedCoverageCell
-  ? matching.gaps.filter(
-      (gap) =>
-        gap.phase === selectedCoverageCell.phase &&
-        gap.planetCategory === selectedCoverageCell.category
-    )
-  : [];
+
+  const selectedCoverage = selectedCoverageCell
+    ? matching.coverage.find(
+        (c) =>
+          c.phase === selectedCoverageCell.phase &&
+          c.category === selectedCoverageCell.category
+      ) ?? null
+    : null;
+
   const selectedAssignments = selectedCoverageCell
-  ? matching.assignments.filter(
-      (a) =>
-        a.phase === selectedCoverageCell.phase &&
-        a.planetCategory === selectedCoverageCell.category
-    )
-  : [];
-  const assignmentsByPlatoon = new Map<string, typeof selectedAssignments>();
+    ? matching.assignments.filter(
+        (a) =>
+          a.phase === selectedCoverageCell.phase &&
+          a.planetCategory === selectedCoverageCell.category
+      )
+    : [];
 
-for (const a of selectedAssignments) {
-  const arr = assignmentsByPlatoon.get(a.platoonKey) ?? [];
-  arr.push(a);
-  assignmentsByPlatoon.set(a.platoonKey, arr);
-}
+  const selectedGaps = selectedCoverageCell
+    ? matching.gaps.filter(
+        (gap) =>
+          gap.phase === selectedCoverageCell.phase &&
+          gap.planetCategory === selectedCoverageCell.category
+      )
+    : [];
 
-const gapsByPlatoon = new Map<string, typeof selectedGaps>();
+  const selectedGapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
 
-for (const gap of selectedGaps) {
-  const arr = gapsByPlatoon.get(gap.platoonKey) ?? [];
-  arr.push(gap);
-  gapsByPlatoon.set(gap.platoonKey, arr);
-}
-const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoon.keys()])].sort();
-  const gapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
-  const gapCounts = Object.fromEntries(
-    gapActionOrder.map((a) => [a, matching.gaps.filter((g) => g.recommendedAction === a).length])
+  const selectedGapCounts = Object.fromEntries(
+    selectedGapActionOrder.map((action) => [
+      action,
+      selectedGaps.filter((g) => g.recommendedAction === action).length,
+    ])
   ) as Record<GapActionType, number>;
 
-  const visibleGaps =
+  const visibleSelectedGaps =
+    gapFilter === 'all'
+      ? [...selectedGaps].sort(
+          (a, b) =>
+            selectedGapActionOrder.indexOf(a.recommendedAction) -
+            selectedGapActionOrder.indexOf(b.recommendedAction)
+        )
+      : selectedGaps.filter((g) => g.recommendedAction === gapFilter);
+
+  const rowsByPlatoon = new Map<
+    string,
+    Array<
+      | {
+          kind: 'assigned';
+          requirementId: string;
+          slotNumber: number;
+          unitName: string;
+          playerName: string;
+        }
+      | {
+          kind: 'open';
+          requirementId: string;
+          slotNumber: number;
+          unitName: string;
+          action: string;
+        }
+    >
+  >();
+
+  for (const assignment of selectedAssignments) {
+    const existing = rowsByPlatoon.get(assignment.platoonKey) ?? [];
+    existing.push({
+      kind: 'assigned',
+      requirementId: assignment.requirementId,
+      slotNumber: assignment.slotNumber,
+      unitName: assignment.unitName ?? assignment.unitBaseId,
+      playerName: assignment.playerName ?? assignment.memberId,
+    });
+    rowsByPlatoon.set(assignment.platoonKey, existing);
+  }
+
+  for (const gap of selectedGaps) {
+    const existing = rowsByPlatoon.get(gap.platoonKey) ?? [];
+    existing.push({
+      kind: 'open',
+      requirementId: gap.requirementId,
+      slotNumber: gap.slotNumber,
+      unitName: gap.unitName ?? gap.unitBaseId,
+      action: formatBestNextAction(gap),
+    });
+    rowsByPlatoon.set(gap.platoonKey, existing);
+  }
+
+  const platoonKeys = [...rowsByPlatoon.keys()].sort();
+
+  const globalGapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
+  const globalGapCounts = Object.fromEntries(
+    globalGapActionOrder.map((action) => [
+      action,
+      matching.gaps.filter((g) => g.recommendedAction === action).length,
+    ])
+  ) as Record<GapActionType, number>;
+
+  const visibleGlobalGaps =
     gapFilter === 'all'
       ? [...matching.gaps].sort(
           (a, b) =>
-            gapActionOrder.indexOf(a.recommendedAction) -
-            gapActionOrder.indexOf(b.recommendedAction)
+            globalGapActionOrder.indexOf(a.recommendedAction) -
+            globalGapActionOrder.indexOf(b.recommendedAction)
         )
       : matching.gaps.filter((g) => g.recommendedAction === gapFilter);
 
   return (
     <section className="mt-6 space-y-8">
-      {/* Coverage grid */}
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -1542,66 +1600,178 @@ const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoo
             </span>
           </div>
         </div>
+
         <div className="mt-5">
-          <CoverageGrid
-            coverage={matching.coverage}
-            onSelect={onSelectCoverageCell}
-          />
-        {selectedCoverageCell && (
-          <div className="mt-4 space-y-4">
-            {platoonKeys.map((platoonKey) => (
-              <div key={platoonKey} className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
-                <div className="mb-2 text-sm font-semibold text-white">
-                  {platoonKey}
-                </div>
-
-                {(assignmentsByPlatoon.get(platoonKey) ?? [])
-                  .sort((a, b) => a.slotNumber - b.slotNumber)
-                  .map((a) => (
-                    <div key={a.requirementId} className="text-sm text-gray-200">
-                      {a.unitName} → {a.playerName}
-                    </div>
-                  ))}
-
-                {(gapsByPlatoon.get(platoonKey) ?? [])
-                  .sort((a, b) => a.slotNumber - b.slotNumber)
-                  .map((a) => {
-                  const source = a.possibleSources?.[0];
-
-                  let action = 'Acquire or unlock unit';
-
-                  if (a.recommendedAction === 'use_unused' && source) {
-                    action = `Assign ${source.playerName}`;
-                  }
-
-                  if (a.recommendedAction === 'upgrade' && source) {
-                    const parts: string[] = [];
-                    if (source.missingRelicTiers > 0) parts.push(`+${source.missingRelicTiers} relic`);
-                    if (source.missingRarity > 0) parts.push(`+${source.missingRarity} star`);
-                    action = `Upgrade ${source.playerName}${parts.length ? ` (${parts.join(', ')})` : ''}`;
-                  }
-
-                  return (
-                    <div key={a.requirementId} className="text-sm text-gray-400">
-                      <div>{a.unitName} → offen</div>
-                      <div className="text-xs text-gray-500">Best next action: {action}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        )}
+          <CoverageGrid coverage={matching.coverage} onSelect={onSelectCoverageCell} />
         </div>
-       
+
         <p className="mt-4 text-xs text-gray-500">
-          Each cell shows assigned / required slots. Colour: green ≥ 100% · blue ≥ 75% · amber ≥ 40% · red &lt; 40%.
-          Bonus zone capacity is budgeted independently from main zones.
+          Each cell shows assigned / required slots. Colour: green ≥ 100% · blue ≥ 75% · amber ≥
+          40% · red &lt; 40%. Bonus zone capacity is budgeted independently from main zones.
         </p>
       </div>
 
-      {/* Gap panel */}
-      {matching.gaps.length > 0 && (
+      {selectedCoverageCell && selectedCoverage && (
+        <>
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                  Selected Scope
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold text-white">
+                  P{selectedCoverage.phase} ·{' '}
+                  {selectedCoverage.category === 'SPECIAL' ? 'Bonus' : selectedCoverage.category}
+                </h3>
+              </div>
+              <div className="flex flex-wrap gap-3 text-sm">
+                <span className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-emerald-200">
+                  {selectedCoverage.assignedCount} assigned
+                </span>
+                <span className="rounded-full border border-red-900 bg-red-950/40 px-3 py-1 text-red-200">
+                  {selectedGaps.length} open
+                </span>
+                <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
+                  {selectedCoverage.coveragePercent}% coverage
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                  Gap Analysis
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold text-white">
+                  {selectedGaps.length} unresolved slot{selectedGaps.length === 1 ? '' : 's'} in
+                  this scope
+                </h3>
+              </div>
+              <p className="max-w-sm text-sm text-gray-400">
+                Only the open slots for the selected phase/category.
+              </p>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <FilterPill
+                label="All"
+                active={gapFilter === 'all'}
+                onClick={() => setGapFilter('all')}
+              />
+              {selectedGapActionOrder.map((action) =>
+                selectedGapCounts[action] > 0 ? (
+                  <FilterPill
+                    key={action}
+                    label={`${GAP_ACTION_META[action].label} (${selectedGapCounts[action]})`}
+                    active={gapFilter === action}
+                    onClick={() => setGapFilter(action)}
+                    secondary
+                  />
+                ) : null
+              )}
+            </div>
+
+            {gapFilter !== 'all' && visibleSelectedGaps.length > 0 && (
+              <p className="mt-3 text-xs text-gray-500">{GAP_ACTION_META[gapFilter].detail}</p>
+            )}
+
+            <div className="mt-4 space-y-2">
+              {visibleSelectedGaps.length > 0 ? (
+                visibleSelectedGaps.map((gap) => <GapCard key={gap.requirementId} gap={gap} />)
+              ) : (
+                <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-100">
+                  No open slots in the current filter for this phase/category.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                  Platoon Detail
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold text-white">
+                  Assignments and open slots by platoon
+                </h3>
+              </div>
+              <p className="max-w-sm text-sm text-gray-400">
+                Compact slot view for the selected phase/category.
+              </p>
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              {platoonKeys.map((platoonKey, index) => {
+                const rows = [...(rowsByPlatoon.get(platoonKey) ?? [])].sort(
+                  (a, b) => a.slotNumber - b.slotNumber
+                );
+
+                const openCount = rows.filter((row) => row.kind === 'open').length;
+
+                return (
+                  <div
+                    key={platoonKey}
+                    className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-lg font-semibold text-white">
+                          {formatPlatoonTitle(platoonKey, index)}
+                        </h4>
+                        <p className="mt-1 text-xs text-gray-500">{platoonKey}</p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          openCount > 0
+                            ? 'border-amber-900 bg-amber-950/40 text-amber-200'
+                            : 'border-emerald-900 bg-emerald-950/40 text-emerald-200'
+                        }`}
+                      >
+                        {openCount > 0 ? `${openCount} open` : 'Complete'}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {rows.map((row) =>
+                        row.kind === 'assigned' ? (
+                          <div
+                            key={row.requirementId}
+                            className="rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-3"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-sm text-white">
+                                {row.slotNumber}. {row.unitName}
+                              </div>
+                              <div className="text-sm text-gray-300">{row.playerName}</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            key={row.requirementId}
+                            className="rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3"
+                          >
+                            <div className="text-sm text-white">
+                              {row.slotNumber}. {row.unitName} → offen
+                            </div>
+                            <div className="mt-1 text-xs text-amber-200">
+                              Best next action: {row.action}
+                            </div>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {!selectedCoverageCell && matching.gaps.length > 0 && (
         <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -1613,22 +1783,22 @@ const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoo
               </h3>
             </div>
             <p className="max-w-sm text-sm text-gray-400">
-              Slots that the optimal matching could not fill, with the cheapest known closure path.
+              Select a coverage cell above for a scoped drilldown, or review the global gap list
+              here.
             </p>
           </div>
 
-          {/* Action filter */}
           <div className="mt-4 flex flex-wrap gap-2">
             <FilterPill
               label="All"
               active={gapFilter === 'all'}
               onClick={() => setGapFilter('all')}
             />
-            {gapActionOrder.map((action) =>
-              gapCounts[action] > 0 ? (
+            {globalGapActionOrder.map((action) =>
+              globalGapCounts[action] > 0 ? (
                 <FilterPill
                   key={action}
-                  label={`${GAP_ACTION_META[action].label} (${gapCounts[action]})`}
+                  label={`${GAP_ACTION_META[action].label} (${globalGapCounts[action]})`}
                   active={gapFilter === action}
                   onClick={() => setGapFilter(action)}
                   secondary
@@ -1637,13 +1807,12 @@ const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoo
             )}
           </div>
 
-          {/* Active filter explanation */}
           {gapFilter !== 'all' && (
             <p className="mt-3 text-xs text-gray-500">{GAP_ACTION_META[gapFilter].detail}</p>
           )}
 
           <div className="mt-4 space-y-2">
-            {visibleGaps.map((gap) => (
+            {visibleGlobalGaps.map((gap) => (
               <GapCard key={gap.requirementId} gap={gap} />
             ))}
           </div>
@@ -1658,6 +1827,35 @@ const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoo
       )}
     </section>
   );
+}
+
+function formatBestNextAction(gap: PlatoonMatchingGap) {
+  const source = gap.possibleSources?.[0];
+
+  if (gap.recommendedAction === 'use_unused' && source) {
+    return `Assign ${source.playerName}`;
+  }
+
+  if (gap.recommendedAction === 'upgrade' && source) {
+    const parts: string[] = [];
+    if (source.missingRelicTiers > 0) parts.push(`+${source.missingRelicTiers} relic`);
+    if (source.missingRarity > 0) parts.push(`+${source.missingRarity} star`);
+    return `Upgrade ${source.playerName}${parts.length ? ` (${parts.join(', ')})` : ''}`;
+  }
+
+  if (gap.recommendedAction === 'reassign' && source) {
+    return `Reassign ${source.playerName}`;
+  }
+
+  return 'Acquire or unlock unit';
+}
+
+function formatPlatoonTitle(platoonKey: string, index: number) {
+  const match = platoonKey.match(/(?:platoon|pl)-?(\d+)/i);
+  if (match) {
+    return `Platoon ${match[1]}`;
+  }
+  return `Platoon ${index + 1}`;
 }
 
 function MemberTargetsView({
