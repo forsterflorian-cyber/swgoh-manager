@@ -16,10 +16,9 @@ import {
 } from '@/lib/services/platoon-simulator';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 
-type GapCandidateAction = {
-  gap: PlatoonMatchingGap;
+type PlatoonGapGroup = {
   platoonId: string;
-  action: PlatoonSimulatorAction;
+  gaps: PlatoonMatchingGap[];
 };
 
 function findDatasetSlotForGap(
@@ -52,7 +51,7 @@ function getPlatoonIdForGap(gap: PlatoonMatchingGap): string {
   return [gap.phase, gap.zoneKey, gap.platoonKey].join('::');
 }
 
-function buildMakeSlotEligibleAction(
+function buildActionForGapSource(
   slot: StrategicPlannerSlotInput,
   source: GapPossibleSource,
 ): PlatoonSimulatorAction {
@@ -65,35 +64,6 @@ function buildMakeSlotEligibleAction(
   };
 }
 
-function getCandidateActionsForGap(
-  dataset: StrategicPlannerDataset,
-  gap: PlatoonMatchingGap,
-): GapCandidateAction[] {
-  const slot = findDatasetSlotForGap(dataset, gap);
-  if (!slot) return [];
-
-  const platoonId = getPlatoonIdForGap(gap);
-  const result: GapCandidateAction[] = [];
-
-  for (const source of gap.possibleSources.slice(0, 3)) {
-    result.push({
-      gap,
-      platoonId,
-      action: buildMakeSlotEligibleAction(slot, source),
-    });
-  }
-
-  return result;
-}
-
-function getActionIdentity(action: PlatoonSimulatorAction): string {
-  if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-    return `${action.type}::${action.slotKey}::${action.memberId}`;
-  }
-
-  return action.id;
-}
-
 function dedupeActions(
   actions: PlatoonSimulatorAction[],
 ): PlatoonSimulatorAction[] {
@@ -101,23 +71,15 @@ function dedupeActions(
   const result: PlatoonSimulatorAction[] = [];
 
   for (const action of actions) {
-    const key = getActionIdentity(action);
+    let key = action.id;
+
+    if (action.type === 'MAKE_SLOT_ELIGIBLE') {
+      key = `${action.type}::${action.slotKey}::${action.memberId}`;
+    }
+
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(action);
-  }
-
-  return result;
-}
-
-function getAllGapCandidateActions(
-  dataset: StrategicPlannerDataset,
-  matching: PlatoonMatchingResult,
-): GapCandidateAction[] {
-  const result: GapCandidateAction[] = [];
-
-  for (const gap of matching.gaps) {
-    result.push(...getCandidateActionsForGap(dataset, gap));
   }
 
   return result;
@@ -128,6 +90,13 @@ function scoreCandidate(
   best: NextFullPlatoonResult | null,
 ): boolean {
   if (!best) return true;
+
+  const candidateActionCount = candidate.actions.length;
+  const bestActionCount = best.actions.length;
+
+  if (candidateActionCount !== bestActionCount) {
+    return candidateActionCount < bestActionCount;
+  }
 
   if (candidate.deltaFullPlatoons !== best.deltaFullPlatoons) {
     return candidate.deltaFullPlatoons > best.deltaFullPlatoons;
@@ -145,7 +114,7 @@ function scoreCandidate(
     return candidate.displacedAssignmentCount < best.displacedAssignmentCount;
   }
 
-  return candidate.actions.length < best.actions.length;
+  return candidate.targetPlatoonId < best.targetPlatoonId;
 }
 
 function evaluateActionSet(
@@ -172,69 +141,155 @@ function evaluateActionSet(
   };
 }
 
+function groupGapsByPlatoon(
+  matching: PlatoonMatchingResult,
+): PlatoonGapGroup[] {
+  const map = new Map<string, PlatoonMatchingGap[]>();
+
+  for (const gap of matching.gaps) {
+    const platoonId = getPlatoonIdForGap(gap);
+    const list = map.get(platoonId);
+
+    if (list) {
+      list.push(gap);
+    } else {
+      map.set(platoonId, [gap]);
+    }
+  }
+
+  return Array.from(map.entries())
+    .map(([platoonId, gaps]) => ({ platoonId, gaps }))
+    .sort((a, b) => {
+      if (a.gaps.length !== b.gaps.length) {
+        return a.gaps.length - b.gaps.length;
+      }
+
+      return a.platoonId.localeCompare(b.platoonId);
+    });
+}
+
+function getCandidateActionsForGap(
+  dataset: StrategicPlannerDataset,
+  gap: PlatoonMatchingGap,
+  perGapLimit: number,
+): PlatoonSimulatorAction[] {
+  const slot = findDatasetSlotForGap(dataset, gap);
+  if (!slot) return [];
+
+  return gap.possibleSources.slice(0, perGapLimit).map((source) => {
+    return buildActionForGapSource(slot, source);
+  });
+}
+
+function generateActionCombosForPlatoon(
+  dataset: StrategicPlannerDataset,
+  gaps: PlatoonMatchingGap[],
+  perGapLimit: number,
+  maxGapCount: number,
+): PlatoonSimulatorAction[][] {
+  const limitedGaps = gaps.slice(0, maxGapCount);
+  if (limitedGaps.length === 0) return [];
+
+  const actionsPerGap = limitedGaps.map((gap) =>
+    getCandidateActionsForGap(dataset, gap, perGapLimit),
+  );
+
+  if (actionsPerGap.some((actions) => actions.length === 0)) {
+    return [];
+  }
+
+  const results: PlatoonSimulatorAction[][] = [];
+  const current: PlatoonSimulatorAction[] = [];
+  const usedMembers = new Set<string>();
+  const seenCombos = new Set<string>();
+
+  function backtrack(index: number) {
+    if (index === actionsPerGap.length) {
+      const deduped = dedupeActions(current);
+      if (deduped.length !== limitedGaps.length) return;
+
+      const comboKey = deduped
+        .map((action) => action.id)
+        .sort((a, b) => a.localeCompare(b))
+        .join('||');
+
+      if (seenCombos.has(comboKey)) return;
+      seenCombos.add(comboKey);
+
+      results.push([...deduped]);
+      return;
+    }
+
+    for (const action of actionsPerGap[index] ?? []) {
+      if (usedMembers.has(action.memberId)) continue;
+
+      usedMembers.add(action.memberId);
+      current.push(action);
+      backtrack(index + 1);
+      current.pop();
+      usedMembers.delete(action.memberId);
+    }
+  }
+
+  backtrack(0);
+  return results;
+}
+
+function findBestCompletionForPlatoon(
+  dataset: StrategicPlannerDataset,
+  platoonId: string,
+  gaps: PlatoonMatchingGap[],
+): NextFullPlatoonResult | null {
+  if (gaps.length === 0) return null;
+
+  const perGapLimit = 3;
+  const maxGapCount = Math.min(gaps.length, 3);
+
+  let best: NextFullPlatoonResult | null = null;
+
+  for (let gapCount = 1; gapCount <= maxGapCount; gapCount += 1) {
+    const combos = generateActionCombosForPlatoon(
+      dataset,
+      gaps.slice(0, gapCount),
+      perGapLimit,
+      gapCount,
+    );
+
+    for (const combo of combos) {
+      const candidate = evaluateActionSet(dataset, combo);
+      if (!candidate) continue;
+      if (candidate.targetPlatoonId !== platoonId) continue;
+
+      if (scoreCandidate(candidate, best)) {
+        best = candidate;
+      }
+    }
+
+    if (best) {
+      return best;
+    }
+  }
+
+  return null;
+}
+
 export function findNextFullPlatoon(
   dataset: StrategicPlannerDataset,
   matching: PlatoonMatchingResult,
 ): NextFullPlatoonResult | null {
-  const allCandidates = getAllGapCandidateActions(dataset, matching);
+  const platoons = groupGapsByPlatoon(matching);
 
   let best: NextFullPlatoonResult | null = null;
 
-  for (const single of allCandidates) {
-    const candidate = evaluateActionSet(dataset, [single.action]);
+  for (const platoon of platoons) {
+    const candidate = findBestCompletionForPlatoon(
+      dataset,
+      platoon.platoonId,
+      platoon.gaps,
+    );
+
     if (candidate && scoreCandidate(candidate, best)) {
       best = candidate;
-    }
-  }
-
-  if (best) return best;
-
-  const gapsByPlatoon = new Map<string, PlatoonMatchingGap[]>();
-
-  for (const gap of matching.gaps) {
-    const platoonId = getPlatoonIdForGap(gap);
-    const existing = gapsByPlatoon.get(platoonId);
-    if (existing) {
-      existing.push(gap);
-    } else {
-      gapsByPlatoon.set(platoonId, [gap]);
-    }
-  }
-
-  const prioritizedPlatoons = Array.from(gapsByPlatoon.entries())
-    .sort((a, b) => a[1].length - b[1].length)
-    .slice(0, 8);
-
-  for (const [platoonId, gaps] of prioritizedPlatoons) {
-    const relevantGaps = gaps.slice(0, 3);
-    const platoonGapIds = new Set(relevantGaps.map(getGapId));
-
-    const platoonCandidates = allCandidates.filter((candidate) => {
-      return (
-        candidate.platoonId === platoonId &&
-        platoonGapIds.has(getGapId(candidate.gap))
-      );
-    });
-
-    for (let i = 0; i < platoonCandidates.length; i++) {
-      for (let j = i + 1; j < platoonCandidates.length; j++) {
-        const left = platoonCandidates[i];
-        const right = platoonCandidates[j];
-        if (!left || !right) continue;
-
-        if (getGapId(left.gap) === getGapId(right.gap)) continue;
-
-        if (left.action.memberId === right.action.memberId) continue;
-
-        const candidate = evaluateActionSet(dataset, [
-          left.action,
-          right.action,
-        ]);
-
-        if (candidate && scoreCandidate(candidate, best)) {
-          best = candidate;
-        }
-      }
     }
   }
 
