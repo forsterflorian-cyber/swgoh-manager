@@ -279,17 +279,17 @@ function buildDelta(
 function buildSyntheticRosterEntry(
   action: Extract<PlatoonSimulatorAction, { type: 'ADD_HYPOTHETICAL_UNIT' }>,
   index: number,
-): DatasetRosterEntry {
+): StrategicPlannerDataset['roster'][number] {
   return {
     memberId: `${action.memberId}__sim__${index}`,
-    unitBaseId: action.unitBaseId,
-    rarity: action.rarity ?? 0,
-    relicTier: action.relicTier ?? 0,
     allyCode: `SIM-${index}`,
     playerName: `[sim] ${action.memberId}`,
+    unitBaseId: action.unitBaseId,
     unitName: action.unitBaseId,
-    gearLevel: null,
-  };
+    rarity: action.rarity ?? 0,
+    relicTier: action.relicTier ?? 0,
+    gearLevel: 0,
+  } as StrategicPlannerDataset['roster'][number];
 }
 
 function isRosterEntryEligibleForSlot(
@@ -421,7 +421,7 @@ function ensureSyntheticMemberExists(
     allyCode: `SIM-${memberId}`,
     galacticPower: 0,
     lastSynced: new Date(0).toISOString(),
-  });
+  } as StrategicPlannerDataset['members'][number]);
 }
 function applySingleAction(
   dataset: StrategicPlannerDataset,
@@ -432,13 +432,38 @@ function applySingleAction(
 case 'ADD_HYPOTHETICAL_UNIT': {
   const syntheticEntry = buildSyntheticRosterEntry(action, syntheticIndexRef.value);
   syntheticIndexRef.value += 1;
+console.log('[sim add]', {
+  syntheticMemberId: syntheticEntry.memberId,
+  syntheticUnitBaseId: syntheticEntry.unitBaseId,
+  rosterCount: dataset.roster.length,
+  membersCount: dataset.members.length,
+});
+  ensureSyntheticMemberExists(
+    dataset,
+    syntheticEntry.memberId,
+    syntheticEntry.playerName,
+  );
+
+  dataset.roster.push(syntheticEntry);
 
   for (const slot of dataset.slots as DatasetSlot[]) {
-    if (isRosterEntryEligibleForSlot(syntheticEntry, slot)) {
+    if (isRosterEntryEligibleForSlot(
+      {
+        unitBaseId: syntheticEntry.unitBaseId,
+        rarity: syntheticEntry.rarity ?? 0,
+        relicTier: syntheticEntry.relicTier ?? 0,
+      },
+      slot,
+    )) {
       if (!Array.isArray(slot.eligibleRoster)) {
         slot.eligibleRoster = [];
       }
-      slot.eligibleRoster.push(syntheticEntry);
+      slot.eligibleRoster.push({
+        memberId: syntheticEntry.memberId,
+        unitBaseId: syntheticEntry.unitBaseId,
+        rarity: syntheticEntry.rarity ?? 0,
+        relicTier: syntheticEntry.relicTier ?? 0,
+      } as DatasetRosterEntry);
     }
   }
 

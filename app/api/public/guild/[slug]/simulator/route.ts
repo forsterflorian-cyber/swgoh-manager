@@ -89,6 +89,9 @@ timings.advisor_ms = Date.now() - advisoryStartedAt;
       }
     }
     console.log('[route] delta', simulation.delta);
+    console.log('[route] actionsCount', actions.length);
+    console.log('[route] firstAction', actions[0] ?? null);
+    
     return NextResponse.json(
       {
         simulation: {
