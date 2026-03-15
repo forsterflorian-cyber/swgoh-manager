@@ -3,13 +3,63 @@ import type {
   PlatoonSimulatorAction,
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
-import type { PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
-import { applySimulationActions, simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
-
-// TODO: an dein Projekt anpassen
+import type {
+  GapPossibleSource,
+  PlatoonMatchingGap,
+  PlatoonMatchingResult,
+} from '@/lib/types/platoon-readiness';
+import {
+  applySimulationActions,
+  simulatePlatoonScenario,
+} from '@/lib/services/platoon-simulator';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 
 type StrategicPlannerData = any;
+
+function readGapSlotId(gap: PlatoonMatchingGap): string | null {
+  const candidate = gap as unknown as Record<string, unknown>;
+
+  const possibleKeys = [
+    'slotId',
+    'platoonSlotId',
+    'targetSlotId',
+    'requirementId',
+    'id',
+  ];
+
+  for (const key of possibleKeys) {
+    const value = candidate[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function readPossibleSourceOwnerKey(source: GapPossibleSource): string | null {
+  const candidate = source as unknown as Record<string, unknown>;
+
+  const possibleKeys = [
+    'ownerKey',
+    'sourceOwnerKey',
+    'unitOwnerKey',
+    'memberKey',
+    'playerKey',
+    'rosterUnitId',
+    'unitId',
+    'id',
+  ];
+
+  for (const key of possibleKeys) {
+    const value = candidate[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
 
 function getTopGapBasedActions(
   matching: PlatoonMatchingResult,
@@ -17,27 +67,22 @@ function getTopGapBasedActions(
   const actions: PlatoonSimulatorAction[] = [];
 
   for (const gap of matching.gaps.slice(0, 10)) {
+    const slotId = readGapSlotId(gap);
+    if (!slotId) continue;
+
     const topSources = gap.possibleSources?.slice(0, 2) ?? [];
 
     for (const source of topSources) {
-      if (source.actionType === 'REMOVE_BLOCK' && source.ownerKey) {
-        actions.push({
-          id: `remove-block-${gap.slotId}-${source.ownerKey}`,
-          type: 'REMOVE_SOURCE_BLOCK',
-          ownerKey: source.ownerKey,
-          blockType: 'committed',
-        });
-      }
+      const ownerKey = readPossibleSourceOwnerKey(source);
+      if (!ownerKey) continue;
 
-      if (source.ownerKey) {
-        actions.push({
-          id: `eligible-${gap.slotId}-${source.ownerKey}`,
-          type: 'MAKE_SLOT_ELIGIBLE',
-          slotId: gap.slotId,
-          ownerKey: source.ownerKey,
-          reason: 'upgrade',
-        });
-      }
+      actions.push({
+        id: `eligible-${slotId}-${ownerKey}`,
+        type: 'MAKE_SLOT_ELIGIBLE',
+        slotId,
+        ownerKey,
+        reason: 'upgrade',
+      });
     }
   }
 
