@@ -114,6 +114,7 @@ function getAssignmentSlotKey(assignment: PlatoonMatchingAssignment): string | n
   const a = assignment as unknown as Record<string, unknown>;
 
   const directCandidates = [
+    a.requirementId,
     a.slotKey,
     a.targetSlotKey,
     a.requiredSlotKey,
@@ -138,6 +139,7 @@ function getAssignmentSlotKey(assignment: PlatoonMatchingAssignment): string | n
 
     const r = obj as Record<string, unknown>;
     const nestedCandidates = [
+      r.requirementId,
       r.slotKey,
       r.targetSlotKey,
       r.requiredSlotKey,
@@ -148,6 +150,24 @@ function getAssignmentSlotKey(assignment: PlatoonMatchingAssignment): string | n
       if (typeof candidate === 'string' && candidate.length > 0) {
         return candidate;
       }
+    }
+  }
+
+  return null;
+}
+
+function getDatasetSlotKey(slot: StrategicPlannerDataset['slots'][number]): string | null {
+  const s = slot as unknown as Record<string, unknown>;
+
+  const candidates = [
+    s.slotKey,
+    s.requirementId,
+    s.key,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      return candidate;
     }
   }
 
@@ -185,8 +205,11 @@ function getTargetPlatoonCoverage(
   for (const rawSlot of dataset.slots as SlotLike[]) {
     if (getPlatoonIdFromSlot(rawSlot) !== targetPlatoonId) continue;
 
+    const slotKey = getDatasetSlotKey(rawSlot);
+    if (!slotKey) continue;
+
     totalSlots += 1;
-    if (covered.has(rawSlot.slotKey)) {
+    if (covered.has(slotKey)) {
       coveredSlots += 1;
     }
   }
@@ -209,13 +232,15 @@ function getUncoveredSlotsForPlatoon(
   const covered = getCoveredSlotKeys(matching);
 
   return (dataset.slots as SlotLike[]).filter((slot) => {
+    const slotKey = getDatasetSlotKey(slot);
+
     return (
       getPlatoonIdFromSlot(slot) === targetPlatoonId &&
-      !covered.has(slot.slotKey)
+      !!slotKey &&
+      !covered.has(slotKey)
     );
   });
 }
-
 function buildActionsForTargetPlatoon(
   dataset: StrategicPlannerDataset,
   baseline: PlatoonMatchingResult,
