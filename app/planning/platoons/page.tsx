@@ -101,6 +101,8 @@ export default function PlatoonReadinessPage() {
 }
 
 function PlatoonReadinessContent() {
+
+  const [selectedCoverageCell, setSelectedCoverageCell] = useState<{ phase: number; category: PlanetCategory } | null>(null);
   const searchParams = useSearchParams();
   const fixture = searchParams.get('fixture');
   const requestedView = searchParams.get('view');
@@ -1506,6 +1508,7 @@ function MatchingView({ matching }: { matching: PlatoonMatchingResult | null }) 
   <div className="mt-3 text-sm text-gray-400">
     Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
   </div>
+  
 )}
         </div>
         <p className="mt-4 text-xs text-gray-500">
