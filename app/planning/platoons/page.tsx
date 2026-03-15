@@ -34,9 +34,6 @@ type SelectedCoverageCell = {
   category: PlanetCategory;
 } | null;
 
-const [selectedCoverageCell, setSelectedCoverageCell] =
-  useState<SelectedCoverageCell>(null);
-
 type PlannerViewKey = 'overview' | 'priorities' | 'targets' | 'matching';
 
 const MAX_STATIONS_PER_MEMBER_PER_PLANET = 10;
