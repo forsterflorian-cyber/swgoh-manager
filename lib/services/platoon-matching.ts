@@ -499,7 +499,7 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
   });
 
     const suspect = allGaps.find(
-      (g) => g.unitBaseId === 'LUKESKYWALKER'
+      (g) => g.unitBaseId === 'LOGRAY'
     );
 
     if (suspect) {
