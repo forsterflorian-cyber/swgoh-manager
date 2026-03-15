@@ -325,6 +325,7 @@ function cloneSlotForSimulation(slot: StrategicPlannerDataset['slots'][number]):
 function cloneDatasetForSimulation(dataset: StrategicPlannerDataset): StrategicPlannerDataset {
   return {
     ...dataset,
+    members: [...dataset.members],
     roster: [...dataset.roster],
     slots: dataset.slots.map(cloneSlotForSimulation),
     strategicAssignments: Array.isArray(dataset.strategicAssignments)
@@ -432,12 +433,7 @@ function applySingleAction(
 case 'ADD_HYPOTHETICAL_UNIT': {
   const syntheticEntry = buildSyntheticRosterEntry(action, syntheticIndexRef.value);
   syntheticIndexRef.value += 1;
-console.log('[sim add]', {
-  syntheticMemberId: syntheticEntry.memberId,
-  syntheticUnitBaseId: syntheticEntry.unitBaseId,
-  rosterCount: dataset.roster.length,
-  membersCount: dataset.members.length,
-});
+
   ensureSyntheticMemberExists(
     dataset,
     syntheticEntry.memberId,
@@ -446,26 +442,45 @@ console.log('[sim add]', {
 
   dataset.roster.push(syntheticEntry);
 
+  let eligibleHits = 0;
+
   for (const slot of dataset.slots as DatasetSlot[]) {
-    if (isRosterEntryEligibleForSlot(
-      {
-        unitBaseId: syntheticEntry.unitBaseId,
-        rarity: syntheticEntry.rarity ?? 0,
-        relicTier: syntheticEntry.relicTier ?? 0,
-      },
-      slot,
-    )) {
+    if (
+      isRosterEntryEligibleForSlot(
+        {
+          unitBaseId: syntheticEntry.unitBaseId,
+          rarity: syntheticEntry.rarity ?? 0,
+          relicTier: syntheticEntry.relicTier ?? 0,
+        },
+        slot,
+      )
+    ) {
       if (!Array.isArray(slot.eligibleRoster)) {
         slot.eligibleRoster = [];
       }
+
       slot.eligibleRoster.push({
         memberId: syntheticEntry.memberId,
         unitBaseId: syntheticEntry.unitBaseId,
         rarity: syntheticEntry.rarity ?? 0,
         relicTier: syntheticEntry.relicTier ?? 0,
+        allyCode: syntheticEntry.allyCode ?? null,
+        playerName: syntheticEntry.playerName ?? '[sim]',
+        unitName: syntheticEntry.unitName ?? syntheticEntry.unitBaseId,
+        gearLevel: syntheticEntry.gearLevel ?? 0,
       } as DatasetRosterEntry);
+
+      eligibleHits += 1;
     }
   }
+
+  console.log('[sim add]', {
+    syntheticMemberId: syntheticEntry.memberId,
+    syntheticUnitBaseId: syntheticEntry.unitBaseId,
+    rosterCount: dataset.roster.length,
+    membersCount: dataset.members.length,
+    eligibleHits,
+  });
 
   return;
 }
