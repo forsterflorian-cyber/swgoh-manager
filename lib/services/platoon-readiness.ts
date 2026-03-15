@@ -2097,3 +2097,94 @@ export class PlatoonReadinessService {
     return getAccessibleGuild(userId);
   }
 }
+
+export async function loadStrategicPlannerDatasetForGuildSlug(
+  slug: string
+): Promise<StrategicPlannerDataset> {
+  const guildResult = await sql<{
+    id: string;
+    name: string;
+    slug: string;
+    member_count: string | number;
+    last_roster_sync: string | null;
+  }>`
+    SELECT
+      g.id,
+      g.name,
+      g.slug,
+      (SELECT COUNT(*) FROM guild_members WHERE guild_id = g.id) AS member_count,
+      (SELECT MAX(last_synced)::text FROM guild_members WHERE guild_id = g.id) AS last_roster_sync
+    FROM guilds g
+    WHERE g.slug = ${slug}
+    LIMIT 1
+  `;
+
+  const guildRow = guildResult.rows[0];
+
+  if (!guildRow) {
+    return {
+      mode: 'live',
+      fixtureName: null,
+      guild: null,
+      reference: null,
+      slots: [],
+      roster: [],
+      members: [],
+      strategicAssignments: [],
+      permissions: {
+        canManageTargets: false,
+      },
+    };
+  }
+
+  const guild: StrategicPlannerGuild = {
+    id: guildRow.id,
+    name: guildRow.name,
+    slug: guildRow.slug,
+    memberCount: toNumber(guildRow.member_count),
+    rosteredMembers: 0,
+    rosterUnitCount: 0,
+    lastRosterSync: guildRow.last_roster_sync,
+  };
+
+  const reference = await getReferenceDefinition();
+
+  if (!reference?.id) {
+    return {
+      mode: 'live',
+      fixtureName: null,
+      guild,
+      reference: null,
+      slots: [],
+      roster: [],
+      members: await loadGuildMembers(guildRow.id),
+      strategicAssignments: await listGuildUpgradeAssignments(guildRow.id),
+      permissions: {
+        canManageTargets: false,
+      },
+    };
+  }
+
+  const slots = await loadSlotsForReference(reference);
+  const unitBaseIds = [...new Set(slots.map((slot) => slot.unitBaseId))];
+
+  const [roster, members, strategicAssignments] = await Promise.all([
+    loadRosterForUnits(guildRow.id, unitBaseIds),
+    loadGuildMembers(guildRow.id),
+    listGuildUpgradeAssignments(guildRow.id),
+  ]);
+
+  return {
+    mode: 'live',
+    fixtureName: null,
+    guild,
+    reference,
+    slots,
+    roster,
+    members,
+    strategicAssignments,
+    permissions: {
+      canManageTargets: false,
+    },
+  };
+}

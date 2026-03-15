@@ -262,6 +262,7 @@ export interface StrategicPlannerPermissions {
   canManageTargets: boolean;
 }
 
+
 // ── Platoon Matching ──────────────────────────────────────────────────────────
 
 /** Why a gap slot cannot be covered and the cheapest known closure path. */
