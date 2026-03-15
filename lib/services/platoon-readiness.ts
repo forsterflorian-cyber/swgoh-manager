@@ -2098,8 +2098,122 @@ export class PlatoonReadinessService {
   }
 }
 
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function getStringField(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getNumberField(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = toNullableNumber(record[key]);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function rosterEntryMatchesSlot(
+  slot: Record<string, unknown>,
+  rosterEntry: Record<string, unknown>,
+): boolean {
+  const slotUnitBaseId = getStringField(slot, ['unitBaseId']);
+  const rosterUnitBaseId = getStringField(rosterEntry, ['unitBaseId', 'baseId', 'defId']);
+
+  if (!slotUnitBaseId || !rosterUnitBaseId || slotUnitBaseId !== rosterUnitBaseId) {
+    return false;
+  }
+
+  const requiredRarity = getNumberField(slot, ['requiredRarity']);
+  const requiredRelicTier = getNumberField(slot, ['requiredRelicTier']);
+
+  const rosterRarity = getNumberField(rosterEntry, [
+    'rarity',
+    'currentRarity',
+    'starCount',
+  ]);
+
+  const rosterRelicTier = getNumberField(rosterEntry, [
+    'relicTier',
+    'currentRelicTier',
+  ]);
+
+  if (requiredRarity !== null && (rosterRarity ?? 0) < requiredRarity) {
+    return false;
+  }
+
+  if (requiredRelicTier !== null && (rosterRelicTier ?? 0) < requiredRelicTier) {
+    return false;
+  }
+
+  return true;
+}
+
+function hydrateSlotsWithEligibleRoster<
+  TSlot extends {
+    unitBaseId: string;
+    requiredRarity: number | null;
+    requiredRelicTier: number | null;
+  },
+  TRoster extends Record<string, unknown>,
+>(
+  slots: TSlot[],
+  roster: TRoster[],
+): Array<TSlot & { eligibleRoster: TRoster[] }> {
+  const rosterByUnitBaseId = new Map<string, TRoster[]>();
+
+  for (const entry of roster) {
+    const unitBaseId = getStringField(entry, ['unitBaseId', 'baseId', 'defId']);
+    if (!unitBaseId) continue;
+
+    const list = rosterByUnitBaseId.get(unitBaseId);
+    if (list) {
+      list.push(entry);
+    } else {
+      rosterByUnitBaseId.set(unitBaseId, [entry]);
+    }
+  }
+
+  return slots.map((slot) => {
+    const candidates = rosterByUnitBaseId.get(slot.unitBaseId) ?? [];
+
+    const eligibleRoster = candidates.filter((entry) =>
+      rosterEntryMatchesSlot(slot as unknown as Record<string, unknown>, entry),
+    );
+
+    return {
+      ...slot,
+      eligibleRoster,
+    };
+  });
+}
+
 export async function loadStrategicPlannerDatasetForGuildSlug(
-  slug: string
+  slug: string,
 ): Promise<StrategicPlannerDataset> {
   const guildResult = await sql<{
     id: string;
@@ -2137,27 +2251,26 @@ export async function loadStrategicPlannerDatasetForGuildSlug(
     };
   }
 
-  const guild: StrategicPlannerGuild = {
-    id: guildRow.id,
-    name: guildRow.name,
-    slug: guildRow.slug,
-    memberCount: toNumber(guildRow.member_count),
-    rosteredMembers: 0,
-    rosterUnitCount: 0,
-    lastRosterSync: guildRow.last_roster_sync,
-  };
-
   const reference = await getReferenceDefinition();
+  const members = await loadGuildMembers(guildRow.id);
 
   if (!reference?.id) {
     return {
       mode: 'live',
       fixtureName: null,
-      guild,
+      guild: {
+        id: guildRow.id,
+        name: guildRow.name,
+        slug: guildRow.slug,
+        memberCount: toNumber(guildRow.member_count),
+        rosteredMembers: 0,
+        rosterUnitCount: 0,
+        lastRosterSync: guildRow.last_roster_sync,
+      },
       reference: null,
       slots: [],
       roster: [],
-      members: await loadGuildMembers(guildRow.id),
+      members,
       strategicAssignments: await listGuildUpgradeAssignments(guildRow.id),
       permissions: {
         canManageTargets: false,
@@ -2165,14 +2278,35 @@ export async function loadStrategicPlannerDatasetForGuildSlug(
     };
   }
 
-  const slots = await loadSlotsForReference(reference);
-  const unitBaseIds = [...new Set(slots.map((slot) => slot.unitBaseId))];
+  const rawSlots = await loadSlotsForReference(reference);
+  const unitBaseIds = [...new Set(rawSlots.map((slot) => slot.unitBaseId))];
 
-  const [roster, members, strategicAssignments] = await Promise.all([
+  const [rawRoster, strategicAssignments] = await Promise.all([
     loadRosterForUnits(guildRow.id, unitBaseIds),
-    loadGuildMembers(guildRow.id),
     listGuildUpgradeAssignments(guildRow.id),
   ]);
+const slots = hydrateSlotsWithEligibleRoster(
+  rawSlots,
+  rawRoster as unknown as Record<string, unknown>[],
+);
+
+  const rosteredMemberIds = new Set<string>();
+  for (const entry of rawRoster as unknown as Record<string, unknown>[]) {
+    const memberId = getStringField(entry, ['memberId', 'playerId']);
+    if (memberId) {
+      rosteredMemberIds.add(memberId);
+    }
+  }
+
+  const guild: StrategicPlannerGuild = {
+    id: guildRow.id,
+    name: guildRow.name,
+    slug: guildRow.slug,
+    memberCount: toNumber(guildRow.member_count),
+    rosteredMembers: rosteredMemberIds.size,
+    rosterUnitCount: rawRoster.length,
+    lastRosterSync: guildRow.last_roster_sync,
+  };
 
   return {
     mode: 'live',
@@ -2180,7 +2314,7 @@ export async function loadStrategicPlannerDatasetForGuildSlug(
     guild,
     reference,
     slots,
-    roster,
+    roster: rawRoster,
     members,
     strategicAssignments,
     permissions: {
