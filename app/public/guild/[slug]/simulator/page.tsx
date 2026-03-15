@@ -67,85 +67,97 @@ function CandidateCard({
 }) {
   if (!candidate) {
     return (
-      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <div className="mt-3 text-sm text-slate-400">
-          Kein vollständiges Platoon mit den aktuell modellierten hypothetischen Aktionen gefunden.
+      <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-white">{title}</h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Kein vollständiges Platoon mit den aktuell modellierten hypothetischen Aktionen gefunden.
+            </p>
+          </div>
         </div>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <div className="mt-1 text-sm text-slate-300">
+          <div className="text-sm text-slate-400">{title}</div>
+          <h2 className="mt-1 text-2xl font-semibold text-white">
             {getPlatoonLabel(candidate.targetPlatoonId)}
-          </div>
+          </h2>
         </div>
 
         <button
           type="button"
           onClick={() => onApplyAll(candidate.actions)}
           disabled={!canApply || candidate.actions.length === 0}
-          className="rounded-lg border border-indigo-700 bg-indigo-900/40 px-3 py-2 text-sm hover:bg-indigo-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-2xl border border-indigo-700/70 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-200 transition hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Apply all
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-          <div className="text-xs text-slate-400">Suggested Actions</div>
-          <div className="mt-2 text-xl font-semibold">{candidate.actions.length}</div>
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Suggested actions</div>
+          <div className="mt-2 text-3xl font-semibold text-white">
+            {candidate.actions.length}
+          </div>
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-          <div className="text-xs text-slate-400">Delta Full Platoons</div>
-          <div className="mt-2 text-xl font-semibold">{candidate.deltaFullPlatoons}</div>
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Delta full platoons</div>
+          <div className="mt-2 text-3xl font-semibold text-white">
+            {candidate.deltaFullPlatoons}
+          </div>
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-          <div className="text-xs text-slate-400">Delta Covered Slots</div>
-          <div className="mt-2 text-xl font-semibold">{candidate.deltaCoveredSlots}</div>
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Delta covered slots</div>
+          <div className="mt-2 text-3xl font-semibold text-white">
+            {candidate.deltaCoveredSlots}
+          </div>
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-          <div className="text-xs text-slate-400">Changed Assignments</div>
-          <div className="mt-2 text-xl font-semibold">{candidate.changedAssignmentCount}</div>
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Changed assignments</div>
+          <div className="mt-2 text-3xl font-semibold text-white">
+            {candidate.changedAssignmentCount}
+          </div>
         </div>
       </div>
 
-      <div className="mt-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <div className="mt-6">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
           Suggested hypothetical actions
         </div>
 
         {candidate.actions.length === 0 ? (
-          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm text-slate-400">
+          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4 text-sm text-slate-400">
             Keine Aktionen vorgeschlagen.
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {candidate.actions.map((action) => (
               <div
                 key={getActionKey(action)}
-                className="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-black/20 p-4 lg:flex-row lg:items-center lg:justify-between"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">
+                  <div className="truncate text-sm font-medium text-slate-100">
                     {describeAction(action)}
                   </div>
-                  <div className="mt-1 text-xs text-slate-400">{action.type}</div>
+                  <div className="mt-1 text-xs text-slate-500">{action.type}</div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => onApplyOne(action)}
                   disabled={!canApply}
-                  className="rounded border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Apply
                 </button>
@@ -154,7 +166,7 @@ function CandidateCard({
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -214,10 +226,7 @@ export default function PublicGuildSimulatorPage({
     run();
   }, [slug, actions]);
 
-  const summary = useMemo(() => {
-    return data?.simulation.delta ?? null;
-  }, [data]);
-
+  const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
 
@@ -239,143 +248,170 @@ export default function PublicGuildSimulatorPage({
   }
 
   return (
-    <main className="mx-auto max-w-7xl p-6">
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Next Full Platoon Simulator</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Advisor-zentrierte Simulation. Keine Änderungen werden gespeichert.
-          </p>
-        </div>
+    <main className="min-h-screen bg-black text-slate-100">
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-sm text-slate-400">Public guild simulator</div>
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-white">
+              Next Full Platoon Simulator
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm text-slate-400">
+              Advisor-zentrierte Simulation. Aktionen werden aus den vorgeschlagenen
+              Kandidaten übernommen. Es werden keine Änderungen gespeichert.
+            </p>
+          </div>
 
-        <div className="flex gap-2">
           <button
             type="button"
             onClick={resetScenario}
             disabled={actions.length === 0}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reset scenario
           </button>
         </div>
-      </div>
 
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <div className="text-xs text-slate-400">Covered Slots</div>
-          <div className="mt-2 text-xl font-semibold">
-            {summary
-              ? `${summary.baselineCoveredSlots} → ${summary.simulatedCoveredSlots}`
-              : '—'}
+        <div className="mb-8 grid gap-4 md:grid-cols-4">
+          <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+            <div className="text-sm text-slate-400">Covered slots</div>
+            <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
+              {summary
+                ? `${summary.simulatedCoveredSlots}`
+                : '—'}
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              {summary
+                ? `${summary.baselineCoveredSlots} → ${summary.simulatedCoveredSlots}`
+                : 'No data'}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+            <div className="text-sm text-slate-400">Full platoons</div>
+            <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
+              {summary
+                ? `${summary.simulatedFullPlatoons}`
+                : '—'}
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              {summary
+                ? `${summary.baselineFullPlatoons} → ${summary.simulatedFullPlatoons}`
+                : 'No data'}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+            <div className="text-sm text-slate-400">Changed assignments</div>
+            <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
+              {summary ? summary.changedAssignmentCount : '—'}
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              Scenario assignment movement
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+            <div className="text-sm text-slate-400">Newly full</div>
+            <div className="mt-3 text-3xl font-semibold tracking-tight text-white">
+              {summary?.becameFullPlatoonIds?.length
+                ? `${summary.becameFullPlatoonIds.length}`
+                : '0'}
+            </div>
+            <div className="mt-2 text-sm text-slate-500 break-words">
+              {summary?.becameFullPlatoonIds?.length
+                ? summary.becameFullPlatoonIds.join(', ')
+                : 'No newly completed platoons'}
+            </div>
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <div className="text-xs text-slate-400">Full Platoons</div>
-          <div className="mt-2 text-xl font-semibold">
-            {summary
-              ? `${summary.baselineFullPlatoons} → ${summary.simulatedFullPlatoons}`
-              : '—'}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <div className="text-xs text-slate-400">Changed Assignments</div>
-          <div className="mt-2 text-xl font-semibold">
-            {summary ? summary.changedAssignmentCount : '—'}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <div className="text-xs text-slate-400">Newly Full</div>
-          <div className="mt-2 text-sm font-semibold">
-            {summary?.becameFullPlatoonIds?.length
-              ? summary.becameFullPlatoonIds.join(', ')
-              : '—'}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <aside className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">Active Scenario</h2>
-            {loading ? (
-              <span className="text-xs text-slate-400">Recalculating…</span>
-            ) : (
-              <span className="text-xs text-slate-500">Auto-updated</span>
-            )}
-          </div>
-
-          <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
-            <div className="text-xs text-slate-400">Applied hypothetical actions</div>
-            <div className="mt-2 text-2xl font-semibold">{actions.length}</div>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {actions.length === 0 ? (
-              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm text-slate-400">
-                Noch keine hypothetischen Aktionen aktiv. Nutze rechts die Advisor-Vorschläge.
-              </div>
-            ) : (
-              actions.map((action) => (
-                <div
-                  key={getActionKey(action)}
-                  className="rounded-lg border border-slate-800 bg-slate-950 p-3"
-                >
-                  <div className="text-sm font-medium">{describeAction(action)}</div>
-                  <div className="mt-1 text-xs text-slate-400">{action.type}</div>
-
-                  <button
-                    type="button"
-                    onClick={() => removeAction(action)}
-                    className="mt-3 rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800"
-                  >
-                    Remove
-                  </button>
+        <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-white">Active scenario</h2>
+                <div className="mt-1 text-sm text-slate-400">
+                  Hypothetical actions currently applied
                 </div>
-              ))
-            )}
-          </div>
+              </div>
 
-          {data?.simulation ? (
-            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
-              <div className="text-xs text-slate-400">Scenario effect</div>
-              <div className="mt-3 space-y-2 text-sm text-slate-300">
+              <div className="text-xs text-slate-500">
+                {loading ? 'Recalculating…' : 'Auto-updated'}
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-800 bg-black/20 p-4">
+              <div className="text-sm text-slate-400">Applied hypothetical actions</div>
+              <div className="mt-2 text-4xl font-semibold text-white">{actions.length}</div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {actions.length === 0 ? (
+                <div className="rounded-2xl border border-slate-800 bg-black/20 p-4 text-sm text-slate-400">
+                  Noch keine hypothetischen Aktionen aktiv. Nutze rechts die Advisor-Vorschläge.
+                </div>
+              ) : (
+                actions.map((action) => (
+                  <div
+                    key={getActionKey(action)}
+                    className="rounded-2xl border border-slate-800 bg-black/20 p-4"
+                  >
+                    <div className="text-sm font-medium text-slate-100">
+                      {describeAction(action)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">{action.type}</div>
+
+                    <button
+                      type="button"
+                      onClick={() => removeAction(action)}
+                      className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-800 bg-black/20 p-4">
+              <div className="text-sm text-slate-400">Scenario effect</div>
+
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
                 <div className="flex items-center justify-between gap-3">
                   <span>Delta covered slots</span>
-                  <span>{data.simulation.delta.deltaCoveredSlots}</span>
+                  <span>{data?.simulation.delta.deltaCoveredSlots ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>Delta full platoons</span>
-                  <span>{data.simulation.delta.deltaFullPlatoons}</span>
+                  <span>{data?.simulation.delta.deltaFullPlatoons ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>Displaced assignments</span>
-                  <span>{data.simulation.delta.displacedAssignmentCount}</span>
+                  <span>{data?.simulation.delta.displacedAssignmentCount ?? '—'}</span>
                 </div>
               </div>
             </div>
-          ) : null}
-        </aside>
+          </aside>
 
-        <section className="space-y-6">
-          <CandidateCard
-            title="Current Next Full Platoon"
-            candidate={firstCandidate}
-            onApplyOne={applyOne}
-            onApplyAll={applyAll}
-            canApply={!loading}
-          />
+          <section className="space-y-6">
+            <CandidateCard
+              title="Current next full platoon"
+              candidate={firstCandidate}
+              onApplyOne={applyOne}
+              onApplyAll={applyAll}
+              canApply={!loading}
+            />
 
-          <CandidateCard
-            title="Second Next Full Platoon"
-            candidate={secondCandidate}
-            onApplyOne={applyOne}
-            onApplyAll={applyAll}
-            canApply={!loading}
-          />
-        </section>
+            <CandidateCard
+              title="Second next full platoon"
+              candidate={secondCandidate}
+              onApplyOne={applyOne}
+              onApplyAll={applyAll}
+              canApply={!loading}
+            />
+          </section>
+        </div>
       </div>
     </main>
   );

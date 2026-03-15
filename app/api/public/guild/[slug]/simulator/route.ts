@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
+import { applySimulationActions, simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
 import { findSequentialFullPlatoonPlan } from '@/lib/services/platoon-completion-advisor';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 
@@ -22,7 +22,8 @@ export async function POST(
     }
 
     const simulation = simulatePlatoonScenario(dataset, actions);
-    const advisory = findSequentialFullPlatoonPlan(dataset);
+    const simulatedDataset = applySimulationActions(dataset, actions);
+    const advisory = findSequentialFullPlatoonPlan(simulatedDataset);
 
     return NextResponse.json({
       simulation,
