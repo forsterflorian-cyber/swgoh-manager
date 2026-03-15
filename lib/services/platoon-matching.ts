@@ -497,6 +497,22 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
     totalAssignments: allAssignments.length,
     totalGaps: allGaps.length,
   });
+
+  const suspect = allGaps.find(
+  (g) => g.unitName === 'Logray' || g.unitName === 'Luke Skywalker (Farmboy)'
+  );
+
+    if (suspect) {
+      throw new Error(
+        `DEBUG GAP ${JSON.stringify({
+          slotKey: suspect.requirementId,
+          unitBaseId: suspect.unitBaseId,
+          unitName: suspect.unitName,
+          action: suspect.recommendedAction,
+          possibleSources: suspect.possibleSources,
+        })}`
+      );
+    }
   return {
     coverage: allCoverage,
     assignments: allAssignments,
