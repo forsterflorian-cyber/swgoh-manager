@@ -91,7 +91,7 @@ timings.advisor_ms = Date.now() - advisoryStartedAt;
     console.log('[route] delta', simulation.delta);
     console.log('[route] actionsCount', actions.length);
     console.log('[route] firstAction', actions[0] ?? null);
-    
+    console.log('[route] advisory', advisory);
     return NextResponse.json(
       {
         simulation: {
@@ -129,7 +129,7 @@ timings.advisor_ms = Date.now() - advisoryStartedAt;
     }
 
     console.error('Simulator API error', error);
-
+    
     return NextResponse.json(
       {
         error: message,
