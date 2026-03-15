@@ -1,65 +1,105 @@
-import type {
-  PlatoonMatchingCoverage,
-  PlatoonMatchingResult,
-  StrategicPlannerDataset,
-  StrategicPlannerMemberInput,
-  StrategicPlannerRosterInput,
-  StrategicPlannerSlotInput,
-} from '@/lib/types/platoon-readiness';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import type {
   PlatoonSimulatorAction,
   PlatoonSimulatorDelta,
   PlatoonSimulatorResponse,
-  PlatoonSimulatorStepEffect,
 } from '@/lib/types/platoon-simulator';
-import { computePlatoonMatching } from '@/lib/services/platoon-matching';
-import { UnitCategory } from '@/lib/types/platoon-readiness';
+import type { StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
 
-function readCoverageCoveredSlots(item: PlatoonMatchingCoverage): number {
-  const candidate = item as unknown as Record<string, unknown>;
 
-  const possibleKeys = [
-    'coveredSlots',
-    'assignedSlots',
-    'filledSlots',
-    'matchedSlots',
-    'countCovered',
-    'countAssigned',
-  ];
 
-  for (const key of possibleKeys) {
-    const value = candidate[key];
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
+export function simulatePlatoonScenario(
+  dataset: StrategicPlannerDataset,
+  actions: PlatoonSimulatorAction[],
+): PlatoonSimulatorResponse {
+  const baseline = computePlatoonMatching(dataset);
+
+  const simulatedDataset = applySimulationActions(dataset, actions);
+  const simulated = computePlatoonMatching(simulatedDataset);
+
+  const delta = buildDelta(baseline, simulated);
+  const steps = simulateStepEffects(dataset, actions);
+
+  return {
+    baseline,
+    simulated,
+    delta,
+    steps,
+  };
+}
+
+type AnyRecord = Record<string, unknown>;
+
+type SimulatedEligibleRosterEntry = AnyRecord;
+
+type SimulatedSlot = StrategicPlannerDataset['slots'][number] & {
+  eligibleRoster?: SimulatedEligibleRosterEntry[];
+};
+
+type SimulatedAssignment = StrategicPlannerDataset['strategicAssignments'][number];
+
+export function applySimulationActions(
+  dataset: StrategicPlannerDataset,
+  actions: PlatoonSimulatorAction[],
+): StrategicPlannerDataset {
+  if (actions.length === 0) {
+    return dataset;
+  }
+
+  const cloned: StrategicPlannerDataset = {
+    ...dataset,
+    slots: dataset.slots.map((slot) => cloneSlotForSimulation(slot)),
+    strategicAssignments: Array.isArray(dataset.strategicAssignments)
+      ? dataset.strategicAssignments.map((assignment) => ({ ...assignment }))
+      : ([] as SimulatedAssignment[]),
+  };
+
+  for (const action of actions) {
+    if (action.type === 'MAKE_SLOT_ELIGIBLE') {
+      const slot = findSlotByKeyLocal(cloned, action.slotKey);
+      if (!slot) continue;
+
+      upsertEligibleRosterEntryLocal(cloned, slot, action.memberId);
+      continue;
+    }
+
+    if (action.type === 'REMOVE_SOURCE_BLOCK') {
+      removeStrategicBlockLocal(cloned, action);
     }
   }
 
-  return 0;
+  return cloned;
 }
 
-function readCoverageTotalSlots(item: PlatoonMatchingCoverage): number {
-  const candidate = item as unknown as Record<string, unknown>;
+function cloneSlotForSimulation(
+  slot: StrategicPlannerDataset['slots'][number],
+): StrategicPlannerDataset['slots'][number] {
+  const simulatedSlot = slot as unknown as SimulatedSlot;
 
-  const possibleKeys = ['totalSlots', 'requiredSlots', 'slotCount', 'total', 'countTotal'];
-
-  for (const key of possibleKeys) {
-    const value = candidate[key];
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-  }
-
-  return 0;
+  return {
+    ...slot,
+    ...(Array.isArray(simulatedSlot.eligibleRoster)
+      ? { eligibleRoster: [...simulatedSlot.eligibleRoster] }
+      : {}),
+  };
 }
 
-function readCoveragePlatoonId(item: PlatoonMatchingCoverage): string | null {
-  const candidate = item as unknown as Record<string, unknown>;
+function findSlotByKeyLocal(
+  dataset: StrategicPlannerDataset,
+  slotKey: string,
+): SimulatedSlot | undefined {
+  return dataset.slots.find((slot) => {
+    const record = slot as unknown as AnyRecord;
+    return typeof record.slotKey === 'string' && record.slotKey === slotKey;
+  }) as SimulatedSlot | undefined;
+}
 
-  const possibleKeys = ['platoonId', 'targetPlatoonId', 'id', 'key'];
+function getString(record: AnyRecord | null | undefined, ...keys: string[]): string | null {
+  if (!record) return null;
 
-  for (const key of possibleKeys) {
-    const value = candidate[key];
-    if (typeof value === 'string' && value.trim()) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
       return value;
     }
   }
@@ -67,49 +107,70 @@ function readCoveragePlatoonId(item: PlatoonMatchingCoverage): string | null {
   return null;
 }
 
-function countCoveredSlots(result: PlatoonMatchingResult): number {
-  return result.coverage.reduce((sum, item) => sum + readCoverageCoveredSlots(item), 0);
+function upsertEligibleRosterEntryLocal(
+  dataset: StrategicPlannerDataset,
+  slot: SimulatedSlot,
+  memberId: string,
+): void {
+  const slotRecord = slot as unknown as AnyRecord;
+  const slotUnitBaseId = getString(slotRecord, 'unitBaseId');
+
+  if (!slot.eligibleRoster) {
+    slot.eligibleRoster = [];
+  }
+
+  const alreadyExists = slot.eligibleRoster.some((entry) => {
+    const record = entry as AnyRecord;
+    const entryMemberId = getString(record, 'memberId', 'playerId');
+    return entryMemberId === memberId;
+  });
+
+  if (alreadyExists) {
+    return;
+  }
+
+  const rosterEntry = (dataset.roster as unknown as AnyRecord[]).find((entry) => {
+    const rosterMemberId = getString(entry, 'memberId', 'playerId');
+    const rosterUnitBaseId = getString(entry, 'unitBaseId', 'baseId', 'defId');
+
+    return rosterMemberId === memberId && rosterUnitBaseId === slotUnitBaseId;
+  });
+
+  if (rosterEntry) {
+    slot.eligibleRoster.push({ ...rosterEntry });
+    return;
+  }
+
+  slot.eligibleRoster.push({
+    memberId,
+    unitBaseId: slotUnitBaseId,
+  });
 }
 
-function countFullPlatoons(result: PlatoonMatchingResult): number {
-  return result.coverage.filter((item) => {
-    const covered = readCoverageCoveredSlots(item);
-    const total = readCoverageTotalSlots(item);
-    return total > 0 && covered >= total;
-  }).length;
-}
+function removeStrategicBlockLocal(
+  dataset: StrategicPlannerDataset,
+  action: Extract<PlatoonSimulatorAction, { type: 'REMOVE_SOURCE_BLOCK' }>,
+): void {
+  dataset.strategicAssignments = dataset.strategicAssignments.filter((assignment) => {
+    const record = assignment as unknown as AnyRecord;
 
-function getFullPlatoonIds(result: PlatoonMatchingResult): string[] {
-  return result.coverage
-    .filter((item) => {
-      const covered = readCoverageCoveredSlots(item);
-      const total = readCoverageTotalSlots(item);
-      return total > 0 && covered >= total;
-    })
-    .map((item) => readCoveragePlatoonId(item))
-    .filter((value): value is string => !!value);
-}
+    const memberId = getString(record, 'memberId');
+    const unitBaseId = getString(record, 'unitBaseId');
+    const planetCategory = getString(record, 'planetCategory');
+    const blockType = getString(record, 'blockType');
 
-function getAssignmentKeys(result: PlatoonMatchingResult): Set<string> {
-  return new Set(
-    result.assignments.map((item) => {
-      const candidate = item as unknown as Record<string, unknown>;
+    const sameMember = memberId === action.memberId;
+    const sameUnit = unitBaseId === action.unitBaseId;
+    const samePlanet = (planetCategory ?? null) === (action.planetCategory ?? null);
+    const sameBlockType = blockType === action.blockType;
 
-      const platoonId =
-        typeof candidate.platoonId === 'string' ? candidate.platoonId : 'unknown-platoon';
-      const slotId =
-        typeof candidate.slotId === 'string' ? candidate.slotId : 'unknown-slot';
-      const ownerKey =
-        typeof candidate.ownerKey === 'string' ? candidate.ownerKey : 'unknown-owner';
-
-      return `${platoonId}::${slotId}::${ownerKey}`;
-    }),
-  );
+    return !(sameMember && sameUnit && samePlanet && sameBlockType);
+  });
 }
 
 function buildDelta(
-  baseline: PlatoonMatchingResult,
-  simulated: PlatoonMatchingResult,
+  baseline: any,
+  simulated: any,
 ): PlatoonSimulatorDelta {
   const baselineCoveredSlots = countCoveredSlots(baseline);
   const simulatedCoveredSlots = countCoveredSlots(simulated);
@@ -155,191 +216,98 @@ function buildDelta(
     noLongerFullPlatoonIds,
   };
 }
-function findSlotByKey(
-  dataset: StrategicPlannerDataset,
-  slotKey: string,
-): StrategicPlannerSlotInput | null {
-  return dataset.slots.find((slot) => slot.slotKey === slotKey) ?? null;
-}
-
-function findMemberById(
-  dataset: StrategicPlannerDataset,
-  memberId: string,
-): StrategicPlannerMemberInput | null {
-  return dataset.members.find((member) => member.memberId === memberId) ?? null;
-}
-
-function upsertEligibleRosterEntry(
-  dataset: StrategicPlannerDataset,
-  slot: StrategicPlannerSlotInput,
-  memberId: string,
-): void {
-  const existing = dataset.roster.find(
-    (row) => row.memberId === memberId && row.unitBaseId === slot.unitBaseId,
-  );
-
-  if (existing) {
-    existing.relicTier = Math.max(existing.relicTier, slot.requiredRelicTier);
-    existing.rarity = Math.max(existing.rarity, slot.requiredRarity);
-
-    if (slot.unitCategory !== 'SHIP') {
-      existing.gearLevel = Math.max(existing.gearLevel, 13);
-    }
-
-    return;
-  }
-
-  const member = findMemberById(dataset, memberId);
-  if (!member) return;
-
-  const simulatedRow: StrategicPlannerRosterInput = {
-    memberId: member.memberId,
-    allyCode: member.allyCode,
-    playerName: member.playerName,
-    unitBaseId: slot.unitBaseId,
-    unitName: slot.unitName ?? slot.unitBaseId,
-    relicTier: slot.requiredRelicTier,
-    rarity: slot.requiredRarity,
-    gearLevel: slot.unitCategory === 'SHIP' ? 0 : 13,
-  };
-
-  dataset.roster.push(simulatedRow);
-}
-
-function removeStrategicBlock(
-  dataset: StrategicPlannerDataset,
-  action: Extract<PlatoonSimulatorAction, { type: 'REMOVE_SOURCE_BLOCK' }>,
-): void {
-  dataset.strategicAssignments = dataset.strategicAssignments.filter(
-    (assignment) =>
-      !(
-        assignment.guildMemberId === action.memberId &&
-        assignment.unitBaseId === action.unitBaseId &&
-        assignment.planetCategory === action.planetCategory
-      ),
-  );
-}
 
 /**
- * Actions verändern nur den Dataset-Input.
- * Danach wird das Matching vollständig neu berechnet.
+ * Die folgenden Helper greifen bewusst tolerant auf das bestehende Matching-Shape zu.
+ * Damit muss nicht noch ein dritter Typenumbau parallel gemacht werden.
  */
-type SimulatedEligibleRosterEntry = Record<string, unknown>;
+function countCoveredSlots(result: any): number {
+  if (!result || !Array.isArray(result.coverage)) return 0;
 
-type SimulatedSlot = StrategicPlannerDataset['slots'][number] & {
-  eligibleRoster?: SimulatedEligibleRosterEntry[];
-};
+  return result.coverage.reduce((sum: number, platoon: any) => {
+    const covered = Array.isArray(platoon.assignments)
+      ? platoon.assignments.length
+      : Array.isArray(platoon.coveredSlots)
+        ? platoon.coveredSlots.length
+        : typeof platoon.coveredSlotsCount === 'number'
+          ? platoon.coveredSlotsCount
+          : 0;
 
-type SimulatedAssignment = StrategicPlannerDataset['strategicAssignments'][number];
+    return sum + covered;
+  }, 0);
+}
 
-export function applySimulationActions(
-  dataset: StrategicPlannerDataset,
-  actions: PlatoonSimulatorAction[],
-): StrategicPlannerDataset {
-  if (actions.length === 0) {
-    return dataset;
+function countFullPlatoons(result: any): number {
+  return getFullPlatoonIds(result).length;
+}
+
+function getFullPlatoonIds(result: any): string[] {
+  if (!result || !Array.isArray(result.coverage)) return [];
+
+  return result.coverage
+    .filter((platoon: any) => {
+      const covered = Array.isArray(platoon.assignments)
+        ? platoon.assignments.length
+        : Array.isArray(platoon.coveredSlots)
+          ? platoon.coveredSlots.length
+          : typeof platoon.coveredSlotsCount === 'number'
+            ? platoon.coveredSlotsCount
+            : 0;
+
+      const total = Array.isArray(platoon.slots)
+        ? platoon.slots.length
+        : typeof platoon.totalSlots === 'number'
+          ? platoon.totalSlots
+          : 0;
+
+      return total > 0 && covered >= total;
+    })
+    .map((platoon: any) => {
+      if (typeof platoon.platoonId === 'string') return platoon.platoonId;
+      if (typeof platoon.targetPlatoonId === 'string') return platoon.targetPlatoonId;
+      if (typeof platoon.id === 'string') return platoon.id;
+      return '';
+    })
+    .filter(Boolean);
+}
+
+function getAssignmentKeys(result: any): Set<string> {
+  const keys = new Set<string>();
+
+  if (!result || !Array.isArray(result.coverage)) {
+    return keys;
   }
 
-  const cloned: StrategicPlannerDataset = {
-    ...dataset,
-    slots: dataset.slots.map((slot) => cloneSlotForSimulation(slot)),
-    strategicAssignments: Array.isArray(dataset.strategicAssignments)
-      ? dataset.strategicAssignments.map((assignment) => ({ ...assignment }))
-      : ([] as SimulatedAssignment[]),
-  };
+  for (const platoon of result.coverage) {
+    const assignments = Array.isArray(platoon.assignments) ? platoon.assignments : [];
 
-  for (const action of actions) {
-    if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-      const slot = findSlotByKey(cloned, action.slotKey) as SimulatedSlot | undefined;
-      if (!slot) continue;
+    for (const assignment of assignments) {
+      const slotKey =
+        typeof assignment?.slotKey === 'string'
+          ? assignment.slotKey
+          : typeof assignment?.slot?.slotKey === 'string'
+            ? assignment.slot.slotKey
+            : null;
 
-      upsertEligibleRosterEntry(cloned, slot, action.memberId);
-      continue;
-    }
+      const memberId =
+        typeof assignment?.memberId === 'string'
+          ? assignment.memberId
+          : typeof assignment?.sourceMemberId === 'string'
+            ? assignment.sourceMemberId
+            : null;
 
-    if (action.type === 'REMOVE_SOURCE_BLOCK') {
-      removeStrategicBlock(cloned, action);
+      if (slotKey && memberId) {
+        keys.add(`${slotKey}::${memberId}`);
+      }
     }
   }
 
-  return cloned;
+  return keys;
 }
 
-function cloneSlotForSimulation(
-  slot: StrategicPlannerDataset['slots'][number],
-): StrategicPlannerDataset['slots'][number] {
-  const simulatedSlot = slot as SimulatedSlot;
-
-  return {
-    ...slot,
-    ...(Array.isArray(simulatedSlot.eligibleRoster)
-      ? { eligibleRoster: [...simulatedSlot.eligibleRoster] }
-      : {}),
-  };
-}
-function clearDerivedSimulationState(dataset: StrategicPlannerDataset): void {
-  const mutable = dataset as unknown as Record<string, unknown>;
-
-  delete mutable.matching;
-  delete mutable.readiness;
-  delete mutable.simulation;
-  delete mutable.advisor;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled simulator action: ${JSON.stringify(value)}`);
-}
 function simulateStepEffects(
-  dataset: StrategicPlannerDataset,
-  actions: PlatoonSimulatorAction[],
-): PlatoonSimulatorStepEffect[] {
-  const steps: PlatoonSimulatorStepEffect[] = [];
-
-  let currentDataset: StrategicPlannerDataset = structuredClone(dataset);
-  let currentMatching = computePlatoonMatching(currentDataset);
-
-  for (const action of actions) {
-    const coveredSlotsBefore = countCoveredSlots(currentMatching);
-    const fullPlatoonsBefore = countFullPlatoons(currentMatching);
-
-    currentDataset = applySimulationActions(currentDataset, [action]);
-    const nextMatching = computePlatoonMatching(currentDataset);
-
-    const coveredSlotsAfter = countCoveredSlots(nextMatching);
-    const fullPlatoonsAfter = countFullPlatoons(nextMatching);
-    const becameFullPlatoonIds = buildDelta(currentMatching, nextMatching).becameFullPlatoonIds;
-
-    steps.push({
-      actionId: action.id,
-      coveredSlotsBefore,
-      coveredSlotsAfter,
-      fullPlatoonsBefore,
-      fullPlatoonsAfter,
-      becameFullPlatoonIds,
-    });
-
-    currentMatching = nextMatching;
-  }
-
-  return steps;
-}
-
-export function simulatePlatoonScenario(
-  dataset: StrategicPlannerDataset,
-  actions: PlatoonSimulatorAction[],
-): PlatoonSimulatorResponse {
-  const baseline = computePlatoonMatching(dataset);
-
-  const simulatedDataset = applySimulationActions(dataset, actions);
-  const simulated = computePlatoonMatching(simulatedDataset);
-
-  const delta = buildDelta(baseline, simulated);
-  const steps = simulateStepEffects(dataset, actions);
-
-  return {
-    baseline,
-    simulated,
-    delta,
-    steps,
-  };
+  _dataset: StrategicPlannerDataset,
+  _actions: PlatoonSimulatorAction[],
+): PlatoonSimulatorResponse['steps'] {
+  return [];
 }
