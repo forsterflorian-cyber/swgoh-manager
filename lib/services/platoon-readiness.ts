@@ -68,6 +68,7 @@ type SlotRow = {
   required_relic_tier: string | number | null;
   required_rarity: string | number | null;
   is_bonus: boolean | null;
+  planet_category: PlanetCategory | null;
 };
 
 type RosterRow = {
@@ -1762,6 +1763,7 @@ async function loadSlotsForReference(
       tz.name AS zone_name,
       tz.sort_order AS zone_sort_order,
       tz.is_bonus,
+      tz.planet_category,
       tpl.platoon_key,
       tpl.platoon_number,
       tpl.sort_order AS platoon_sort_order,
@@ -1826,13 +1828,15 @@ async function loadSlotsForReference(
       unitCategory,
       requiredRelicTier,
       requiredRarity,
-      planetCategory: inferPlanetCategory({
-        tbKey: reference.tbKey,
-        zoneKey: row.zone_key,
-        zoneName: row.zone_name,
-        isBonus: row.is_bonus,
-      }),
-    };
+      planetCategory:
+        row.planet_category ??
+        inferPlanetCategory({
+          tbKey: reference.tbKey,
+          zoneKey: row.zone_key,
+          zoneName: row.zone_name,
+          isBonus: row.is_bonus,
+        }),
+     };
   });
 }
 

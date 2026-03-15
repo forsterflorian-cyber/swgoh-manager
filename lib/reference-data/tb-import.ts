@@ -214,7 +214,7 @@ async function upsertNormalizedDefinition(
 
       for (const zone of phase.zones) {
         const zoneResult = await client.sql<{ id: string }>`
-          INSERT INTO tb_zones (id, tb_phase_id, zone_key, name, sort_order, is_bonus, updated_at)
+          INSERT INTO tb_zones (id, tb_phase_id, zone_key, name, sort_order, is_bonus, planet_category, updated_at)
           VALUES (
             gen_random_uuid(),
             ${phaseId},
@@ -222,6 +222,7 @@ async function upsertNormalizedDefinition(
             ${zone.zoneName},
             ${zone.sortOrder},
             ${zone.isBonus},
+            ${zone.isBonus ? 'SPECIAL' : zone.category}
             NOW()
           )
           ON CONFLICT (tb_phase_id, zone_key)
@@ -229,6 +230,7 @@ async function upsertNormalizedDefinition(
             name = EXCLUDED.name,
             sort_order = EXCLUDED.sort_order,
             is_bonus = EXCLUDED.is_bonus,
+            planet_category = excluded.planet_category,
             updated_at = NOW()
           RETURNING id
         `;
