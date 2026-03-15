@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type { PlatoonMatchingGap, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
 
@@ -330,6 +331,12 @@ export default function PublicGuildMatchingBoard({
             Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
             {matching.totalAssigned}/{matching.totalRequired} assigned
           </p>
+          <Link
+            href={`/public/guild/${slug}/simulator`}
+            className="mt-3 inline-block rounded-xl border border-indigo-700/60 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-300 transition hover:bg-indigo-500/20"
+          >
+            Next Full Platoon Simulator →
+          </Link>
         </header>
 
         <section className="mb-6 grid gap-4 md:grid-cols-3">

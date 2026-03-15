@@ -7,9 +7,15 @@ import type {
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
 
+type Lookups = {
+  memberNames: Record<string, string>;
+  unitNames: Record<string, string>;
+};
+
 type SimulatorApiResponse = {
   simulation: PlatoonSimulatorResponse;
   advisory: SequentialFullPlatoonPlan;
+  lookups: Lookups;
 };
 
 type ErrorResponse = {
@@ -48,12 +54,15 @@ function getPlatoonLabel(targetPlatoonId: string | null | undefined): string {
   return `Phase ${phase} · ${zoneKey} · ${platoonKey}`;
 }
 
-function describeAction(action: PlatoonSimulatorAction): string {
+function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): string {
+  const member = (lookups?.memberNames[action.memberId] ?? action.memberId);
   if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-    return `${action.memberId} → ${action.slotKey} (${action.reason})`;
+    const unit = action.slotKey.split('::').pop() ?? action.slotKey;
+    return `${member} → ${unit} (${action.reason})`;
   }
 
-  return `${action.memberId} → ${action.unitBaseId} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
+  const unit = lookups?.unitNames[action.unitBaseId] ?? action.unitBaseId;
+  return `${member} → ${unit} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
 }
 
 function CandidateCard({
@@ -62,12 +71,14 @@ function CandidateCard({
   onApplyOne,
   onApplyAll,
   canApply,
+  lookups,
 }: {
   title: string;
   candidate: SequentialFullPlatoonPlan['first'] | SequentialFullPlatoonPlan['second'] | null;
   onApplyOne: (action: PlatoonSimulatorAction) => void;
   onApplyAll: (actions: PlatoonSimulatorAction[]) => void;
   canApply: boolean;
+  lookups?: Lookups;
 }) {
   if (!candidate) {
     return (
@@ -149,7 +160,7 @@ function CandidateCard({
               >
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-100">
-                    {describeAction(action)}
+                    {describeAction(action, lookups)}
                   </div>
                   <div className="mt-1 text-xs text-slate-500">{action.type}</div>
                 </div>
@@ -266,6 +277,7 @@ useEffect(() => {
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
+  const lookups = data?.lookups;
 
   function applyOne(action: PlatoonSimulatorAction) {
     setActions((prev) => dedupeActions([...prev, action]));
@@ -401,7 +413,7 @@ useEffect(() => {
                     className="rounded-2xl border border-slate-800 bg-black/20 p-4"
                   >
                     <div className="text-sm font-medium text-slate-100">
-                      {describeAction(action)}
+                      {describeAction(action, lookups)}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">{action.type}</div>
 
@@ -444,6 +456,7 @@ useEffect(() => {
               onApplyOne={applyOne}
               onApplyAll={applyAll}
               canApply={!loading}
+              lookups={lookups}
             />
 
             <CandidateCard
@@ -452,6 +465,7 @@ useEffect(() => {
               onApplyOne={applyOne}
               onApplyAll={applyAll}
               canApply={!loading}
+              lookups={lookups}
             />
           </section>
         </div>

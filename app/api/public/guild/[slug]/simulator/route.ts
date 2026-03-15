@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server';
-import {
-  applySimulationActions,
-  simulatePlatoonScenario,
-} from '@/lib/services/platoon-simulator';
-import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+import { applySimulationActions, simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
 import { findSequentialFullPlatoonPlan } from '@/lib/services/platoon-completion-advisor';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 import type { PlatoonSimulatorAction } from '@/lib/types/platoon-simulator';
@@ -61,29 +57,17 @@ export async function POST(request: Request, { params }: RouteContext) {
       );
     }
 
-    const baselineStartedAt = Date.now();
-    const baseline = await withStageTimeout('baseline_matching', () =>
-      computePlatoonMatching(dataset),
+    const simulationStartedAt = Date.now();
+    const simulation = await withStageTimeout('simulation', () =>
+      simulatePlatoonScenario(dataset, actions),
     );
-    timings.baseline_matching_ms = Date.now() - baselineStartedAt;
+    timings.simulation_ms = Date.now() - simulationStartedAt;
 
     const applyStartedAt = Date.now();
     const simulatedDataset = await withStageTimeout('apply_actions', () =>
       applySimulationActions(dataset, actions),
     );
     timings.apply_actions_ms = Date.now() - applyStartedAt;
-
-    const simulatedStartedAt = Date.now();
-    const simulated = await withStageTimeout('simulated_matching', () =>
-      computePlatoonMatching(simulatedDataset),
-    );
-    timings.simulated_matching_ms = Date.now() - simulatedStartedAt;
-
-    const deltaStartedAt = Date.now();
-    const simulation = await withStageTimeout('build_simulation', () =>
-      simulatePlatoonScenario(dataset, actions),
-    );
-    timings.build_simulation_ms = Date.now() - deltaStartedAt;
 
     const advisoryStartedAt = Date.now();
     const advisory = await withStageTimeout('advisor', () =>
@@ -93,15 +77,34 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     timings.total_ms = Date.now() - startedAt;
 
+    const memberNames: Record<string, string> = {};
+    for (const m of dataset.members) {
+      memberNames[m.memberId] = m.playerName;
+    }
+
+    const unitNames: Record<string, string> = {};
+    for (const s of dataset.slots) {
+      if (s.unitName) unitNames[s.unitBaseId] = s.unitName;
+    }
+    for (const r of dataset.roster) {
+      if (r.unitName && !unitNames[r.unitBaseId]) {
+        unitNames[r.unitBaseId] = r.unitName;
+      }
+    }
+
     return NextResponse.json(
       {
-        simulation,
+        simulation: {
+          delta: simulation.delta,
+        },
         advisory,
+        lookups: {
+          memberNames,
+          unitNames,
+        },
         debug: {
           actionsCount: actions.length,
           timings,
-          baselineExists: !!baseline,
-          simulatedExists: !!simulated,
         },
       },
       { status: 200 },
