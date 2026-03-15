@@ -76,37 +76,32 @@ function getPlatoonIdFromSlot(slot: {
 
 function getCoveredSlotsByPlatoon(result: MatchingLike): Map<string, Set<string>> {
   const byPlatoon = new Map<string, Set<string>>();
+  const resultRecord = result as unknown as AnyRecord;
 
-  if (!result || !Array.isArray((result  as unknown as AnyRecord).coverage)) {
+  if (!Array.isArray(resultRecord.assignments)) {
     return byPlatoon;
   }
 
-  for (const platoon of (result  as unknown as AnyRecord).coverage as AnyRecord[]) {
-    const platoonId =
-      getString(platoon, 'platoonId', 'targetPlatoonId', 'id') ??
-      buildPlatoonIdFromCoverageRecord(platoon);
+  for (const assignment of resultRecord.assignments as AnyRecord[]) {
+    const requirementId = getString(assignment, 'requirementId');
+    const phase =
+      getNumber(assignment, 'phase')?.toString() ??
+      getString(assignment, 'phase');
+    const zoneKey = getString(assignment, 'zoneKey');
+    const platoonKey = getString(assignment, 'platoonKey');
 
-    if (!platoonId) continue;
-
-    const coveredSlotKeys = new Set<string>();
-    const assignments = Array.isArray(platoon.assignments) ? platoon.assignments : [];
-
-    for (const assignment of assignments as AnyRecord[]) {
-      const slotKey =
-        getString(assignment, 'slotKey') ??
-        getString(assignment.slot as AnyRecord | undefined, 'slotKey');
-
-      if (slotKey) {
-        coveredSlotKeys.add(slotKey);
-      }
+    if (!requirementId || !phase || !zoneKey || !platoonKey) {
+      continue;
     }
 
-    byPlatoon.set(platoonId, coveredSlotKeys);
+    const platoonId = `${phase}::${zoneKey}::${platoonKey}`;
+    const covered = byPlatoon.get(platoonId) ?? new Set<string>();
+    covered.add(requirementId);
+    byPlatoon.set(platoonId, covered);
   }
 
   return byPlatoon;
 }
-
 function buildPlatoonIdFromCoverageRecord(record: AnyRecord): string | null {
   const phase = getString(record, 'phase') ?? getNumber(record, 'phase')?.toString() ?? null;
   const zoneKey = getString(record, 'zoneKey');
@@ -151,77 +146,52 @@ function getFullPlatoonIds(result: MatchingLike): string[] {
   }
 
   return (resultRecord.coverage as AnyRecord[])
-    .filter((platoon) => {
-      const covered = Array.isArray(platoon.assignments)
-        ? platoon.assignments.length
-        : Array.isArray(platoon.coveredSlots)
-          ? platoon.coveredSlots.length
-          : typeof platoon.coveredSlotsCount === 'number'
-            ? platoon.coveredSlotsCount
-            : 0;
-
-      const total = Array.isArray(platoon.slots)
-        ? platoon.slots.length
-        : typeof platoon.totalSlots === 'number'
-          ? platoon.totalSlots
-          : 0;
-
-      return total > 0 && covered >= total;
+    .filter((entry) => {
+      const assignedCount = getNumber(entry, 'assignedCount') ?? 0;
+      const requirementCount = getNumber(entry, 'requirementCount') ?? 0;
+      return requirementCount > 0 && assignedCount >= requirementCount;
     })
-    .map((platoon) => {
-      return (
-        getString(platoon, 'platoonId', 'targetPlatoonId', 'id') ??
-        buildPlatoonIdFromCoverageRecord(platoon) ??
-        ''
-      );
+    .map((entry) => {
+      const phase =
+        getNumber(entry, 'phase')?.toString() ??
+        getString(entry, 'phase');
+      const category = getString(entry, 'category');
+
+      if (!phase || !category) {
+        return '';
+      }
+
+      return `${phase}::${category}`;
     })
     .filter(Boolean);
 }
 function countFullPlatoons(result: MatchingLike): number {
-  return getFullPlatoonIds(result).length;
-}
+  const resultRecord = result as unknown as AnyRecord;
 
+  if (!Array.isArray(resultRecord.coverage)) {
+    return 0;
+  }
+
+  return (resultRecord.coverage as AnyRecord[]).filter((entry) => {
+    const assignedCount = getNumber(entry, 'assignedCount') ?? 0;
+    const requirementCount = getNumber(entry, 'requirementCount') ?? 0;
+    return requirementCount > 0 && assignedCount >= requirementCount;
+  }).length;
+}
 function getAssignmentKeys(result: MatchingLike): Set<string> {
   const keys = new Set<string>();
   const resultRecord = result as unknown as AnyRecord;
 
-  if (Array.isArray(resultRecord.assignments)) {
-    for (const assignment of resultRecord.assignments as AnyRecord[]) {
-      const slotKey =
-        getString(assignment, 'slotKey') ??
-        getString(assignment.slot as AnyRecord | undefined, 'slotKey');
-
-      const memberId =
-        getString(assignment, 'memberId', 'sourceMemberId') ??
-        getString(assignment.source as AnyRecord | undefined, 'memberId', 'sourceMemberId');
-
-      if (slotKey && memberId) {
-        keys.add(`${slotKey}::${memberId}`);
-      }
-    }
-
+  if (!Array.isArray(resultRecord.assignments)) {
     return keys;
   }
 
-  if (!Array.isArray(resultRecord.coverage)) {
-    return keys;
-  }
+  for (const assignment of resultRecord.assignments as AnyRecord[]) {
+    const requirementId = getString(assignment, 'requirementId');
+    const memberId = getString(assignment, 'memberId');
 
-  for (const platoon of resultRecord.coverage as AnyRecord[]) {
-    const assignments = Array.isArray(platoon.assignments) ? platoon.assignments : [];
-
-    for (const assignment of assignments as AnyRecord[]) {
-      const slotKey =
-        getString(assignment, 'slotKey') ??
-        getString(assignment.slot as AnyRecord | undefined, 'slotKey');
-
-      const memberId =
-        getString(assignment, 'memberId', 'sourceMemberId') ??
-        getString(assignment.source as AnyRecord | undefined, 'memberId', 'sourceMemberId');
-
-      if (slotKey && memberId) {
-        keys.add(`${slotKey}::${memberId}`);
-      }
+    if (requirementId && memberId) {
+      keys.add(`${requirementId}::${memberId}`);
     }
   }
 
@@ -569,7 +539,7 @@ if (firstAction?.type === 'ADD_HYPOTHETICAL_UNIT') {
       const syntheticEligible = Array.isArray(s.eligibleRoster)
         ? s.eligibleRoster.filter((entry) =>
             typeof entry.memberId === 'string' &&
-            entry.memberId.includes('__sim__'),
+            (entry.memberId.includes('_sim_') || entry.memberId.includes('__sim__')),
           ).map((entry) => entry.memberId)
         : [];
 
