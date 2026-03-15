@@ -120,9 +120,17 @@ function buildPlatoonIdFromCoverageRecord(record: AnyRecord): string | null {
 }
 
 function countCoveredSlots(result: MatchingLike): number {
-  if (!result || !Array.isArray((result  as unknown as AnyRecord).coverage)) return 0;
+  const resultRecord = result as unknown as AnyRecord;
 
-  return ((result  as unknown as AnyRecord).coverage as AnyRecord[]).reduce((sum, platoon) => {
+  if (typeof resultRecord.coveredSlots === 'number' && Number.isFinite(resultRecord.coveredSlots)) {
+    return resultRecord.coveredSlots;
+  }
+
+  if (!Array.isArray(resultRecord.coverage)) {
+    return 0;
+  }
+
+  return (resultRecord.coverage as AnyRecord[]).reduce((sum, platoon) => {
     const covered = Array.isArray(platoon.assignments)
       ? platoon.assignments.length
       : Array.isArray(platoon.coveredSlots)
@@ -136,48 +144,70 @@ function countCoveredSlots(result: MatchingLike): number {
 }
 
 function getFullPlatoonIds(result: MatchingLike): string[] {
-  if (!result || !Array.isArray((result  as unknown as AnyRecord).coverage)) return [];
+  const resultRecord = result as unknown as AnyRecord;
 
-  return ((result  as unknown as AnyRecord).coverage as AnyRecord[])
-    .filter((platoon) => {
-      const covered = Array.isArray(platoon.assignments)
-        ? platoon.assignments.length
-        : Array.isArray(platoon.coveredSlots)
-          ? platoon.coveredSlots.length
-          : typeof platoon.coveredSlotsCount === 'number'
-            ? platoon.coveredSlotsCount
+  if (Array.isArray(resultRecord.coverage)) {
+    return (resultRecord.coverage as AnyRecord[])
+      .filter((platoon) => {
+        const covered = Array.isArray(platoon.assignments)
+          ? platoon.assignments.length
+          : Array.isArray(platoon.coveredSlots)
+            ? platoon.coveredSlots.length
+            : typeof platoon.coveredSlotsCount === 'number'
+              ? platoon.coveredSlotsCount
+              : 0;
+
+        const total = Array.isArray(platoon.slots)
+          ? platoon.slots.length
+          : typeof platoon.totalSlots === 'number'
+            ? platoon.totalSlots
             : 0;
 
-      const total = Array.isArray(platoon.slots)
-        ? platoon.slots.length
-        : typeof platoon.totalSlots === 'number'
-          ? platoon.totalSlots
-          : 0;
+        return total > 0 && covered >= total;
+      })
+      .map((platoon) => {
+        return (
+          getString(platoon, 'platoonId', 'targetPlatoonId', 'id') ??
+          buildPlatoonIdFromCoverageRecord(platoon) ??
+          ''
+        );
+      })
+      .filter(Boolean);
+  }
 
-      return total > 0 && covered >= total;
-    })
-    .map((platoon) => {
-      return (
-        getString(platoon, 'platoonId', 'targetPlatoonId', 'id') ??
-        buildPlatoonIdFromCoverageRecord(platoon) ??
-        ''
-      );
-    })
-    .filter(Boolean);
+  return [];
 }
-
 function countFullPlatoons(result: MatchingLike): number {
   return getFullPlatoonIds(result).length;
 }
 
 function getAssignmentKeys(result: MatchingLike): Set<string> {
   const keys = new Set<string>();
+  const resultRecord = result as unknown as AnyRecord;
 
-  if (!result || !Array.isArray((result  as unknown as AnyRecord).coverage)) {
+  if (Array.isArray(resultRecord.assignments)) {
+    for (const assignment of resultRecord.assignments as AnyRecord[]) {
+      const slotKey =
+        getString(assignment, 'slotKey') ??
+        getString(assignment.slot as AnyRecord | undefined, 'slotKey');
+
+      const memberId =
+        getString(assignment, 'memberId', 'sourceMemberId') ??
+        getString(assignment.source as AnyRecord | undefined, 'memberId', 'sourceMemberId');
+
+      if (slotKey && memberId) {
+        keys.add(`${slotKey}::${memberId}`);
+      }
+    }
+
     return keys;
   }
 
-  for (const platoon of (result  as unknown as AnyRecord).coverage as AnyRecord[]) {
+  if (!Array.isArray(resultRecord.coverage)) {
+    return keys;
+  }
+
+  for (const platoon of resultRecord.coverage as AnyRecord[]) {
     const assignments = Array.isArray(platoon.assignments) ? platoon.assignments : [];
 
     for (const assignment of assignments as AnyRecord[]) {
@@ -197,7 +227,6 @@ function getAssignmentKeys(result: MatchingLike): Set<string> {
 
   return keys;
 }
-
 function buildDelta(
   baseline: MatchingLike,
   simulated: MatchingLike,
@@ -455,7 +484,27 @@ export function simulatePlatoonScenario(
     actions.length > 0 && 'slotKey' in actions[0] && typeof actions[0].slotKey === 'string'
       ? null
       : null;
+console.log('[simulator] baseline raw', {
+  coveredSlots: (baseline as unknown as Record<string, unknown>).coveredSlots,
+  fullPlatoons: (baseline as unknown as Record<string, unknown>).fullPlatoons,
+  assignments: Array.isArray((baseline as unknown as Record<string, unknown>).assignments)
+    ? ((baseline as unknown as Record<string, unknown>).assignments as unknown[]).length
+    : null,
+  coverage: Array.isArray((baseline as unknown as Record<string, unknown>).coverage)
+    ? ((baseline as unknown as Record<string, unknown>).coverage as unknown[]).length
+    : null,
+});
 
+console.log('[simulator] simulated raw', {
+  coveredSlots: (simulated as unknown as Record<string, unknown>).coveredSlots,
+  fullPlatoons: (simulated as unknown as Record<string, unknown>).fullPlatoons,
+  assignments: Array.isArray((simulated as unknown as Record<string, unknown>).assignments)
+    ? ((simulated as unknown as Record<string, unknown>).assignments as unknown[]).length
+    : null,
+  coverage: Array.isArray((simulated as unknown as Record<string, unknown>).coverage)
+    ? ((simulated as unknown as Record<string, unknown>).coverage as unknown[]).length
+    : null,
+});
   return {
     baseline,
     simulatedDataset,
