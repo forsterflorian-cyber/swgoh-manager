@@ -57,7 +57,12 @@ export type {
 
 /** Maximum platoon slots a single member may fill per category per phase. */
 const MEMBER_CAP_PER_CATEGORY = 10;
+/** Soft fairness penalty for the nth assignment of the same member within one (phase, category). */
+const FAIRNESS_SLOT_COSTS = [0, 5, 15, 30, 50, 75, 105, 140, 180, 225] as const;
 
+function fairnessCostForSlotIndex(slotIndex: number): number {
+  return FAIRNESS_SLOT_COSTS[slotIndex] ?? FAIRNESS_SLOT_COSTS[FAIRNESS_SLOT_COSTS.length - 1];
+}
 /** Processing order: main zone categories first, bonus (SPECIAL) last. */
 const CATEGORY_PROCESSING_ORDER: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
 
@@ -275,9 +280,6 @@ function runMatchingForGroup(
     return { assignments: new Map(), usedOwners: new Set(), memberLoad: new Map() };
   }
 
-  // ── Step 1: Identify all eligible edges and collect unique members & ownerKeys ──
-
-  /** Sorted deterministic slot list. */
   const sortedSlots = [...slots].sort((a, b) => {
     if (a.phase !== b.phase) return a.phase - b.phase;
     if (a.zoneSortOrder !== b.zoneSortOrder) return a.zoneSortOrder - b.zoneSortOrder;
@@ -290,7 +292,6 @@ function runMatchingForGroup(
     slotKeyToIdx.set(sortedSlots[i].slotKey, i);
   }
 
-  // Collect eligible edges: (ownerKey, slotIndex, cost)
   interface CandidateEdge {
     ownerKey: OwnerKey;
     memberId: string;
@@ -302,14 +303,12 @@ function runMatchingForGroup(
   const memberSet = new Set<string>();
   const ownerKeySet = new Set<OwnerKey>();
 
-  /** Deterministic tiebreaker counter per unit. */
   let tiebreakerCounter = 0;
 
   for (const slot of sortedSlots) {
     const sIdx = slotKeyToIdx.get(slot.slotKey)!;
     const candidates = rosterByUnit.get(slot.unitBaseId) ?? [];
 
-    // Sort candidates deterministically (weakest first for stable tiebreaker assignment).
     const sorted = [...candidates]
       .filter((o) => ownerQualifies(o, slot))
       .sort((a, b) => {
@@ -331,45 +330,58 @@ function runMatchingForGroup(
     }
   }
 
-  // ── Step 2: Assign node IDs ──
-
   const members = [...memberSet].sort();
-  const memberToNodeId = new Map<string, number>();
   const ownerKeys = [...ownerKeySet].sort();
-  const ownerKeyToNodeId = new Map<string, number>();
 
   const SOURCE = 0;
   const SINK = 1;
   let nextId = 2;
 
-  for (const m of members) {
-    memberToNodeId.set(m, nextId++);
+  /**
+   * Instead of one member-cap node with cap=10, build 10 member-slot nodes with cap=1 each.
+   * This lets us attach increasing fairness costs per additional assignment.
+   */
+  const memberSlotNodes = new Map<string, number[]>();
+  for (const memberId of members) {
+    const nodeIds: number[] = [];
+    for (let i = 0; i < MEMBER_CAP_PER_CATEGORY; i++) {
+      nodeIds.push(nextId++);
+    }
+    memberSlotNodes.set(memberId, nodeIds);
   }
+
+  const ownerKeyToNodeId = new Map<OwnerKey, number>();
   for (const ok of ownerKeys) {
     ownerKeyToNodeId.set(ok, nextId++);
   }
+
   const slotNodeBase = nextId;
   nextId += sortedSlots.length;
 
   const totalNodes = nextId;
-
-  // ── Step 3: Build network ──
-
   const net = createNetwork(totalNodes, SOURCE, SINK);
 
-  // SOURCE → member-cap nodes (capacity = MEMBER_CAP_PER_CATEGORY, cost = 0)
-  for (const m of members) {
-    addEdge(net, SOURCE, memberToNodeId.get(m)!, MEMBER_CAP_PER_CATEGORY, 0);
+  // SOURCE → member-slot nodes, cap=1, increasing fairness cost
+  for (const memberId of members) {
+    const slotNodes = memberSlotNodes.get(memberId)!;
+    for (let i = 0; i < slotNodes.length; i++) {
+      addEdge(net, SOURCE, slotNodes[i], 1, fairnessCostForSlotIndex(i));
+    }
   }
 
-  // member-cap nodes → owner-key nodes (capacity = 1, cost = 0)
-  // Each ownerKey belongs to exactly one member.
+  // member-slot nodes → owner-key nodes, cap=1, cost=0
+  // Important: every member-slot can activate exactly one owner-key.
   for (const ok of ownerKeys) {
     const memberId = memberIdFromOwnerKey(ok);
-    addEdge(net, memberToNodeId.get(memberId)!, ownerKeyToNodeId.get(ok)!, 1, 0);
+    const ownerNodeId = ownerKeyToNodeId.get(ok)!;
+    const slotNodes = memberSlotNodes.get(memberId)!;
+
+    for (const memberSlotNodeId of slotNodes) {
+      addEdge(net, memberSlotNodeId, ownerNodeId, 1, 0);
+    }
   }
 
-  // owner-key nodes → slot nodes (capacity = 1, cost = computed edge cost)
+  // owner-key nodes → slot nodes, cap=1, edge cost = owner surplus cost
   for (const ce of candidateEdges) {
     addEdge(
       net,
@@ -380,22 +392,17 @@ function runMatchingForGroup(
     );
   }
 
-  // slot nodes → SINK (capacity = 1, cost = 0)
+  // slot nodes → SINK, cap=1, cost=0
   for (let i = 0; i < sortedSlots.length; i++) {
     addEdge(net, slotNodeBase + i, SINK, 1, 0);
   }
 
-  // ── Step 4: Solve ──
-
   solveMinCostMaxFlow(net);
-
-  // ── Step 5: Extract assignments ──
 
   const assignments = new Map<string, OwnerKey>();
   const usedOwners = new Set<OwnerKey>();
   const memberLoad = new Map<string, number>();
 
-  // Check flow on owner-key → slot edges.
   for (const ok of ownerKeys) {
     const nodeId = ownerKeyToNodeId.get(ok)!;
     for (const e of net.adj[nodeId]) {
@@ -404,15 +411,15 @@ function runMatchingForGroup(
         const slot = sortedSlots[slotIdx];
         assignments.set(slot.slotKey, ok);
         usedOwners.add(ok);
-        const mid = memberIdFromOwnerKey(ok);
-        memberLoad.set(mid, (memberLoad.get(mid) ?? 0) + 1);
+
+        const memberId = memberIdFromOwnerKey(ok);
+        memberLoad.set(memberId, (memberLoad.get(memberId) ?? 0) + 1);
       }
     }
   }
 
   return { assignments, usedOwners, memberLoad };
 }
-
 // ─── Gap analysis ─────────────────────────────────────────────────────────────
 
 /**
