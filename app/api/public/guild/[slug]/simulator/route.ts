@@ -27,77 +27,71 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function countSlotsFromRoot(root: Record<string, unknown> | null): number {
-  if (!root) return 0;
-
-  const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
-  let count = 0;
-
-  for (const phase of phases) {
-    const zones = Array.isArray(phase.zones) ? (phase.zones as Record<string, unknown>[]) : [];
-
-    for (const zone of zones) {
-      const platoons = Array.isArray(zone.platoons)
-        ? (zone.platoons as Record<string, unknown>[])
-        : [];
-
-      for (const platoon of platoons) {
-        const slots = Array.isArray(platoon.slots)
-          ? (platoon.slots as Record<string, unknown>[])
-          : [];
-        count += slots.length;
-      }
-    }
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
   }
 
-  return count;
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      !!item && typeof item === 'object' && !Array.isArray(item),
+  );
 }
 
-function countPlatoonsFromRoot(root: Record<string, unknown> | null): number {
-  if (!root) return 0;
-
-  const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
-  let count = 0;
-
-  for (const phase of phases) {
-    const zones = Array.isArray(phase.zones) ? (phase.zones as Record<string, unknown>[]) : [];
-
-    for (const zone of zones) {
-      const platoons = Array.isArray(zone.platoons)
-        ? (zone.platoons as Record<string, unknown>[])
-        : [];
-      count += platoons.length;
-    }
-  }
-
-  return count;
+function getTopLevelKeys(value: unknown): string[] {
+  const record = asRecord(value);
+  return record ? Object.keys(record).sort() : [];
 }
 
-function countMembersFromRoot(root: Record<string, unknown> | null): number {
-  if (!root) return 0;
-
-  if (Array.isArray(root.members)) {
-    return root.members.length;
-  }
-
-  if (Array.isArray(root.rosterMembers)) {
-    return root.rosterMembers.length;
-  }
-
-  return 0;
+function pickSlotSample(slots: Record<string, unknown>[]) {
+  return slots.slice(0, 3).map((slot, index) => ({
+    index,
+    keys: Object.keys(slot).sort(),
+    slotKey:
+      typeof slot.slotKey === 'string'
+        ? slot.slotKey
+        : typeof slot.id === 'string'
+          ? slot.id
+          : typeof slot.key === 'string'
+            ? slot.key
+            : null,
+    platoonId:
+      typeof slot.platoonId === 'string'
+        ? slot.platoonId
+        : typeof slot.targetPlatoonId === 'string'
+          ? slot.targetPlatoonId
+          : null,
+    unitBaseId:
+      typeof slot.unitBaseId === 'string'
+        ? slot.unitBaseId
+        : typeof slot.baseId === 'string'
+          ? slot.baseId
+          : null,
+    memberId:
+      typeof slot.memberId === 'string'
+        ? slot.memberId
+        : null,
+    planetCategory:
+      typeof slot.planetCategory === 'string'
+        ? slot.planetCategory
+        : null,
+    eligibleRosterCount: Array.isArray(slot.eligibleRoster) ? slot.eligibleRoster.length : 0,
+    assignedRosterCount: Array.isArray(slot.assignedRoster) ? slot.assignedRoster.length : 0,
+  }));
 }
 
-function inspectCandidate(name: string, value: unknown) {
-  const root = asRecord(value);
-
-  return {
-    name,
-    exists: !!root,
-    topLevelKeys: root ? Object.keys(root).sort() : [],
-    membersCount: countMembersFromRoot(root),
-    platoonsCount: countPlatoonsFromRoot(root),
-    slotsCount: countSlotsFromRoot(root),
-  };
+function pickStrategicAssignmentSample(assignments: Record<string, unknown>[]) {
+  return assignments.slice(0, 3).map((item, index) => ({
+    index,
+    keys: Object.keys(item).sort(),
+    memberId: typeof item.memberId === 'string' ? item.memberId : null,
+    unitBaseId: typeof item.unitBaseId === 'string' ? item.unitBaseId : null,
+    slotKey: typeof item.slotKey === 'string' ? item.slotKey : null,
+    platoonId: typeof item.platoonId === 'string' ? item.platoonId : null,
+    planetCategory:
+      typeof item.planetCategory === 'string' ? item.planetCategory : null,
+    blockType: typeof item.blockType === 'string' ? item.blockType : null,
+  }));
 }
 
 export async function POST(request: Request, { params }: RouteContext) {
@@ -109,11 +103,17 @@ export async function POST(request: Request, { params }: RouteContext) {
     const loaded = await loadStrategicPlannerDatasetForGuildSlug(slug);
     const root = asRecord(loaded);
 
-    const datasetCandidate = root ? root.dataset : undefined;
-    const plannerDataCandidate = root ? root.plannerData : undefined;
-    const dataCandidate = root ? root.data : undefined;
-    const readinessCandidate = root ? root.readiness : undefined;
-    const strategicPlannerDatasetCandidate = root ? root.strategicPlannerDataset : undefined;
+    if (!root) {
+      return NextResponse.json(
+        { error: 'Loaded dataset is not an object.' },
+        { status: 500 },
+      );
+    }
+
+    const slots = asRecordArray(root.slots);
+    const strategicAssignments = asRecordArray(root.strategicAssignments);
+    const members = Array.isArray(root.members) ? root.members : [];
+    const roster = asRecord(root.roster);
 
     return NextResponse.json(
       {
@@ -140,15 +140,13 @@ export async function POST(request: Request, { params }: RouteContext) {
         debug: {
           slug,
           actionsCount: actions.length,
-          root: inspectCandidate('root', loaded),
-          dataset: inspectCandidate('dataset', datasetCandidate),
-          plannerData: inspectCandidate('plannerData', plannerDataCandidate),
-          data: inspectCandidate('data', dataCandidate),
-          readiness: inspectCandidate('readiness', readinessCandidate),
-          strategicPlannerDataset: inspectCandidate(
-            'strategicPlannerDataset',
-            strategicPlannerDatasetCandidate,
-          ),
+          topLevelKeys: getTopLevelKeys(root),
+          membersCount: members.length,
+          slotsCount: slots.length,
+          strategicAssignmentsCount: strategicAssignments.length,
+          rosterKeys: getTopLevelKeys(roster),
+          slotSample: pickSlotSample(slots),
+          strategicAssignmentSample: pickStrategicAssignmentSample(strategicAssignments),
         },
       },
       { status: 200 },
