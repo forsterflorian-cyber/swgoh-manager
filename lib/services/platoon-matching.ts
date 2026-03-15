@@ -80,7 +80,9 @@ function memberIdFromOwnerKey(key: OwnerKey): string {
   const idx = key.indexOf(':');
   return idx === -1 ? key : key.slice(0, idx);
 }
-
+function makeMemberCategoryKey(memberId: string, category: PlanetCategory): string {
+  return `${memberId}:${category}`;
+}
 function ownerQualifies(
   owner: StrategicPlannerRosterInput,
   slot: StrategicPlannerSlotInput,
@@ -250,13 +252,14 @@ function solveMinCostMaxFlow(net: MCMFNetwork): [number, number] {
 
 // ─── Flow network construction per (phase, category) group ────────────────────
 
+
 interface GroupMatchResult {
   /** slotKey → OwnerKey that fills it. */
   assignments: Map<string, OwnerKey>;
   /** Set of OwnerKeys that are used in assignments. */
   usedOwners: Set<OwnerKey>;
-  /** memberId → number of slots assigned. */
-  memberLoad: Map<string, number>;
+  /** `${memberId}:${category}` → number of slots assigned. */
+  memberCategoryLoad: Map<string, number>;
 }
 
 /**
@@ -272,16 +275,25 @@ interface GroupMatchResult {
  *   2+M .. 2+M+O-1               = owner-key nodes   (O = distinct eligible (member,unit) pairs)
  *   2+M+O .. 2+M+O+S-1           = slot nodes        (S = number of slots)
  */
-function runMatchingForGroup(
-  slots: StrategicPlannerSlotInput[],
+function runMatchingForPhase(
+  phaseSlots: StrategicPlannerSlotInput[],
   rosterByUnit: ReadonlyMap<string, StrategicPlannerRosterInput[]>,
 ): GroupMatchResult {
-  if (slots.length === 0) {
-    return { assignments: new Map(), usedOwners: new Set(), memberLoad: new Map() };
+  if (phaseSlots.length === 0) {
+    return {
+      assignments: new Map(),
+      usedOwners: new Set(),
+      memberCategoryLoad: new Map(),
+    };
   }
 
-  const sortedSlots = [...slots].sort((a, b) => {
+  const sortedSlots = [...phaseSlots].sort((a, b) => {
     if (a.phase !== b.phase) return a.phase - b.phase;
+
+    const categoryOrderA = CATEGORY_PROCESSING_ORDER.indexOf(normalizeAlgoCategory(a.planetCategory));
+    const categoryOrderB = CATEGORY_PROCESSING_ORDER.indexOf(normalizeAlgoCategory(b.planetCategory));
+    if (categoryOrderA !== categoryOrderB) return categoryOrderA - categoryOrderB;
+
     if (a.zoneSortOrder !== b.zoneSortOrder) return a.zoneSortOrder - b.zoneSortOrder;
     if (a.platoonSortOrder !== b.platoonSortOrder) return a.platoonSortOrder - b.platoonSortOrder;
     return a.slotNumber - b.slotNumber;
@@ -295,12 +307,13 @@ function runMatchingForGroup(
   interface CandidateEdge {
     ownerKey: OwnerKey;
     memberId: string;
+    category: PlanetCategory;
     slotIdx: number;
     cost: number;
   }
 
   const candidateEdges: CandidateEdge[] = [];
-  const memberSet = new Set<string>();
+  const memberCategorySet = new Set<string>();
   const ownerKeySet = new Set<OwnerKey>();
 
   let tiebreakerCounter = 0;
@@ -309,7 +322,7 @@ function runMatchingForGroup(
     const sIdx = slotKeyToIdx.get(slot.slotKey)!;
     const candidates = rosterByUnit.get(slot.unitBaseId) ?? [];
 
-    const sorted = [...candidates]
+    const sortedCandidates = [...candidates]
       .filter((o) => ownerQualifies(o, slot))
       .sort((a, b) => {
         if (a.relicTier !== b.relicTier) return a.relicTier - b.relicTier;
@@ -317,20 +330,24 @@ function runMatchingForGroup(
         return a.playerName.localeCompare(b.playerName);
       });
 
-    for (const owner of sorted) {
-      const oKey = makeOwnerKey(owner.memberId, owner.unitBaseId);
-      memberSet.add(owner.memberId);
-      ownerKeySet.add(oKey);
+    for (const owner of sortedCandidates) {
+      const ownerKey = makeOwnerKey(owner.memberId, owner.unitBaseId);
+      const memberCategoryKey = makeMemberCategoryKey(owner.memberId, normalizeAlgoCategory(slot.planetCategory));
+
+      ownerKeySet.add(ownerKey);
+      memberCategorySet.add(memberCategoryKey);
+
       candidateEdges.push({
-        ownerKey: oKey,
+        ownerKey,
         memberId: owner.memberId,
+        category: normalizeAlgoCategory(slot.planetCategory),
         slotIdx: sIdx,
         cost: edgeCost(owner, slot, tiebreakerCounter++),
       });
     }
   }
 
-  const members = [...memberSet].sort();
+  const memberCategoryKeys = [...memberCategorySet].sort();
   const ownerKeys = [...ownerKeySet].sort();
 
   const SOURCE = 0;
@@ -338,24 +355,28 @@ function runMatchingForGroup(
   let nextId = 2;
 
   /**
-   * Instead of one member-cap node with cap=10, build 10 member-slot nodes with cap=1 each.
-   * This lets us attach increasing fairness costs per additional assignment.
+   * Fairness/capacity nodes per (member, category), not just per member.
+   * This preserves per-category cap semantics while solving the whole phase jointly.
    */
-  const memberSlotNodes = new Map<string, number[]>();
-  for (const memberId of members) {
+  const memberCategorySlotNodes = new Map<string, number[]>();
+  for (const memberCategoryKey of memberCategoryKeys) {
     const nodeIds: number[] = [];
     for (let i = 0; i < MEMBER_CAP_PER_CATEGORY; i++) {
       nodeIds.push(nextId++);
     }
-    memberSlotNodes.set(memberId, nodeIds);
+    memberCategorySlotNodes.set(memberCategoryKey, nodeIds);
   }
 
+  /**
+   * Owner uniqueness is global for the whole phase.
+   * ownerIn -> ownerOut has cap=1, therefore one (member, unit) can only be used once in this phase.
+   */
   const ownerKeyToInNodeId = new Map<OwnerKey, number>();
   const ownerKeyToOutNodeId = new Map<OwnerKey, number>();
 
-  for (const ok of ownerKeys) {
-    ownerKeyToInNodeId.set(ok, nextId++);
-    ownerKeyToOutNodeId.set(ok, nextId++);
+  for (const ownerKey of ownerKeys) {
+    ownerKeyToInNodeId.set(ownerKey, nextId++);
+    ownerKeyToOutNodeId.set(ownerKey, nextId++);
   }
 
   const slotNodeBase = nextId;
@@ -364,48 +385,58 @@ function runMatchingForGroup(
   const totalNodes = nextId;
   const net = createNetwork(totalNodes, SOURCE, SINK);
 
-  // SOURCE → member-slot nodes, cap=1, increasing fairness cost
-  for (const memberId of members) {
-    const slotNodes = memberSlotNodes.get(memberId)!;
+  // SOURCE -> memberCategory slot nodes, cap=1 each, increasing fairness cost
+  for (const memberCategoryKey of memberCategoryKeys) {
+    const slotNodes = memberCategorySlotNodes.get(memberCategoryKey)!;
     for (let i = 0; i < slotNodes.length; i++) {
       addEdge(net, SOURCE, slotNodes[i], 1, fairnessCostForSlotIndex(i));
     }
   }
 
-  // member-slot nodes → owner-key nodes, cap=1, cost=0
-  // Important: every member-slot can activate exactly one owner-key.
-for (const ok of ownerKeys) {
-  const memberId = memberIdFromOwnerKey(ok);
-  const ownerInNodeId = ownerKeyToInNodeId.get(ok)!;
-  const slotNodes = memberSlotNodes.get(memberId)!;
-
-  for (const memberSlotNodeId of slotNodes) {
-    addEdge(net, memberSlotNodeId, ownerInNodeId, 1, 0);
+  // memberCategory slot nodes -> ownerIn
+  // Only connect an owner to category buckets in which that owner has at least one eligible slot.
+  const ownerCategoryKeys = new Set<string>();
+  for (const ce of candidateEdges) {
+    ownerCategoryKeys.add(`${ce.ownerKey}::${ce.category}`);
   }
-}
 
-for (const ok of ownerKeys) {
-  addEdge(
-    net,
-    ownerKeyToInNodeId.get(ok)!,
-    ownerKeyToOutNodeId.get(ok)!,
-    1,
-    0,
-  );
-}
+  for (const ownerCategoryKey of [...ownerCategoryKeys].sort()) {
+    const [ownerKey, category] = ownerCategoryKey.split('::') as [OwnerKey, PlanetCategory];
+    const memberId = memberIdFromOwnerKey(ownerKey);
+    const memberCategoryKey = makeMemberCategoryKey(memberId, category);
+    const categorySlotNodes = memberCategorySlotNodes.get(memberCategoryKey);
+    const ownerInNodeId = ownerKeyToInNodeId.get(ownerKey);
 
-  // owner-key nodes → slot nodes, cap=1, edge cost = owner surplus cost
-for (const ce of candidateEdges) {
-  addEdge(
-    net,
-    ownerKeyToOutNodeId.get(ce.ownerKey)!,
-    slotNodeBase + ce.slotIdx,
-    1,
-    ce.cost,
-  );
-}
+    if (!categorySlotNodes || ownerInNodeId == null) continue;
 
-  // slot nodes → SINK, cap=1, cost=0
+    for (const memberCategorySlotNodeId of categorySlotNodes) {
+      addEdge(net, memberCategorySlotNodeId, ownerInNodeId, 1, 0);
+    }
+  }
+
+  // ownerIn -> ownerOut, cap=1 => hard uniqueness per owner across the full phase
+  for (const ownerKey of ownerKeys) {
+    addEdge(
+      net,
+      ownerKeyToInNodeId.get(ownerKey)!,
+      ownerKeyToOutNodeId.get(ownerKey)!,
+      1,
+      0,
+    );
+  }
+
+  // ownerOut -> slot, cap=1, cost = unit surplus cost
+  for (const ce of candidateEdges) {
+    addEdge(
+      net,
+      ownerKeyToOutNodeId.get(ce.ownerKey)!,
+      slotNodeBase + ce.slotIdx,
+      1,
+      ce.cost,
+    );
+  }
+
+  // slot -> SINK
   for (let i = 0; i < sortedSlots.length; i++) {
     addEdge(net, slotNodeBase + i, SINK, 1, 0);
   }
@@ -414,27 +445,37 @@ for (const ce of candidateEdges) {
 
   const assignments = new Map<string, OwnerKey>();
   const usedOwners = new Set<OwnerKey>();
-  const memberLoad = new Map<string, number>();
+  const memberCategoryLoad = new Map<string, number>();
 
-for (const ok of ownerKeys) {
-  const nodeId = ownerKeyToOutNodeId.get(ok)!;
-  for (const e of net.adj[nodeId]) {
-    if (e.flow > 0 && e.to >= slotNodeBase && e.to < slotNodeBase + sortedSlots.length) {
-      const slotIdx = e.to - slotNodeBase;
-      const slot = sortedSlots[slotIdx];
-      assignments.set(slot.slotKey, ok);
-      usedOwners.add(ok);
+  for (const ownerKey of ownerKeys) {
+    const ownerOutNodeId = ownerKeyToOutNodeId.get(ownerKey)!;
 
-      const memberId = memberIdFromOwnerKey(ok);
-      memberLoad.set(memberId, (memberLoad.get(memberId) ?? 0) + 1);
+    for (const e of net.adj[ownerOutNodeId]) {
+      if (e.flow > 0 && e.to >= slotNodeBase && e.to < slotNodeBase + sortedSlots.length) {
+        const slotIdx = e.to - slotNodeBase;
+        const slot = sortedSlots[slotIdx];
+
+        assignments.set(slot.slotKey, ownerKey);
+        usedOwners.add(ownerKey);
+
+        const memberId = memberIdFromOwnerKey(ownerKey);
+        const memberCategoryKey = makeMemberCategoryKey(memberId, normalizeAlgoCategory(slot.planetCategory));
+        memberCategoryLoad.set(
+          memberCategoryKey,
+          (memberCategoryLoad.get(memberCategoryKey) ?? 0) + 1,
+        );
+      }
     }
   }
-}
 
-  return { assignments, usedOwners, memberLoad };
+  return { assignments, usedOwners, memberCategoryLoad };
 }
 // ─── Gap analysis ─────────────────────────────────────────────────────────────
-
+function normalizeAlgoCategory(
+  category: PlanetCategory | null | undefined,
+): PlanetCategory {
+  return category ?? 'SPECIAL';
+}
 /**
  * For every unmatched slot, determine the cheapest net closure path.
  *
@@ -474,8 +515,9 @@ function buildGaps(
         };
 
         const isUsed = matchResult.usedOwners.has(oKey);
+        const memberCategoryKey = makeMemberCategoryKey(owner.memberId, normalizeAlgoCategory(slot.planetCategory));
         const isAtCap =
-          (matchResult.memberLoad.get(owner.memberId) ?? 0) >= MEMBER_CAP_PER_CATEGORY;
+          (matchResult.memberCategoryLoad.get(memberCategoryKey) ?? 0) >= MEMBER_CAP_PER_CATEGORY;
 
         if (!isUsed && !isAtCap) {
           freeEligible.push(source);
@@ -570,15 +612,34 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
     members.map((m) => [m.memberId, m.playerName]),
   );
 
-  const rosterByUnit = new Map<string, StrategicPlannerRosterInput[]>();
-  for (const entry of roster) {
-    const existing = rosterByUnit.get(entry.unitBaseId);
-    if (existing) {
-      existing.push(entry);
-    } else {
-      rosterByUnit.set(entry.unitBaseId, [entry]);
-    }
+const uniqueRoster = new Map<string, StrategicPlannerRosterInput>();
+
+for (const entry of roster) {
+  const key = `${entry.memberId}:${entry.unitBaseId}`;
+  const existing = uniqueRoster.get(key);
+
+  if (!existing) {
+    uniqueRoster.set(key, entry);
+    continue;
   }
+
+  if (
+    entry.relicTier > existing.relicTier ||
+    (entry.relicTier === existing.relicTier && entry.rarity > existing.rarity)
+  ) {
+    uniqueRoster.set(key, entry);
+  }
+}
+
+const rosterByUnit = new Map<string, StrategicPlannerRosterInput[]>();
+for (const entry of uniqueRoster.values()) {
+  const existing = rosterByUnit.get(entry.unitBaseId);
+  if (existing) {
+    existing.push(entry);
+  } else {
+    rosterByUnit.set(entry.unitBaseId, [entry]);
+  }
+}
 
   const phases = [...new Set(slots.map((s) => s.phase))].sort((a, b) => a - b);
 
@@ -586,58 +647,69 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
   const allAssignments: PlatoonMatchingAssignment[] = [];
   const allGaps: PlatoonMatchingGap[] = [];
 
-  for (const phase of phases) {
-    const phaseSlots = slots.filter((s) => s.phase === phase);
+for (const phase of phases) {
+  const phaseSlots = slots.filter((s) => s.phase === phase);
+  if (phaseSlots.length === 0) continue;
 
-    for (const category of CATEGORY_PROCESSING_ORDER) {
-      const group = phaseSlots.filter((s) => s.planetCategory === category);
-      if (group.length === 0) continue;
+  const matchResult = runMatchingForPhase(phaseSlots, rosterByUnit);
 
-      const matchResult = runMatchingForGroup(group, rosterByUnit);
+  const slotIndex = new Map(phaseSlots.map((s) => [s.slotKey, s]));
 
-      const assignedCount = matchResult.assignments.size;
-      const requirementCount = group.length;
+  for (const category of CATEGORY_PROCESSING_ORDER) {
+    const categorySlots = phaseSlots.filter((s) => s.planetCategory === category);
+    if (categorySlots.length === 0) continue;
 
-      allCoverage.push({
-        phase,
-        category,
-        isBonus: category === 'SPECIAL',
-        assignedCount,
-        requirementCount,
-        coveragePercent:
-          requirementCount > 0 ? Math.round((assignedCount / requirementCount) * 100) : 100,
-      });
+    const assignedCount = categorySlots.filter((s) => matchResult.assignments.has(s.slotKey)).length;
+    const requirementCount = categorySlots.length;
 
-      const slotIndex = new Map(group.map((s) => [s.slotKey, s]));
+    allCoverage.push({
+      phase,
+      category,
+      isBonus: category === 'SPECIAL',
+      assignedCount,
+      requirementCount,
+      coveragePercent:
+        requirementCount > 0 ? Math.round((assignedCount / requirementCount) * 100) : 100,
+    });
 
-      for (const [reqId, oKey] of matchResult.assignments) {
-        const slot = slotIndex.get(reqId);
-        if (!slot) continue;
-
-        const memberId = memberIdFromOwnerKey(oKey);
-
-        allAssignments.push({
-          requirementId: reqId,
-          phase: slot.phase,
-          zoneKey: slot.zoneKey,
-          platoonKey: slot.platoonKey,
-          slotNumber: slot.slotNumber,
-          unitBaseId: slot.unitBaseId,
-          unitName: slot.unitName,
-          planetCategory: slot.planetCategory,
-          memberId,
-          playerName: memberNameMap.get(memberId) ?? memberId,
-        });
-      }
-
-      const unmatched = group.filter((s) => !matchResult.assignments.has(s.slotKey));
-      allGaps.push(...buildGaps(unmatched, rosterByUnit, memberNameMap, matchResult));
-    }
+    const unmatched = categorySlots.filter((s) => !matchResult.assignments.has(s.slotKey));
+    allGaps.push(...buildGaps(unmatched, rosterByUnit, memberNameMap, matchResult));
   }
+
+  for (const [reqId, ownerKey] of matchResult.assignments) {
+    const slot = slotIndex.get(reqId);
+    if (!slot) continue;
+
+    const memberId = memberIdFromOwnerKey(ownerKey);
+
+    allAssignments.push({
+      requirementId: reqId,
+      phase: slot.phase,
+      zoneKey: slot.zoneKey,
+      platoonKey: slot.platoonKey,
+      slotNumber: slot.slotNumber,
+      unitBaseId: slot.unitBaseId,
+      unitName: slot.unitName,
+      planetCategory: slot.planetCategory,
+      memberId,
+      playerName: memberNameMap.get(memberId) ?? memberId,
+    });
+  }
+}
 
   const totalRequired = allCoverage.reduce((sum, e) => sum + e.requirementCount, 0);
   const totalAssigned = allCoverage.reduce((sum, e) => sum + e.assignedCount, 0);
+const seenPerPhaseOwner = new Set<string>();
 
+for (const assignment of allAssignments) {
+  const key = `${assignment.phase}:${assignment.memberId}:${assignment.unitBaseId}`;
+
+  if (seenPerPhaseOwner.has(key)) {
+    throw new Error(`Duplicate owner usage across phase detected: ${key}`);
+  }
+
+  seenPerPhaseOwner.add(key);
+}
   return {
     coverage: allCoverage,
     assignments: allAssignments,

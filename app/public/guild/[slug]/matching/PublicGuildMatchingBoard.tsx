@@ -50,6 +50,7 @@ function normalizeCategory(
   return 'all';
 }
 
+
 function CoverageCard({
   phase,
   category,
