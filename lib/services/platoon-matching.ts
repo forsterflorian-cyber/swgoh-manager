@@ -446,7 +446,6 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
         const slot = slotIndex.get(reqId);
         if (!slot) continue;
         const memberId = memberIdFromOwnerKey(oKey);
-          if (DEBUG_UNITS.has(slot.unitBaseId)) {
             console.log('[matching:assignment]', {
               slot: reqId,
               unit: slot.unitBaseId,
@@ -454,7 +453,6 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
               member: memberId,
               playerName: memberNameMap.get(memberId) ?? memberId,
             });
-          }
         allAssignments.push({
           requirementId: reqId,
           phase: slot.phase,
@@ -477,7 +475,16 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
   // ── Totals ────────────────────────────────────────────────────────────────
   const totalRequired = allCoverage.reduce((n, c) => n + c.requirementCount, 0);
   const totalAssigned = allCoverage.reduce((n, c) => n + c.assignedCount, 0);
-
+    console.log('[matching:summary]', {
+      totalAssignments: allAssignments.length,
+      totalGaps: allGaps.length,
+      sampleGaps: allGaps.slice(0, 10).map((g) => ({
+        slotKey: g.requirementId,
+        unitBaseId: g.unitBaseId,
+        unitName: g.unitName,
+        action: g.recommendedAction,
+      })),
+    });
   return {
     coverage: allCoverage,
     assignments: allAssignments,

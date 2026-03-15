@@ -34,7 +34,7 @@ import { toNumber } from '@/lib/utils/to-number';
 // Debug tracing — set to the exact unitBaseId to trace, or '' to disable.
 // Remove before shipping a production build.
 // ---------------------------------------------------------------------------
-const DEBUG_UNIT = 'SCYTHE';
+const DEBUG_UNIT = '';
 
 type AccessibleGuildRow = {
   id: string;
