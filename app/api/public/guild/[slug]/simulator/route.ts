@@ -19,8 +19,15 @@ function parseActions(body: unknown): PlatoonSimulatorAction[] {
   return Array.isArray(candidate) ? (candidate as PlatoonSimulatorAction[]) : [];
 }
 
-function countSlots(dataset: unknown): number {
-  const root = dataset as Record<string, unknown> | null;
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function countSlotsFromRoot(root: Record<string, unknown> | null): number {
   if (!root) return 0;
 
   const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
@@ -46,8 +53,7 @@ function countSlots(dataset: unknown): number {
   return count;
 }
 
-function countPlatoons(dataset: unknown): number {
-  const root = dataset as Record<string, unknown> | null;
+function countPlatoonsFromRoot(root: Record<string, unknown> | null): number {
   if (!root) return 0;
 
   const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
@@ -67,43 +73,7 @@ function countPlatoons(dataset: unknown): number {
   return count;
 }
 
-function countEligibleEntries(dataset: unknown): number {
-  const root = dataset as Record<string, unknown> | null;
-  if (!root) return 0;
-
-  const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
-  let count = 0;
-
-  for (const phase of phases) {
-    const zones = Array.isArray(phase.zones) ? (phase.zones as Record<string, unknown>[]) : [];
-
-    for (const zone of zones) {
-      const platoons = Array.isArray(zone.platoons)
-        ? (zone.platoons as Record<string, unknown>[])
-        : [];
-
-      for (const platoon of platoons) {
-        const slots = Array.isArray(platoon.slots)
-          ? (platoon.slots as Record<string, unknown>[])
-          : [];
-
-        for (const slot of slots) {
-          const eligibleRoster = Array.isArray(
-            (slot as Record<string, unknown>).eligibleRoster,
-          )
-            ? ((slot as Record<string, unknown>).eligibleRoster as unknown[])
-            : [];
-          count += eligibleRoster.length;
-        }
-      }
-    }
-  }
-
-  return count;
-}
-
-function countMembers(dataset: unknown): number {
-  const root = dataset as Record<string, unknown> | null;
+function countMembersFromRoot(root: Record<string, unknown> | null): number {
   if (!root) return 0;
 
   if (Array.isArray(root.members)) {
@@ -117,17 +87,33 @@ function countMembers(dataset: unknown): number {
   return 0;
 }
 
+function inspectCandidate(name: string, value: unknown) {
+  const root = asRecord(value);
+
+  return {
+    name,
+    exists: !!root,
+    topLevelKeys: root ? Object.keys(root).sort() : [],
+    membersCount: countMembersFromRoot(root),
+    platoonsCount: countPlatoonsFromRoot(root),
+    slotsCount: countSlotsFromRoot(root),
+  };
+}
+
 export async function POST(request: Request, { params }: RouteContext) {
   try {
     const { slug } = await params;
     const body = await request.json();
     const actions = parseActions(body);
 
-    const dataset = await loadStrategicPlannerDatasetForGuildSlug(slug);
+    const loaded = await loadStrategicPlannerDatasetForGuildSlug(slug);
+    const root = asRecord(loaded);
 
-    if (!dataset) {
-      return NextResponse.json({ error: 'Guild dataset not found.' }, { status: 404 });
-    }
+    const datasetCandidate = root ? root.dataset : undefined;
+    const plannerDataCandidate = root ? root.plannerData : undefined;
+    const dataCandidate = root ? root.data : undefined;
+    const readinessCandidate = root ? root.readiness : undefined;
+    const strategicPlannerDatasetCandidate = root ? root.strategicPlannerDataset : undefined;
 
     return NextResponse.json(
       {
@@ -154,10 +140,15 @@ export async function POST(request: Request, { params }: RouteContext) {
         debug: {
           slug,
           actionsCount: actions.length,
-          membersCount: countMembers(dataset),
-          platoonsCount: countPlatoons(dataset),
-          slotsCount: countSlots(dataset),
-          eligibleEntriesCount: countEligibleEntries(dataset),
+          root: inspectCandidate('root', loaded),
+          dataset: inspectCandidate('dataset', datasetCandidate),
+          plannerData: inspectCandidate('plannerData', plannerDataCandidate),
+          data: inspectCandidate('data', dataCandidate),
+          readiness: inspectCandidate('readiness', readinessCandidate),
+          strategicPlannerDataset: inspectCandidate(
+            'strategicPlannerDataset',
+            strategicPlannerDatasetCandidate,
+          ),
         },
       },
       { status: 200 },
