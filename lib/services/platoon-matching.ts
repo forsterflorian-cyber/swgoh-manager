@@ -350,9 +350,12 @@ function runMatchingForGroup(
     memberSlotNodes.set(memberId, nodeIds);
   }
 
-  const ownerKeyToNodeId = new Map<OwnerKey, number>();
+  const ownerKeyToInNodeId = new Map<OwnerKey, number>();
+  const ownerKeyToOutNodeId = new Map<OwnerKey, number>();
+
   for (const ok of ownerKeys) {
-    ownerKeyToNodeId.set(ok, nextId++);
+    ownerKeyToInNodeId.set(ok, nextId++);
+    ownerKeyToOutNodeId.set(ok, nextId++);
   }
 
   const slotNodeBase = nextId;
@@ -371,26 +374,36 @@ function runMatchingForGroup(
 
   // member-slot nodes → owner-key nodes, cap=1, cost=0
   // Important: every member-slot can activate exactly one owner-key.
-  for (const ok of ownerKeys) {
-    const memberId = memberIdFromOwnerKey(ok);
-    const ownerNodeId = ownerKeyToNodeId.get(ok)!;
-    const slotNodes = memberSlotNodes.get(memberId)!;
+for (const ok of ownerKeys) {
+  const memberId = memberIdFromOwnerKey(ok);
+  const ownerInNodeId = ownerKeyToInNodeId.get(ok)!;
+  const slotNodes = memberSlotNodes.get(memberId)!;
 
-    for (const memberSlotNodeId of slotNodes) {
-      addEdge(net, memberSlotNodeId, ownerNodeId, 1, 0);
-    }
+  for (const memberSlotNodeId of slotNodes) {
+    addEdge(net, memberSlotNodeId, ownerInNodeId, 1, 0);
   }
+}
+
+for (const ok of ownerKeys) {
+  addEdge(
+    net,
+    ownerKeyToInNodeId.get(ok)!,
+    ownerKeyToOutNodeId.get(ok)!,
+    1,
+    0,
+  );
+}
 
   // owner-key nodes → slot nodes, cap=1, edge cost = owner surplus cost
-  for (const ce of candidateEdges) {
-    addEdge(
-      net,
-      ownerKeyToNodeId.get(ce.ownerKey)!,
-      slotNodeBase + ce.slotIdx,
-      1,
-      ce.cost,
-    );
-  }
+for (const ce of candidateEdges) {
+  addEdge(
+    net,
+    ownerKeyToOutNodeId.get(ce.ownerKey)!,
+    slotNodeBase + ce.slotIdx,
+    1,
+    ce.cost,
+  );
+}
 
   // slot nodes → SINK, cap=1, cost=0
   for (let i = 0; i < sortedSlots.length; i++) {
@@ -403,20 +416,20 @@ function runMatchingForGroup(
   const usedOwners = new Set<OwnerKey>();
   const memberLoad = new Map<string, number>();
 
-  for (const ok of ownerKeys) {
-    const nodeId = ownerKeyToNodeId.get(ok)!;
-    for (const e of net.adj[nodeId]) {
-      if (e.flow > 0 && e.to >= slotNodeBase && e.to < slotNodeBase + sortedSlots.length) {
-        const slotIdx = e.to - slotNodeBase;
-        const slot = sortedSlots[slotIdx];
-        assignments.set(slot.slotKey, ok);
-        usedOwners.add(ok);
+for (const ok of ownerKeys) {
+  const nodeId = ownerKeyToOutNodeId.get(ok)!;
+  for (const e of net.adj[nodeId]) {
+    if (e.flow > 0 && e.to >= slotNodeBase && e.to < slotNodeBase + sortedSlots.length) {
+      const slotIdx = e.to - slotNodeBase;
+      const slot = sortedSlots[slotIdx];
+      assignments.set(slot.slotKey, ok);
+      usedOwners.add(ok);
 
-        const memberId = memberIdFromOwnerKey(ok);
-        memberLoad.set(memberId, (memberLoad.get(memberId) ?? 0) + 1);
-      }
+      const memberId = memberIdFromOwnerKey(ok);
+      memberLoad.set(memberId, (memberLoad.get(memberId) ?? 0) + 1);
     }
   }
+}
 
   return { assignments, usedOwners, memberLoad };
 }
