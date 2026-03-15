@@ -424,13 +424,21 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
 
   for (const phase of phases) {
     const phaseSlots = slots.filter((s) => s.phase === phase);
-
+    console.log("[matching] phase start", {
+        phase,
+        slots: phaseSlots.length,
+      });
     for (const category of CATEGORY_PROCESSING_ORDER) {
       const group = phaseSlots.filter((s) => s.planetCategory === category);
       if (group.length === 0) continue;
 
       const state = runMatchingForGroup(group, rosterByUnit);
-
+      console.log("[matching] group result", {
+        phase,
+        category,
+        requirements: group.length,
+        assignments: state.reqToOwner.size,
+      });
       // ── Coverage summary ─────────────────────────────────────────────────
       const assignedCount = state.reqToOwner.size;
       const requirementCount = group.length;
@@ -473,6 +481,11 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
 
       // ── Gap analysis ─────────────────────────────────────────────────────
       const unmatched = group.filter((s) => !state.reqToOwner.has(s.slotKey));
+      console.log("[matching] unmatched summary", {
+        phase,
+        category,
+        unmatched: unmatched.length,
+      });
       allGaps.push(...buildGaps(unmatched, rosterByUnit, memberNameMap, state));
     }
   }
