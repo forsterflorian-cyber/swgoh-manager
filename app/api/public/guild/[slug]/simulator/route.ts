@@ -20,53 +20,130 @@ function parseActions(body: unknown): PlatoonSimulatorAction[] {
   return Array.isArray(candidate) ? (candidate as PlatoonSimulatorAction[]) : [];
 }
 
-export async function POST(request: Request, { params }: RouteContext) {
-  const startedAt = Date.now();
+function countSlots(dataset: unknown): number {
+  const root = dataset as Record<string, unknown> | null;
+  if (!root) return 0;
 
+  const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
+  let count = 0;
+
+  for (const phase of phases) {
+    const zones = Array.isArray(phase.zones) ? (phase.zones as Record<string, unknown>[]) : [];
+
+    for (const zone of zones) {
+      const platoons = Array.isArray(zone.platoons)
+        ? (zone.platoons as Record<string, unknown>[])
+        : [];
+
+      for (const platoon of platoons) {
+        const slots = Array.isArray(platoon.slots)
+          ? (platoon.slots as Record<string, unknown>[])
+          : [];
+        count += slots.length;
+      }
+    }
+  }
+
+  return count;
+}
+
+function countPlatoons(dataset: unknown): number {
+  const root = dataset as Record<string, unknown> | null;
+  if (!root) return 0;
+
+  const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
+  let count = 0;
+
+  for (const phase of phases) {
+    const zones = Array.isArray(phase.zones) ? (phase.zones as Record<string, unknown>[]) : [];
+
+    for (const zone of zones) {
+      const platoons = Array.isArray(zone.platoons)
+        ? (zone.platoons as Record<string, unknown>[])
+        : [];
+      count += platoons.length;
+    }
+  }
+
+  return count;
+}
+
+function countEligibleEntries(dataset: unknown): number {
+  const root = dataset as Record<string, unknown> | null;
+  if (!root) return 0;
+
+  const phases = Array.isArray(root.phases) ? (root.phases as Record<string, unknown>[]) : [];
+  let count = 0;
+
+  for (const phase of phases) {
+    const zones = Array.isArray(phase.zones) ? (phase.zones as Record<string, unknown>[]) : [];
+
+    for (const zone of zones) {
+      const platoons = Array.isArray(zone.platoons)
+        ? (zone.platoons as Record<string, unknown>[])
+        : [];
+
+      for (const platoon of platoons) {
+        const slots = Array.isArray(platoon.slots)
+          ? (platoon.slots as Record<string, unknown>[])
+          : [];
+
+        for (const slot of slots) {
+          const eligibleRoster = Array.isArray(slot.eligibleRoster)
+            ? (slot.eligibleRoster as unknown[])
+            : [];
+          count += eligibleRoster.length;
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
+function countMembers(dataset: unknown): number {
+  const root = dataset as Record<string, unknown> | null;
+  if (!root) return 0;
+
+  if (Array.isArray(root.members)) {
+    return root.members.length;
+  }
+
+  if (Array.isArray(root.rosterMembers)) {
+    return root.rosterMembers.length;
+  }
+
+  return 0;
+}
+
+export async function POST(request: Request, { params }: RouteContext) {
   try {
     const { slug } = await params;
     const body = await request.json();
     const actions = parseActions(body);
 
-    const afterBodyAt = Date.now();
-
     const dataset = await loadStrategicPlannerDatasetForGuildSlug(slug);
 
-    const afterLoadAt = Date.now();
-
     if (!dataset) {
-      return NextResponse.json(
-        {
-          error: 'Guild dataset not found.',
-          stage: 'load_dataset',
-          timings: {
-            totalMs: Date.now() - startedAt,
-            parseBodyMs: afterBodyAt - startedAt,
-            loadDatasetMs: afterLoadAt - afterBodyAt,
-          },
-        },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: 'Guild dataset not found.' }, { status: 404 });
     }
 
     const simulation = simulatePlatoonScenario(dataset, actions);
 
-    const afterSimulationAt = Date.now();
-
     return NextResponse.json(
       {
-        ok: true,
-        stage: 'simulation_done',
-        timings: {
-          totalMs: Date.now() - startedAt,
-          parseBodyMs: afterBodyAt - startedAt,
-          loadDatasetMs: afterLoadAt - afterBodyAt,
-          simulationMs: afterSimulationAt - afterLoadAt,
-        },
         simulation,
         advisory: {
           first: null,
           second: null,
+        },
+        debug: {
+          slug,
+          actionsCount: actions.length,
+          membersCount: countMembers(dataset),
+          platoonsCount: countPlatoons(dataset),
+          slotsCount: countSlots(dataset),
+          eligibleEntriesCount: countEligibleEntries(dataset),
         },
       },
       { status: 200 },
@@ -76,11 +153,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Failed during simulation.',
-        stage: 'simulation',
-        timings: {
-          totalMs: Date.now() - startedAt,
-        },
+        error: error instanceof Error ? error.message : 'Failed to simulate scenario.',
       },
       { status: 500 },
     );
