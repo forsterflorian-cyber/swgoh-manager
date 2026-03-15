@@ -111,19 +111,44 @@ function rankPlatoonsForSimulation(
   return ranked;
 }
 function getAssignmentSlotKey(assignment: PlatoonMatchingAssignment): string | null {
-  const direct = (assignment as PlatoonMatchingAssignment & { slotKey?: string }).slotKey;
-  if (typeof direct === 'string' && direct.length > 0) {
-    return direct;
+  const a = assignment as unknown as Record<string, unknown>;
+
+  const directCandidates = [
+    a.slotKey,
+    a.targetSlotKey,
+    a.requiredSlotKey,
+    a.key,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      return candidate;
+    }
   }
 
-  const nested = (
-    assignment as PlatoonMatchingAssignment & {
-      slot?: { slotKey?: string | null } | null;
-    }
-  ).slot?.slotKey;
+  const nestedObjects = [
+    a.slot,
+    a.targetSlot,
+    a.requiredSlot,
+    a.target,
+  ];
 
-  if (typeof nested === 'string' && nested.length > 0) {
-    return nested;
+  for (const obj of nestedObjects) {
+    if (!obj || typeof obj !== 'object') continue;
+
+    const r = obj as Record<string, unknown>;
+    const nestedCandidates = [
+      r.slotKey,
+      r.targetSlotKey,
+      r.requiredSlotKey,
+      r.key,
+    ];
+
+    for (const candidate of nestedCandidates) {
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        return candidate;
+      }
+    }
   }
 
   return null;
@@ -245,7 +270,16 @@ function findBestNextFullPlatoonCandidate(
   baseline: PlatoonMatchingResult,
 ): NextFullPlatoonResult | null {
 
+const coveredSlotKeys = getCoveredSlotKeys(baseline);
 
+console.log('[advisor] baseline coverage debug', {
+  assignments: baseline.assignments.length,
+  coveredSlotKeys: coveredSlotKeys.size,
+  firstCoveredKeys: Array.from(coveredSlotKeys).slice(0, 10),
+  firstAssignment: baseline.assignments[0]
+    ? JSON.stringify(baseline.assignments[0], null, 2)
+    : null,
+});
 const rankedAll = rankPlatoonsForSimulation(dataset, baseline);
 
 console.log(
