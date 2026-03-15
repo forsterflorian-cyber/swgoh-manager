@@ -1,12 +1,19 @@
-import { simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
+import {
+  applySimulationActions,
+  simulatePlatoonScenario,
+} from '@/lib/services/platoon-simulator';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+
 import type {
   NextFullPlatoonResult,
   PlatoonSimulatorAction,
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
-import type { PlatoonMatchingResult, StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
-
-type AnyRecord = Record<string, unknown>;
+import type {
+  PlatoonMatchingAssignment,
+  PlatoonMatchingResult,
+  StrategicPlannerDataset,
+} from '@/lib/types/platoon-readiness';
 
 type SlotLike = StrategicPlannerDataset['slots'][number] & {
   slotKey: string;
@@ -16,300 +23,294 @@ type SlotLike = StrategicPlannerDataset['slots'][number] & {
   platoonKey: string;
   requiredRarity: number | null;
   requiredRelicTier: number | null;
-  planetCategory?: string | null;
-  eligibleRoster?: AnyRecord[];
 };
 
-type DraftCandidate = {
-  targetPlatoonId: string;
-  actions: PlatoonSimulatorAction[];
-  missingSlots: number;
-  totalGapScore: number;
-};
-
-export function findSequentialFullPlatoonPlan(
-  dataset: StrategicPlannerDataset,
-  precomputedBaseline?: PlatoonMatchingResult,
-): SequentialFullPlatoonPlan {
-  const drafts = buildDraftCandidates(dataset);
-
-  if (drafts.length === 0) {
-    return {
-      first: null,
-      second: null,
-    };
-  }
-
-  const concrete = drafts
-    .slice(0, 8)
-    .map((draft) => toConcreteCandidate(dataset, draft, precomputedBaseline))
-    .filter((candidate): candidate is NextFullPlatoonResult => candidate !== null)
-    .sort(compareCandidates);
-
-  return {
-    first: concrete[0] ?? null,
-    second: concrete[1] ?? null,
-  };
-}
-
-function buildDraftCandidates(dataset: StrategicPlannerDataset): DraftCandidate[] {
-  const slots = (dataset.slots as unknown as SlotLike[]).filter(
-    (slot) => typeof slot.slotKey === 'string' && typeof slot.unitBaseId === 'string',
-  );
-
-  const roster = dataset.roster as unknown as AnyRecord[];
-  const byPlatoon = new Map<string, SlotLike[]>();
-
-  for (const slot of slots) {
-    const platoonId = getTargetPlatoonId(slot);
-    const existing = byPlatoon.get(platoonId);
-
-    if (existing) {
-      existing.push(slot);
-    } else {
-      byPlatoon.set(platoonId, [slot]);
-    }
-  }
-
-  const drafts: DraftCandidate[] = [];
-
-  for (const [targetPlatoonId, platoonSlots] of byPlatoon.entries()) {
-    const coverState = computeCurrentCoverState(platoonSlots);
-
-    if (coverState.uncoveredSlots.length === 0) {
-      continue;
-    }
-
-    const usedMemberIds = new Set(coverState.usedMemberIds);
-    const actions: PlatoonSimulatorAction[] = [];
-    let totalGapScore = 0;
-    let feasible = true;
-
-    for (const slot of coverState.uncoveredSlots) {
-      const nearMiss = findBestNearMiss(slot, roster, usedMemberIds);
-      if (!nearMiss) {
-        feasible = false;
-        break;
-      }
-
-      usedMemberIds.add(nearMiss.memberId);
-      totalGapScore += nearMiss.gapScore;
-
-      actions.push({
-        id: buildActionId(slot.slotKey, nearMiss.memberId),
-        type: 'MAKE_SLOT_ELIGIBLE',
-        slotKey: slot.slotKey,
-        memberId: nearMiss.memberId,
-        reason: 'availability',
-      });
-    }
-
-    if (!feasible || actions.length === 0) {
-      continue;
-    }
-
-    drafts.push({
-      targetPlatoonId,
-      actions,
-      missingSlots: coverState.uncoveredSlots.length,
-      totalGapScore,
-    });
-  }
-
-  drafts.sort((a, b) => {
-    if (a.missingSlots !== b.missingSlots) {
-      return a.missingSlots - b.missingSlots;
-    }
-
-    if (a.totalGapScore !== b.totalGapScore) {
-      return a.totalGapScore - b.totalGapScore;
-    }
-
-    if (a.actions.length !== b.actions.length) {
-      return a.actions.length - b.actions.length;
-    }
-
-    return a.targetPlatoonId.localeCompare(b.targetPlatoonId);
-  });
-
-  return drafts;
-}
-
-function toConcreteCandidate(
-  dataset: StrategicPlannerDataset,
-  draft: DraftCandidate,
-  precomputedBaseline?: PlatoonMatchingResult,
-): NextFullPlatoonResult | null {
-  const simulation = simulatePlatoonScenario(dataset, draft.actions, precomputedBaseline);
-  const delta = simulation.delta;
-
-  if (delta.deltaFullPlatoons <= 0 && delta.deltaCoveredSlots <= 0) {
-    return null;
-  }
-
-  return {
-    targetPlatoonId: draft.targetPlatoonId,
-    actions: draft.actions,
-    deltaCoveredSlots: delta.deltaCoveredSlots,
-    deltaFullPlatoons: delta.deltaFullPlatoons,
-    changedAssignmentCount: delta.changedAssignmentCount,
-    displacedAssignmentCount: delta.displacedAssignmentCount,
-    becameFullPlatoonIds: delta.becameFullPlatoonIds,
-    noLongerFullPlatoonIds: delta.noLongerFullPlatoonIds,
-  } as unknown as NextFullPlatoonResult;
-}
-
-function compareCandidates(a: NextFullPlatoonResult, b: NextFullPlatoonResult): number {
-  if (a.deltaFullPlatoons !== b.deltaFullPlatoons) {
-    return b.deltaFullPlatoons - a.deltaFullPlatoons;
-  }
-
-  if (a.deltaCoveredSlots !== b.deltaCoveredSlots) {
-    return b.deltaCoveredSlots - a.deltaCoveredSlots;
-  }
-
-  if ((a.displacedAssignmentCount ?? 0) !== (b.displacedAssignmentCount ?? 0)) {
-    return (a.displacedAssignmentCount ?? 0) - (b.displacedAssignmentCount ?? 0);
-  }
-
-  if (a.changedAssignmentCount !== b.changedAssignmentCount) {
-    return a.changedAssignmentCount - b.changedAssignmentCount;
-  }
-
-  if (a.actions.length !== b.actions.length) {
-    return a.actions.length - b.actions.length;
-  }
-
-  return a.targetPlatoonId.localeCompare(b.targetPlatoonId);
-}
-
-function buildActionId(slotKey: string, memberId: string): string {
-  return `sim:${slotKey}:${memberId}`;
-}
-
-function getTargetPlatoonId(slot: SlotLike): string {
+function getPlatoonIdFromSlot(slot: {
+  phase: string | number;
+  zoneKey: string;
+  platoonKey: string;
+}): string {
   return `${String(slot.phase)}::${slot.zoneKey}::${slot.platoonKey}`;
 }
 
-function computeCurrentCoverState(slots: SlotLike[]): {
-  usedMemberIds: Set<string>;
-  uncoveredSlots: SlotLike[];
-} {
-  const ordered = [...slots].sort((a, b) => {
-    const aCount = Array.isArray(a.eligibleRoster) ? a.eligibleRoster.length : 0;
-    const bCount = Array.isArray(b.eligibleRoster) ? b.eligibleRoster.length : 0;
+function getCoveredSlotKeys(
+  matching: PlatoonMatchingResult,
+): Set<string> {
+  const keys = new Set<string>();
 
-    if (aCount !== bCount) {
-      return aCount - bCount;
-    }
+  for (const assignment of matching.assignments) {
+    const assignmentWithDirectSlotKey = assignment as PlatoonMatchingAssignment & {
+      slotKey?: string;
+    };
 
-    return a.slotKey.localeCompare(b.slotKey);
-  });
+    const assignmentWithNestedSlot = assignment as PlatoonMatchingAssignment & {
+      slot?: { slotKey?: string | null } | null;
+    };
 
-  const usedMemberIds = new Set<string>();
-  const uncoveredSlots: SlotLike[] = [];
+    const slotKey =
+      typeof assignmentWithDirectSlotKey.slotKey === 'string'
+        ? assignmentWithDirectSlotKey.slotKey
+        : typeof assignmentWithNestedSlot.slot?.slotKey === 'string'
+          ? assignmentWithNestedSlot.slot.slotKey
+          : null;
 
-  for (const slot of ordered) {
-    const eligible = Array.isArray(slot.eligibleRoster) ? slot.eligibleRoster : [];
-    let covered = false;
-
-    for (const entry of eligible) {
-      const memberId = getMemberId(entry);
-      if (!memberId || usedMemberIds.has(memberId)) {
-        continue;
-      }
-
-      usedMemberIds.add(memberId);
-      covered = true;
-      break;
-    }
-
-    if (!covered) {
-      uncoveredSlots.push(slot);
+    if (slotKey) {
+      keys.add(slotKey);
     }
   }
 
+  return keys;
+}
+
+function getTargetPlatoonCoverage(
+  dataset: {
+    slots: Array<{
+      slotKey: string;
+      phase: string | number;
+      zoneKey: string;
+      platoonKey: string;
+    }>;
+  },
+  matching: PlatoonMatchingResult,
+  targetPlatoonId: string,
+): {
+  totalSlots: number;
+  coveredSlots: number;
+  missingSlots: number;
+  isFull: boolean;
+} {
+  const covered = getCoveredSlotKeys(matching);
+
+  let totalSlots = 0;
+  let coveredSlots = 0;
+
+  for (const slot of dataset.slots) {
+    if (getPlatoonIdFromSlot(slot) !== targetPlatoonId) continue;
+
+    totalSlots += 1;
+
+    if (covered.has(slot.slotKey)) {
+      coveredSlots += 1;
+    }
+  }
+
+  const missingSlots = totalSlots - coveredSlots;
+
   return {
-    usedMemberIds,
-    uncoveredSlots,
+    totalSlots,
+    coveredSlots,
+    missingSlots,
+    isFull: totalSlots > 0 && missingSlots === 0,
   };
 }
 
-function findBestNearMiss(
-  slot: SlotLike,
-  roster: AnyRecord[],
-  forbiddenMemberIds: Set<string>,
-): { memberId: string; gapScore: number } | null {
-  const alreadyEligibleMemberIds = new Set(
-    (Array.isArray(slot.eligibleRoster) ? slot.eligibleRoster : [])
-      .map((entry) => getMemberId(entry))
-      .filter((value): value is string => !!value),
+function getUncoveredSlotsForPlatoon(
+  dataset: {
+    slots: Array<{
+      slotKey: string;
+      unitBaseId: string;
+      phase: string | number;
+      zoneKey: string;
+      platoonKey: string;
+      requiredRarity: number | null;
+      requiredRelicTier: number | null;
+    }>;
+  },
+  matching: PlatoonMatchingResult,
+  targetPlatoonId: string,
+) {
+  const covered = getCoveredSlotKeys(matching);
+
+  return dataset.slots.filter((slot) => {
+    return (
+      getPlatoonIdFromSlot(slot) === targetPlatoonId &&
+      !covered.has(slot.slotKey)
+    );
+  });
+}
+
+function buildActionsForTargetPlatoon(
+  dataset: StrategicPlannerDataset,
+  baseline: PlatoonMatchingResult,
+  targetPlatoonId: string,
+): PlatoonSimulatorAction[] {
+  const missingSlots = getUncoveredSlotsForPlatoon(
+    dataset as {
+      slots: Array<{
+        slotKey: string;
+        unitBaseId: string;
+        phase: string | number;
+        zoneKey: string;
+        platoonKey: string;
+        requiredRarity: number | null;
+        requiredRelicTier: number | null;
+      }>;
+    },
+    baseline,
+    targetPlatoonId,
   );
 
-  let best: { memberId: string; gapScore: number } | null = null;
+  return missingSlots.map((slot, index) => ({
+    type: 'ADD_HYPOTHETICAL_UNIT' as const,
+    memberId: `hypothetical-member-${targetPlatoonId}-${index + 1}`,
+    unitBaseId: slot.unitBaseId,
+    rarity: slot.requiredRarity ?? 0,
+    relicTier: slot.requiredRelicTier ?? 0,
+  }));
+}
 
-  for (const entry of roster) {
-    const memberId = getMemberId(entry);
-    const unitBaseId = getString(entry, 'unitBaseId', 'baseId', 'defId');
+function getSimulationDelta(simulation: ReturnType<typeof simulatePlatoonScenario>): {
+  deltaCoveredSlots: number;
+  deltaFullPlatoons: number;
+} {
+  const deltaRecord = simulation.delta as {
+    coveredSlots?: number;
+    fullPlatoons?: number;
+    deltaCoveredSlots?: number;
+    deltaFullPlatoons?: number;
+  };
 
-    if (!memberId || !unitBaseId) continue;
-    if (unitBaseId !== slot.unitBaseId) continue;
-    if (forbiddenMemberIds.has(memberId)) continue;
-    if (alreadyEligibleMemberIds.has(memberId)) continue;
+  return {
+    deltaCoveredSlots:
+      deltaRecord.deltaCoveredSlots ?? deltaRecord.coveredSlots ?? 0,
+    deltaFullPlatoons:
+      deltaRecord.deltaFullPlatoons ?? deltaRecord.fullPlatoons ?? 0,
+  };
+}
 
-    const rarity = getNumber(entry, 'rarity', 'currentRarity', 'starCount') ?? 0;
-    const relicTier = getNumber(entry, 'relicTier', 'currentRelicTier') ?? 0;
+function compareCandidateScore(
+  a: NextFullPlatoonResult,
+  b: NextFullPlatoonResult,
+): number {
+  if (a.targetBecomesFull !== b.targetBecomesFull) {
+    return a.targetBecomesFull ? 1 : -1;
+  }
 
-    const rarityGap = Math.max(0, (slot.requiredRarity ?? 0) - rarity);
-    const relicGap = Math.max(0, (slot.requiredRelicTier ?? 0) - relicTier);
+  const aTargetGain = a.targetCoveredSlotsAfter - a.targetCoveredSlotsBefore;
+  const bTargetGain = b.targetCoveredSlotsAfter - b.targetCoveredSlotsBefore;
 
-    const gapScore = rarityGap * 100 + relicGap;
+  if (aTargetGain !== bTargetGain) {
+    return aTargetGain - bTargetGain;
+  }
 
-    if (!best || gapScore < best.gapScore) {
-      best = {
-        memberId,
-        gapScore,
-      };
+  if (a.deltaFullPlatoons !== b.deltaFullPlatoons) {
+    return a.deltaFullPlatoons - b.deltaFullPlatoons;
+  }
+
+  if (a.deltaCoveredSlots !== b.deltaCoveredSlots) {
+    return a.deltaCoveredSlots - b.deltaCoveredSlots;
+  }
+
+  if (a.actions.length !== b.actions.length) {
+    return b.actions.length - a.actions.length;
+  }
+
+  return 0;
+}
+
+function findBestNextFullPlatoonCandidate(
+  dataset: StrategicPlannerDataset,
+  baseline: PlatoonMatchingResult,
+): NextFullPlatoonResult | null {
+  const platoonIds = Array.from(
+    new Set(
+      (dataset.slots as SlotLike[]).map((slot) => getPlatoonIdFromSlot(slot)),
+    ),
+  );
+
+  let best: NextFullPlatoonResult | null = null;
+
+  for (const targetPlatoonId of platoonIds) {
+    const before = getTargetPlatoonCoverage(
+      dataset as {
+        slots: Array<{
+          slotKey: string;
+          phase: string | number;
+          zoneKey: string;
+          platoonKey: string;
+        }>;
+      },
+      baseline,
+      targetPlatoonId,
+    );
+
+    if (before.totalSlots === 0) continue;
+    if (before.isFull) continue;
+    if (before.missingSlots <= 0) continue;
+
+    const actions = buildActionsForTargetPlatoon(dataset, baseline, targetPlatoonId);
+    if (actions.length === 0) continue;
+
+    const simulation = simulatePlatoonScenario(dataset, actions, baseline);
+    const delta = getSimulationDelta(simulation);
+
+    const after = getTargetPlatoonCoverage(
+      simulation.simulatedDataset as {
+        slots: Array<{
+          slotKey: string;
+          phase: string | number;
+          zoneKey: string;
+          platoonKey: string;
+        }>;
+      },
+      simulation.simulated,
+      targetPlatoonId,
+    );
+
+    const candidate: NextFullPlatoonResult = {
+      targetPlatoonId,
+      actions,
+      deltaCoveredSlots: delta.deltaCoveredSlots,
+      deltaFullPlatoons: delta.deltaFullPlatoons,
+      targetCoveredSlotsBefore: before.coveredSlots,
+      targetCoveredSlotsAfter: after.coveredSlots,
+      targetMissingSlotsBefore: before.missingSlots,
+      targetMissingSlotsAfter: after.missingSlots,
+      targetBecomesFull: !before.isFull && after.isFull,
+    };
+
+    const hasUsefulProgress =
+      candidate.targetCoveredSlotsAfter > candidate.targetCoveredSlotsBefore ||
+      candidate.targetBecomesFull ||
+      candidate.deltaCoveredSlots > 0 ||
+      candidate.deltaFullPlatoons > 0;
+
+    if (!hasUsefulProgress) {
+      continue;
+    }
+
+    if (!best || compareCandidateScore(candidate, best) > 0) {
+      best = candidate;
     }
   }
 
   return best;
 }
 
-function getMemberId(record: AnyRecord | null | undefined): string | null {
-  return getString(record, 'memberId', 'playerId');
-}
+export function findSequentialFullPlatoonPlan(
+  dataset: StrategicPlannerDataset,
+): SequentialFullPlatoonPlan {
+  const baseline = computePlatoonMatching(dataset);
 
-function getString(record: AnyRecord | null | undefined, ...keys: string[]): string | null {
-  if (!record) return null;
+  const first = findBestNextFullPlatoonCandidate(dataset, baseline);
 
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value;
-    }
+  if (!first) {
+    return {
+      first: null,
+      second: null,
+    };
   }
 
-  return null;
-}
+  const datasetAfterFirst = applySimulationActions(dataset, first.actions);
+  const baselineAfterFirst = computePlatoonMatching(datasetAfterFirst);
 
-function getNumber(record: AnyRecord | null | undefined, ...keys: string[]): number | null {
-  if (!record) return null;
+  const second = findBestNextFullPlatoonCandidate(
+    datasetAfterFirst,
+    baselineAfterFirst,
+  );
 
-  for (const key of keys) {
-    const value = record[key];
-
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-
-    if (typeof value === 'string' && value.trim().length > 0) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-
-  return null;
+  return {
+    first,
+    second,
+  };
 }

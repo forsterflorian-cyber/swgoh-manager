@@ -1,4 +1,4 @@
-import type { PlanetCategory, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
+import type { PlanetCategory, PlatoonMatchingResult, StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
 
 export type PlatoonSimulatorAction =
   | {
@@ -15,6 +15,13 @@ export type PlatoonSimulatorAction =
       unitBaseId: string;
       planetCategory: PlanetCategory | null;
       blockType: 'committed' | 'reserved' | 'manual';
+    }
+  | {
+      type: 'ADD_HYPOTHETICAL_UNIT';
+      memberId: string;
+      unitBaseId: string;
+      rarity: number;
+      relicTier: number;
     };
 
 export type PlatoonSimulatorStepEffect = {
@@ -44,9 +51,12 @@ export type PlatoonSimulatorDelta = {
 
 export type PlatoonSimulatorResponse = {
   baseline: PlatoonMatchingResult;
+  simulatedDataset: StrategicPlannerDataset;
   simulated: PlatoonMatchingResult;
   delta: PlatoonSimulatorDelta;
   steps: PlatoonSimulatorStepEffect[];
+  targetPlatoonId: string | null;
+  simulatedCoverageByPlatoon: Map<string, Set<string>>;
 };
 
 export type NextFullPlatoonResult = {
@@ -54,8 +64,13 @@ export type NextFullPlatoonResult = {
   actions: PlatoonSimulatorAction[];
   deltaFullPlatoons: number;
   deltaCoveredSlots: number;
-  changedAssignmentCount: number;
-  displacedAssignmentCount: number;
+  changedAssignmentCount?: number;
+  displacedAssignmentCount?: number;
+  targetCoveredSlotsBefore: number;
+  targetCoveredSlotsAfter: number;
+  targetMissingSlotsBefore: number;
+  targetMissingSlotsAfter: number;
+  targetBecomesFull: boolean;
 };
 
 export type SequentialFullPlatoonPlan = {

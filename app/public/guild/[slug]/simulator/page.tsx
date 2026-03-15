@@ -23,11 +23,19 @@ type ErrorResponse = {
 };
 
 function getActionKey(action: PlatoonSimulatorAction): string {
-  if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-    return `${action.type}::${action.slotKey}::${action.memberId}`;
+  if (action.type === 'REMOVE_SOURCE_BLOCK') {
+    return `${action.type}::${action.memberId}::${action.unitBaseId}::${action.planetCategory ?? 'null'}::${action.blockType}`;
   }
 
-  return `${action.type}::${action.memberId}::${action.unitBaseId}::${action.planetCategory ?? 'null'}::${action.blockType}`;
+  if (action.type === 'ADD_HYPOTHETICAL_UNIT') {
+    return `${action.type}::${action.memberId}::${action.unitBaseId}::${action.rarity}::${action.relicTier}`;
+  }
+
+  if ('slotKey' in action) {
+    return `${String(action.type)}::${String(action.slotKey)}::${String(action.memberId)}`;
+  }
+
+  return JSON.stringify(action);
 }
 
 function dedupeActions(actions: PlatoonSimulatorAction[]): PlatoonSimulatorAction[] {
@@ -55,14 +63,25 @@ function getPlatoonLabel(targetPlatoonId: string | null | undefined): string {
 }
 
 function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): string {
-  const member = (lookups?.memberNames[action.memberId] ?? action.memberId);
-  if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-    const unit = action.slotKey.split('::').pop() ?? action.slotKey;
-    return `${member} → ${unit} (${action.reason})`;
+  const member = lookups?.memberNames[action.memberId] ?? action.memberId;
+
+  if ('slotKey' in action) {
+    const unitFromSlotKey = String(action.slotKey).split('::').pop() ?? String(action.slotKey);
+    const reason = 'reason' in action ? String(action.reason) : 'slot eligible';
+    return `${member} → ${unitFromSlotKey} (${reason})`;
   }
 
   const unit = lookups?.unitNames[action.unitBaseId] ?? action.unitBaseId;
-  return `${member} → ${unit} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
+
+  if (action.type === 'REMOVE_SOURCE_BLOCK') {
+    return `${member} → ${unit} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
+  }
+
+  if (action.type === 'ADD_HYPOTHETICAL_UNIT') {
+    return `${member} → ${unit} (R${action.relicTier} · ${action.rarity}★)`;
+  }
+
+  return `${member} → ${unit}`;
 }
 
 function CandidateCard({
@@ -91,6 +110,12 @@ function CandidateCard({
       </section>
     );
   }
+
+  const changedAssignmentCount =
+    'changedAssignmentCount' in candidate &&
+    typeof candidate.changedAssignmentCount === 'number'
+      ? candidate.changedAssignmentCount
+      : null;
 
   return (
     <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
@@ -137,9 +162,40 @@ function CandidateCard({
         <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
           <div className="text-xs text-slate-400">Changed assignments</div>
           <div className="mt-2 text-3xl font-semibold text-white">
-            {candidate.changedAssignmentCount}
+            {changedAssignmentCount ?? '—'}
           </div>
         </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-5">
+        {'targetCoveredSlotsBefore' in candidate &&
+        typeof candidate.targetCoveredSlotsBefore === 'number' ? (
+          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+            <div className="text-xs text-slate-400">Target covered</div>
+            <div className="mt-2 text-2xl font-semibold text-white">
+              {candidate.targetCoveredSlotsBefore} → {candidate.targetCoveredSlotsAfter}
+            </div>
+          </div>
+        ) : null}
+
+        {'targetMissingSlotsBefore' in candidate &&
+        typeof candidate.targetMissingSlotsBefore === 'number' ? (
+          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+            <div className="text-xs text-slate-400">Target missing</div>
+            <div className="mt-2 text-2xl font-semibold text-white">
+              {candidate.targetMissingSlotsBefore} → {candidate.targetMissingSlotsAfter}
+            </div>
+          </div>
+        ) : null}
+
+        {'targetBecomesFull' in candidate ? (
+          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+            <div className="text-xs text-slate-400">Target becomes full</div>
+            <div className="mt-2 text-2xl font-semibold text-white">
+              {candidate.targetBecomesFull ? 'Yes' : 'No'}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-6">
@@ -195,85 +251,96 @@ export default function PublicGuildSimulatorPage({
   const requestIdRef = useRef(0);
 
   useEffect(() => {
-    params.then((resolved) => setSlug(resolved.slug));
+    let cancelled = false;
+
+    params.then((resolved) => {
+      if (!cancelled) {
+        setSlug(resolved.slug);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [params]);
 
-useEffect(() => {
-  if (!slug) return;
+  useEffect(() => {
+    if (!slug) return;
 
-  const requestId = ++requestIdRef.current;
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 60000);
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
 
-  async function run() {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch(`/api/public/guild/${slug}/simulator`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ actions }),
-        signal: controller.signal,
-      });
-
-      const raw = await res.text();
-
-      let parsed: SimulatorApiResponse | ErrorResponse | null = null;
+    async function run() {
+      setLoading(true);
+      setError(null);
 
       try {
-        parsed = raw
-          ? (JSON.parse(raw) as SimulatorApiResponse | ErrorResponse)
-          : null;
-      } catch {
-        throw new Error(
-          raw
-            ? `Simulator API returned non-JSON response: ${raw.slice(0, 200)}`
-            : 'Simulator API returned empty response',
-        );
-      }
+        const res = await fetch(`/api/public/guild/${slug}/simulator`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ actions }),
+          signal: controller.signal,
+        });
 
-      if (!res.ok) {
-        throw new Error(
-          parsed && 'error' in parsed
-            ? parsed.error
-            : 'Simulation request failed',
-        );
-      }
+        const raw = await res.text();
 
-      if (requestId === requestIdRef.current) {
-        setData(parsed as SimulatorApiResponse);
-      }
-    } catch (err) {
-      console.error(err);
+        let parsed: SimulatorApiResponse | ErrorResponse | null = null;
 
-      if (requestId === requestIdRef.current) {
-        setData(null);
+        try {
+          parsed = raw
+            ? (JSON.parse(raw) as SimulatorApiResponse | ErrorResponse)
+            : null;
+        } catch {
+          throw new Error(
+            raw
+              ? `Simulator API returned non-JSON response: ${raw.slice(0, 200)}`
+              : 'Simulator API returned empty response',
+          );
+        }
 
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          setError('Simulation request timed out');
-        } else {
-          setError(err instanceof Error ? err.message : 'Simulation request failed');
+        if (!res.ok) {
+          throw new Error(
+            parsed && 'error' in parsed
+              ? parsed.error
+              : 'Simulation request failed',
+          );
+        }
+
+        if (requestId === requestIdRef.current) {
+          setData(parsed as SimulatorApiResponse);
+        }
+      } catch (err) {
+        console.error(err);
+
+        if (requestId === requestIdRef.current) {
+          setData(null);
+
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            setError('Simulation request timed out');
+          } else {
+            setError(err instanceof Error ? err.message : 'Simulation request failed');
+          }
+        }
+      } finally {
+        window.clearTimeout(timeoutId);
+
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
         }
       }
-    } finally {
-      window.clearTimeout(timeoutId);
-
-      if (requestId === requestIdRef.current) {
-        setLoading(false);
-      }
     }
-  }
 
-  run();
+    run();
 
-  return () => {
-    window.clearTimeout(timeoutId);
-    controller.abort();
-  };
-}, [slug, actions]);
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [slug, actions]);
+
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
