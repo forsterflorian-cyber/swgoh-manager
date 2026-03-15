@@ -1489,6 +1489,22 @@ function MatchingView({
         a.planetCategory === selectedCoverageCell.category
     )
   : [];
+  const assignmentsByPlatoon = new Map<string, typeof selectedAssignments>();
+
+for (const a of selectedAssignments) {
+  const arr = assignmentsByPlatoon.get(a.platoonKey) ?? [];
+  arr.push(a);
+  assignmentsByPlatoon.set(a.platoonKey, arr);
+}
+
+const gapsByPlatoon = new Map<string, typeof selectedGaps>();
+
+for (const gap of selectedGaps) {
+  const arr = gapsByPlatoon.get(gap.platoonKey) ?? [];
+  arr.push(gap);
+  gapsByPlatoon.set(gap.platoonKey, arr);
+}
+const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoon.keys()])].sort();
   const gapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
   const gapCounts = Object.fromEntries(
     gapActionOrder.map((a) => [a, matching.gaps.filter((g) => g.recommendedAction === a).length])
@@ -1532,11 +1548,26 @@ function MatchingView({
             onSelect={onSelectCoverageCell}
           />
         {selectedCoverageCell && (
-          <div className="mt-3 text-sm text-gray-400">
-            Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
-            <div className="mt-2 text-xs text-gray-500">
-              Assignments: {selectedAssignments.length} · Gaps: {selectedGaps.length}
-            </div>
+          <div className="mt-4 space-y-4">
+            {platoonKeys.map((platoonKey) => (
+              <div key={platoonKey} className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
+                <div className="mb-2 text-sm font-semibold text-white">
+                  {platoonKey}
+                </div>
+
+                {(assignmentsByPlatoon.get(platoonKey) ?? []).map((a) => (
+                  <div key={a.requirementId} className="text-sm text-gray-200">
+                    {a.unitName} → {a.playerName}
+                  </div>
+                ))}
+
+                {(gapsByPlatoon.get(platoonKey) ?? []).map((g) => (
+                  <div key={g.requirementId} className="text-sm text-gray-400">
+                    {g.unitName} → offen
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         )}
         </div>
