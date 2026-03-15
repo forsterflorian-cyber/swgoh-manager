@@ -29,6 +29,13 @@ type Notice = {
   tone: 'success' | 'error';
   message: string;
 };
+type SelectedCoverageCell = {
+  phase: number;
+  category: PlanetCategory;
+} | null;
+
+const [selectedCoverageCell, setSelectedCoverageCell] =
+  useState<SelectedCoverageCell>(null);
 
 type PlannerViewKey = 'overview' | 'priorities' | 'targets' | 'matching';
 
@@ -1317,7 +1324,13 @@ const GAP_ACTION_META: Record<GapActionType, { label: string; className: string;
     },
   };
 
-function CoverageGrid({ coverage }: { coverage: PlatoonMatchingCoverage[] }) {
+function CoverageGrid({
+  coverage,
+  onSelect,
+}: {
+  coverage: PlatoonMatchingCoverage[];
+  onSelect?: (phase: number, category: PlanetCategory) => void;
+}) {
   const phases = [...new Set(coverage.map((c) => c.phase))].sort((a, b) => a - b);
   const categories: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
 
@@ -1366,7 +1379,8 @@ function CoverageGrid({ coverage }: { coverage: PlatoonMatchingCoverage[] }) {
                 return (
                   <td key={cat} className="px-3 py-2 text-center">
                     <span
-                      className={`inline-block rounded-full border px-3 py-1 text-xs font-semibold ${cellClass(cell.coveragePercent)}`}
+                      onClick={() => onSelect?.(phase, cat)}
+                      className={`cursor-pointer inline-block rounded-full border px-3 py-1 text-xs font-semibold ${cellClass(cell.coveragePercent)}`}
                     >
                       {cell.assignedCount}/{cell.requirementCount}
                     </span>
@@ -1486,7 +1500,13 @@ function MatchingView({ matching }: { matching: PlatoonMatchingResult | null }) 
           </div>
         </div>
         <div className="mt-5">
-          <CoverageGrid coverage={matching.coverage} />
+          <CoverageGrid coverage={matching.coverage} 
+          onSelect={(phase, category) => setSelectedCoverageCell({ phase, category })} />
+          {selectedCoverageCell && (
+  <div className="mt-3 text-sm text-gray-400">
+    Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
+  </div>
+)}
         </div>
         <p className="mt-4 text-xs text-gray-500">
           Each cell shows assigned / required slots. Colour: green ≥ 100% · blue ≥ 75% · amber ≥ 40% · red &lt; 40%.
