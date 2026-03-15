@@ -71,7 +71,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     const advisoryStartedAt = Date.now();
     const advisory = await withStageTimeout('advisor', () =>
-      findSequentialFullPlatoonPlan(simulatedDataset),
+      findSequentialFullPlatoonPlan(simulatedDataset, simulation.simulated),
     );
     timings.advisor_ms = Date.now() - advisoryStartedAt;
 

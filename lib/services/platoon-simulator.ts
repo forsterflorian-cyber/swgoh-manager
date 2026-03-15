@@ -11,8 +11,9 @@ import type { StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
 export function simulatePlatoonScenario(
   dataset: StrategicPlannerDataset,
   actions: PlatoonSimulatorAction[],
+  precomputedBaseline?: ReturnType<typeof computePlatoonMatching>,
 ): PlatoonSimulatorResponse {
-  const baseline = computePlatoonMatching(dataset);
+  const baseline = precomputedBaseline ?? computePlatoonMatching(dataset);
 
   const simulatedDataset = applySimulationActions(dataset, actions);
   const simulated = computePlatoonMatching(simulatedDataset);

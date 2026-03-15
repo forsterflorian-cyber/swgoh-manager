@@ -4,7 +4,7 @@ import type {
   PlatoonSimulatorAction,
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
-import type { StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
+import type { PlatoonMatchingResult, StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -29,6 +29,7 @@ type DraftCandidate = {
 
 export function findSequentialFullPlatoonPlan(
   dataset: StrategicPlannerDataset,
+  precomputedBaseline?: PlatoonMatchingResult,
 ): SequentialFullPlatoonPlan {
   const drafts = buildDraftCandidates(dataset);
 
@@ -41,7 +42,7 @@ export function findSequentialFullPlatoonPlan(
 
   const concrete = drafts
     .slice(0, 8)
-    .map((draft) => toConcreteCandidate(dataset, draft))
+    .map((draft) => toConcreteCandidate(dataset, draft, precomputedBaseline))
     .filter((candidate): candidate is NextFullPlatoonResult => candidate !== null)
     .sort(compareCandidates);
 
@@ -137,8 +138,9 @@ function buildDraftCandidates(dataset: StrategicPlannerDataset): DraftCandidate[
 function toConcreteCandidate(
   dataset: StrategicPlannerDataset,
   draft: DraftCandidate,
+  precomputedBaseline?: PlatoonMatchingResult,
 ): NextFullPlatoonResult | null {
-  const simulation = simulatePlatoonScenario(dataset, draft.actions);
+  const simulation = simulatePlatoonScenario(dataset, draft.actions, precomputedBaseline);
   const delta = simulation.delta;
 
   if (delta.deltaFullPlatoons <= 0 && delta.deltaCoveredSlots <= 0) {
