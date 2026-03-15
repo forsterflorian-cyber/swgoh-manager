@@ -387,115 +387,110 @@ function buildGaps(
  * The function is pure (no I/O, no side effects) and runs in O(R × M × U)
  * time where R = requirement count, M = member count, U = max owners per unit.
  */
-// export function computePlatoonMatching(dataset: StrategicPlannerDataset): PlatoonMatchingResult {
-//   const { slots, roster, members } = dataset;
-
-//   // ── Indexes built once and reused across groups ──────────────────────────
-
-//   /** memberId → playerName (preferred over roster.playerName for consistency). */
-//   const memberNameMap = new Map<string, string>(
-//     members.map((m) => [m.memberId, m.playerName]),
-//   );
-
-//   /** unitBaseId → all roster entries owning that unit. */
-//   const rosterByUnit = new Map<string, StrategicPlannerRosterInput[]>();
-//   for (const entry of roster) {
-//     let list = rosterByUnit.get(entry.unitBaseId);
-//     if (!list) {
-//       list = [];
-//       rosterByUnit.set(entry.unitBaseId, list);
-//     }
-//     list.push(entry);
-//   }
-
-//   // Distinct phases in ascending order.
-//   const phases = [...new Set(slots.map((s) => s.phase))].sort((a, b) => a - b);
-
-//   // ── Per-group matching ────────────────────────────────────────────────────
-
-//   const allCoverage: PlatoonMatchingCoverage[] = [];
-//   const allAssignments: PlatoonMatchingAssignment[] = [];
-//   const allGaps: PlatoonMatchingGap[] = [];
-
-//   for (const phase of phases) {
-//     const phaseSlots = slots.filter((s) => s.phase === phase);
-
-//     for (const category of CATEGORY_PROCESSING_ORDER) {
-//       const group = phaseSlots.filter((s) => s.planetCategory === category);
-//       if (group.length === 0) continue;
-
-//       const state = runMatchingForGroup(group, rosterByUnit);
-
-//       // ── Coverage summary ─────────────────────────────────────────────────
-//       const assignedCount = state.reqToOwner.size;
-//       const requirementCount = group.length;
-//       allCoverage.push({
-//         phase,
-//         category,
-//         isBonus: category === 'SPECIAL',
-//         assignedCount,
-//         requirementCount,
-//         coveragePercent:
-//           requirementCount > 0 ? Math.round((assignedCount / requirementCount) * 100) : 100,
-//       });
-
-//       // ── Assignments ──────────────────────────────────────────────────────
-//       const slotIndex = new Map(group.map((s) => [s.slotKey, s]));
-      
-//       for (const [reqId, oKey] of state.reqToOwner) {
-//         const slot = slotIndex.get(reqId);
-//         if (!slot) continue;
-//         const memberId = memberIdFromOwnerKey(oKey);
-//             console.log('[matching:assignment]', {
-//               slot: reqId,
-//               unit: slot.unitBaseId,
-//               unitName: slot.unitName,
-//               member: memberId,
-//               playerName: memberNameMap.get(memberId) ?? memberId,
-//             });
-//         allAssignments.push({
-//           requirementId: reqId,
-//           phase: slot.phase,
-//           zoneKey: slot.zoneKey,
-//           platoonKey: slot.platoonKey,
-//           slotNumber: slot.slotNumber,
-//           unitBaseId: slot.unitBaseId,
-//           unitName: slot.unitName,
-//           memberId,
-//           playerName: memberNameMap.get(memberId) ?? memberId,
-//         });
-//       }
-
-//       // ── Gap analysis ─────────────────────────────────────────────────────
-//       const unmatched = group.filter((s) => !state.reqToOwner.has(s.slotKey));
-//       allGaps.push(...buildGaps(unmatched, rosterByUnit, memberNameMap, state));
-//     }
-//   }
-
-//   // ── Totals ────────────────────────────────────────────────────────────────
-//   const totalRequired = allCoverage.reduce((n, c) => n + c.requirementCount, 0);
-//   const totalAssigned = allCoverage.reduce((n, c) => n + c.assignedCount, 0);
-//     console.log('[matching:summary]', {
-//       totalAssignments: allAssignments.length,
-//       totalGaps: allGaps.length,
-//       sampleGaps: allGaps.slice(0, 10).map((g) => ({
-//         slotKey: g.requirementId,
-//         unitBaseId: g.unitBaseId,
-//         unitName: g.unitName,
-//         action: g.recommendedAction,
-//       })),
-//     });
-//   return {
-//     coverage: allCoverage,
-//     assignments: allAssignments,
-//     gaps: allGaps,
-//     totalAssigned,
-//     totalRequired,
-//     coveragePercent:
-//       totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100,
-//   };
-// }
-
 export function computePlatoonMatching(dataset: StrategicPlannerDataset): PlatoonMatchingResult {
-  throw new Error('DEBUG computePlatoonMatching reached');
+    console.log('[computePlatoonMatching entered]', {
+    slots: dataset.slots.length,
+    roster: dataset.roster.length,
+    members: dataset.members.length,
+  });
+  const { slots, roster, members } = dataset;
+
+  // ── Indexes built once and reused across groups ──────────────────────────
+
+  /** memberId → playerName (preferred over roster.playerName for consistency). */
+  const memberNameMap = new Map<string, string>(
+    members.map((m) => [m.memberId, m.playerName]),
+  );
+
+  /** unitBaseId → all roster entries owning that unit. */
+  const rosterByUnit = new Map<string, StrategicPlannerRosterInput[]>();
+  for (const entry of roster) {
+    let list = rosterByUnit.get(entry.unitBaseId);
+    if (!list) {
+      list = [];
+      rosterByUnit.set(entry.unitBaseId, list);
+    }
+    list.push(entry);
+  }
+
+  // Distinct phases in ascending order.
+  const phases = [...new Set(slots.map((s) => s.phase))].sort((a, b) => a - b);
+
+  // ── Per-group matching ────────────────────────────────────────────────────
+
+  const allCoverage: PlatoonMatchingCoverage[] = [];
+  const allAssignments: PlatoonMatchingAssignment[] = [];
+  const allGaps: PlatoonMatchingGap[] = [];
+
+  for (const phase of phases) {
+    const phaseSlots = slots.filter((s) => s.phase === phase);
+
+    for (const category of CATEGORY_PROCESSING_ORDER) {
+      const group = phaseSlots.filter((s) => s.planetCategory === category);
+      if (group.length === 0) continue;
+
+      const state = runMatchingForGroup(group, rosterByUnit);
+
+      // ── Coverage summary ─────────────────────────────────────────────────
+      const assignedCount = state.reqToOwner.size;
+      const requirementCount = group.length;
+      allCoverage.push({
+        phase,
+        category,
+        isBonus: category === 'SPECIAL',
+        assignedCount,
+        requirementCount,
+        coveragePercent:
+          requirementCount > 0 ? Math.round((assignedCount / requirementCount) * 100) : 100,
+      });
+
+      // ── Assignments ──────────────────────────────────────────────────────
+      const slotIndex = new Map(group.map((s) => [s.slotKey, s]));
+      
+      for (const [reqId, oKey] of state.reqToOwner) {
+        const slot = slotIndex.get(reqId);
+        if (!slot) continue;
+        const memberId = memberIdFromOwnerKey(oKey);
+            console.log('[matching:assignment]', {
+              slot: reqId,
+              unit: slot.unitBaseId,
+              unitName: slot.unitName,
+              member: memberId,
+              playerName: memberNameMap.get(memberId) ?? memberId,
+            });
+        allAssignments.push({
+          requirementId: reqId,
+          phase: slot.phase,
+          zoneKey: slot.zoneKey,
+          platoonKey: slot.platoonKey,
+          slotNumber: slot.slotNumber,
+          unitBaseId: slot.unitBaseId,
+          unitName: slot.unitName,
+          memberId,
+          playerName: memberNameMap.get(memberId) ?? memberId,
+        });
+      }
+
+      // ── Gap analysis ─────────────────────────────────────────────────────
+      const unmatched = group.filter((s) => !state.reqToOwner.has(s.slotKey));
+      allGaps.push(...buildGaps(unmatched, rosterByUnit, memberNameMap, state));
+    }
+  }
+
+  // ── Totals ────────────────────────────────────────────────────────────────
+  const totalRequired = allCoverage.reduce((n, c) => n + c.requirementCount, 0);
+  const totalAssigned = allCoverage.reduce((n, c) => n + c.assignedCount, 0);
+  console.log('[computePlatoonMatching done]', {
+    totalAssignments: allAssignments.length,
+    totalGaps: allGaps.length,
+  });
+  return {
+    coverage: allCoverage,
+    assignments: allAssignments,
+    gaps: allGaps,
+    totalAssigned,
+    totalRequired,
+    coveragePercent:
+      totalRequired > 0 ? Math.round((totalAssigned / totalRequired) * 100) : 100,
+  };
 }
