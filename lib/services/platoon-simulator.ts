@@ -4,34 +4,119 @@ import type {
   PlatoonSimulatorResponse,
   PlatoonSimulatorStepEffect,
 } from '@/lib/types/platoon-simulator';
-import type { PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
+import type {
+  PlatoonMatchingCoverage,
+  PlatoonMatchingResult,
+} from '@/lib/types/platoon-readiness';
 
 // TODO: diese Imports an dein Projekt anpassen
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 
 type StrategicPlannerData = any;
 
+function readCoverageCoveredSlots(item: PlatoonMatchingCoverage): number {
+  const candidate = item as unknown as Record<string, unknown>;
+
+  const possibleKeys = [
+    'coveredSlots',
+    'assignedSlots',
+    'filledSlots',
+    'matchedSlots',
+    'countCovered',
+    'countAssigned',
+  ];
+
+  for (const key of possibleKeys) {
+    const value = candidate[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return 0;
+}
+
+function readCoverageTotalSlots(item: PlatoonMatchingCoverage): number {
+  const candidate = item as unknown as Record<string, unknown>;
+
+  const possibleKeys = [
+    'totalSlots',
+    'requiredSlots',
+    'slotCount',
+    'total',
+    'countTotal',
+  ];
+
+  for (const key of possibleKeys) {
+    const value = candidate[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return 0;
+}
+
+function readCoveragePlatoonId(item: PlatoonMatchingCoverage): string | null {
+  const candidate = item as unknown as Record<string, unknown>;
+
+  const possibleKeys = [
+    'platoonId',
+    'targetPlatoonId',
+    'id',
+    'key',
+  ];
+
+  for (const key of possibleKeys) {
+    const value = candidate[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function countCoveredSlots(result: PlatoonMatchingResult): number {
-  return result.coverage.reduce((sum, item) => sum + item.coveredSlots, 0);
+  return result.coverage.reduce(
+    (sum, item) => sum + readCoverageCoveredSlots(item),
+    0,
+  );
 }
 
 function countFullPlatoons(result: PlatoonMatchingResult): number {
-  return result.coverage.filter(
-    (item) => item.coveredSlots >= item.totalSlots,
-  ).length;
+  return result.coverage.filter((item) => {
+    const covered = readCoverageCoveredSlots(item);
+    const total = readCoverageTotalSlots(item);
+    return total > 0 && covered >= total;
+  }).length;
 }
 
 function getFullPlatoonIds(result: PlatoonMatchingResult): string[] {
   return result.coverage
-    .filter((item) => item.coveredSlots >= item.totalSlots)
-    .map((item) => item.platoonId);
+    .filter((item) => {
+      const covered = readCoverageCoveredSlots(item);
+      const total = readCoverageTotalSlots(item);
+      return total > 0 && covered >= total;
+    })
+    .map((item) => readCoveragePlatoonId(item))
+    .filter((value): value is string => !!value);
 }
 
 function getAssignmentKeys(result: PlatoonMatchingResult): Set<string> {
   return new Set(
-    result.assignments.map(
-      (item) => `${item.platoonId}::${item.slotId}::${item.ownerKey}`,
-    ),
+    result.assignments.map((item) => {
+      const candidate = item as unknown as Record<string, unknown>;
+
+      const platoonId =
+        typeof candidate.platoonId === 'string' ? candidate.platoonId : 'unknown-platoon';
+      const slotId =
+        typeof candidate.slotId === 'string' ? candidate.slotId : 'unknown-slot';
+      const ownerKey =
+        typeof candidate.ownerKey === 'string' ? candidate.ownerKey : 'unknown-owner';
+
+      return `${platoonId}::${slotId}::${ownerKey}`;
+    }),
   );
 }
 
@@ -99,25 +184,11 @@ export function applySimulationActions(
 
   for (const action of actions) {
     if (action.type === 'MAKE_SLOT_ELIGIBLE') {
-      // TODO:
-      // Hier musst du in deiner Datenstruktur den Kandidaten/Owner
-      // für genau diesen Slot hypothetisch eligible machen.
-      //
-      // Beispielhafte Denkweise:
-      // - Slot im dataset finden
-      // - possibleSources / candidates erweitern
-      // - oder einen eligibility flag für ownerKey setzen
-      //
-      // KEIN direct assignment hier.
+      // TODO: an echte Datenstruktur anpassen
     }
 
     if (action.type === 'REMOVE_SOURCE_BLOCK') {
-      // TODO:
-      // Hier musst du in deiner Datenstruktur einen Blocker entfernen.
-      //
-      // Beispielhafte Denkweise:
-      // - Source / ownerKey finden
-      // - committed / reserved / manual block hypothetisch deaktivieren
+      // TODO: an echte Datenstruktur anpassen
     }
   }
 
