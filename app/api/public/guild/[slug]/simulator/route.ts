@@ -88,7 +88,7 @@ timings.advisor_ms = Date.now() - advisoryStartedAt;
         unitNames[r.unitBaseId] = r.unitName;
       }
     }
-
+    console.log('[route] delta', simulation.delta);
     return NextResponse.json(
       {
         simulation: {
