@@ -72,14 +72,24 @@ function dedupeActions(actions: PlatoonSimulatorAction[]): PlatoonSimulatorActio
   return result;
 }
 
-function getPlatoonLabel(targetPlatoonId: string | null | undefined): string {
+function getPlatoonLabel(targetPlatoonId: string | null | undefined, platoonNames?: Record<string, string>): string {
   if (!targetPlatoonId) return '—';
+
+  if (platoonNames?.[targetPlatoonId]) {
+    return platoonNames[targetPlatoonId];
+  }
 
   const parts = targetPlatoonId.split('::');
   if (parts.length < 3) return targetPlatoonId;
 
   const [phase, zoneKey, platoonKey] = parts;
-  return `Phase ${phase} · ${zoneKey} · ${platoonKey}`;
+
+  const platoonMatch = platoonKey.match(/platoon-(\d+)$/i);
+  const platoonNumber = platoonMatch ? platoonMatch[1] : platoonKey;
+
+  const zoneLabel = zoneKey.replace(/^rote-p\d+-/i, '').toUpperCase();
+
+  return `Phase ${phase} · ${zoneLabel} · Platoon ${platoonNumber}`;
 }
 
 function formatUpgradeSuffix(action: Extract<PlatoonSimulatorAction, { type: 'UPGRADE_OWNER_UNIT' }>): string {
@@ -452,7 +462,7 @@ export default function PublicGuildSimulatorPage({
           </div>
 
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-            <div className="text-sm text-slate-400">Full platoons</div>
+            <div className="text-sm text-slate-400">Full Zones</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
               {summary ? summary.simulatedFullPlatoons : '—'}
             </div>
@@ -549,7 +559,7 @@ export default function PublicGuildSimulatorPage({
                   <span>{data?.simulation.delta.deltaCoveredSlots ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span>Delta full platoons</span>
+                  <span>Delta full zones</span>
                   <span>{data?.simulation.delta.deltaFullPlatoons ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">

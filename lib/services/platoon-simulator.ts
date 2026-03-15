@@ -306,72 +306,62 @@ function removeStrategicBlockLocal(
 function applyUseOrUpgradeAction(
   dataset: StrategicPlannerDataset,
   action: Extract<PlatoonSimulatorAction, { type: 'USE_UNUSED_OWNER' | 'UPGRADE_OWNER_UNIT' }>,
-  syntheticIndexRef: { value: number },
 ): void {
+  const rosterEntry = findRosterEntry(dataset, action.memberId, action.unitBaseId);
   const slot = findSlotByRequirementId(dataset, action.requirementId);
+
   if (!slot) {
     return;
   }
 
-  const existingRosterEntry = findRosterEntry(dataset, action.memberId, action.unitBaseId);
-  const existingRecord = existingRosterEntry as unknown as AnyRecord | undefined;
+  if (!rosterEntry) {
+    return;
+  }
 
-  const syntheticMemberId = `simact_${syntheticIndexRef.value}_${action.memberId}`;
-  syntheticIndexRef.value += 1;
+  const record = rosterEntry as unknown as Record<string, unknown>;
 
-  ensureSyntheticMemberExists(
-    dataset,
-    syntheticMemberId,
-    action.playerName,
-  );
+  const currentRarity = getNumber(record, 'rarity', 'currentRarity', 'starCount') ?? 0;
+  const currentRelicTier = getNumber(record, 'relicTier', 'currentRelicTier') ?? 0;
 
-  const rarity = Math.max(
-    getNumber(existingRecord, 'rarity', 'currentRarity', 'starCount') ?? 0,
-    slot.requiredRarity ?? 0,
-  );
+  const nextRarity = Math.max(currentRarity, slot.requiredRarity ?? 0);
+  const nextRelicTier = Math.max(currentRelicTier, slot.requiredRelicTier ?? 0);
 
-  const relicTier = Math.max(
-    getNumber(existingRecord, 'relicTier', 'currentRelicTier') ?? 0,
-    slot.requiredRelicTier ?? 0,
-  );
+  (rosterEntry as unknown as {
+    rarity?: number;
+    relicTier?: number;
+    currentRarity?: number;
+    currentRelicTier?: number;
+    starCount?: number;
+  }).rarity = nextRarity;
 
-  const unitName =
-    getString(existingRecord, 'unitName') ??
-    action.unitName ??
-    slot.unitName ??
-    action.unitBaseId;
+  (rosterEntry as unknown as {
+    rarity?: number;
+    relicTier?: number;
+    currentRarity?: number;
+    currentRelicTier?: number;
+    starCount?: number;
+  }).relicTier = nextRelicTier;
 
-  const allyCodeRaw = getString(existingRecord, 'allyCode');
-  const allyCodeValue = allyCodeRaw ?? `SIM-${syntheticIndexRef.value}`;
+  if ('currentRarity' in (rosterEntry as object)) {
+    (rosterEntry as unknown as { currentRarity?: number }).currentRarity = nextRarity;
+  }
 
-  const playerName =
-    getString(existingRecord, 'playerName') ??
-    action.playerName;
+  if ('currentRelicTier' in (rosterEntry as object)) {
+    (rosterEntry as unknown as { currentRelicTier?: number }).currentRelicTier = nextRelicTier;
+  }
 
-  const gearLevel = getNumber(existingRecord, 'gearLevel') ?? 0;
-
-  dataset.roster.push({
-    ...(existingRosterEntry ? { ...(existingRosterEntry as object) } : {}),
-    memberId: syntheticMemberId,
-    allyCode: allyCodeValue,
-    playerName,
-    unitBaseId: action.unitBaseId,
-    unitName,
-    rarity,
-    relicTier,
-    gearLevel,
-  } as StrategicPlannerDataset['roster'][number]);
+  if ('starCount' in (rosterEntry as object)) {
+    (rosterEntry as unknown as { starCount?: number }).starCount = nextRarity;
+  }
 }
-
 function applySingleAction(
   dataset: StrategicPlannerDataset,
   action: PlatoonSimulatorAction,
-  syntheticIndexRef: { value: number },
 ): void {
   switch (action.type) {
     case 'USE_UNUSED_OWNER':
     case 'UPGRADE_OWNER_UNIT': {
-      applyUseOrUpgradeAction(dataset, action, syntheticIndexRef);
+      applyUseOrUpgradeAction(dataset, action);
       return;
     }
 
@@ -424,10 +414,9 @@ export function applySimulationActions(
   }
 
   const nextDataset = cloneDatasetForSimulation(dataset);
-  const syntheticIndexRef = { value: 0 };
 
   for (const action of actions) {
-    applySingleAction(nextDataset, action, syntheticIndexRef);
+    applySingleAction(nextDataset, action);
   }
 
   return nextDataset;

@@ -1,5 +1,8 @@
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
-
+import {
+  applySimulationActions,
+  simulatePlatoonScenario,
+} from '@/lib/services/platoon-simulator';
 import type {
   NextFullPlatoonResult,
   PlatoonSimulatorAction,
@@ -496,8 +499,23 @@ export function findSequentialFullPlatoonPlan(
 
   const first = findBestNextFullPlatoonCandidate(dataset, baseline);
 
+  if (!first) {
+    return {
+      first: null,
+      second: null,
+    };
+  }
+
+  const datasetAfterFirst = applySimulationActions(dataset, first.actions);
+  const baselineAfterFirst = computePlatoonMatching(datasetAfterFirst);
+
+  const second = findBestNextFullPlatoonCandidate(
+    datasetAfterFirst,
+    baselineAfterFirst,
+  );
+
   return {
     first,
-    second: null,
+    second,
   };
 }
