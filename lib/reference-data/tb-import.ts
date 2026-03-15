@@ -222,7 +222,7 @@ async function upsertNormalizedDefinition(
             ${zone.zoneName},
             ${zone.sortOrder},
             ${zone.isBonus},
-            ${zone.isBonus ? 'SPECIAL' : zone.category}
+            ${zone.isBonus ? 'SPECIAL' : zone.category},
             NOW()
           )
           ON CONFLICT (tb_phase_id, zone_key)
