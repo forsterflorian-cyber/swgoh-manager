@@ -481,7 +481,11 @@ function PlatoonReadinessContent() {
             targetsHref={targetsHref}
           />
         ) : plannerView === 'matching' ? (
-          <MatchingView matching={planner?.matching ?? null} />
+          <MatchingView
+            matching={planner?.matching ?? null}
+            selectedCoverageCell={selectedCoverageCell}
+            onSelectCoverageCell={(phase, category) => setSelectedCoverageCell({ phase, category })}
+          />
         ) : (
           <MemberTargetsView
             summary={summary}
@@ -1448,7 +1452,15 @@ function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
   );
 }
 
-function MatchingView({ matching }: { matching: PlatoonMatchingResult | null }) {
+function MatchingView({
+  matching,
+  selectedCoverageCell,
+  onSelectCoverageCell,
+}: {
+  matching: PlatoonMatchingResult | null;
+  selectedCoverageCell: { phase: number; category: PlanetCategory } | null;
+  onSelectCoverageCell: (phase: number, category: PlanetCategory) => void;
+}) {
   const [gapFilter, setGapFilter] = useState<GapActionType | 'all'>('all');
 
   if (!matching || matching.totalRequired === 0) {
@@ -1499,8 +1511,10 @@ function MatchingView({ matching }: { matching: PlatoonMatchingResult | null }) 
           </div>
         </div>
         <div className="mt-5">
-          <CoverageGrid coverage={matching.coverage} 
-          onSelect={(phase, category) => setSelectedCoverageCell({ phase, category })} />
+          <CoverageGrid
+            coverage={matching.coverage}
+            onSelect={onSelectCoverageCell}
+          />
           {selectedCoverageCell && (
   <div className="mt-3 text-sm text-gray-400">
     Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
