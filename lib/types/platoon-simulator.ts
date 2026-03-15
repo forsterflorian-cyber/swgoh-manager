@@ -3,25 +3,34 @@ import type { PlanetCategory, PlatoonMatchingResult, StrategicPlannerDataset } f
 export type PlatoonSimulatorAction =
   | {
       id: string;
-      type: 'MAKE_SLOT_ELIGIBLE';
-      slotKey: string;
+      type: 'USE_UNUSED_OWNER';
+      requirementId: string;
       memberId: string;
-      reason: 'upgrade' | 'unlock' | 'availability';
+      playerName: string;
+      unitBaseId: string;
+      unitName: string;
+    }
+  | {
+      id: string;
+      type: 'UPGRADE_OWNER_UNIT';
+      requirementId: string;
+      memberId: string;
+      playerName: string;
+      unitBaseId: string;
+      unitName: string;
+      missingRelicTiers: number;
+      missingRarity: number;
     }
   | {
       id: string;
       type: 'REMOVE_SOURCE_BLOCK';
+      requirementId?: string;
       memberId: string;
+      playerName: string;
       unitBaseId: string;
+      unitName: string;
       planetCategory: PlanetCategory | null;
       blockType: 'committed' | 'reserved' | 'manual';
-    }
-  | {
-      type: 'ADD_HYPOTHETICAL_UNIT';
-      memberId: string;
-      unitBaseId: string;
-      rarity: number;
-      relicTier: number;
     };
 
 export type PlatoonSimulatorStepEffect = {

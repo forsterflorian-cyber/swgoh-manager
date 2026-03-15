@@ -22,20 +22,40 @@ type ErrorResponse = {
   error: string;
 };
 
+function getActionTypeLabel(action: PlatoonSimulatorAction): string {
+  switch (action.type) {
+    case 'USE_UNUSED_OWNER':
+      return 'Use unused owner';
+    case 'UPGRADE_OWNER_UNIT':
+      return 'Upgrade owner unit';
+    case 'REMOVE_SOURCE_BLOCK':
+      return 'Remove source block';
+    default:
+      {
+  const exhaustiveCheck: never = action;
+  return String(exhaustiveCheck);
+}
+  }
+}
+
 function getActionKey(action: PlatoonSimulatorAction): string {
-  if (action.type === 'REMOVE_SOURCE_BLOCK') {
-    return `${action.type}::${action.memberId}::${action.unitBaseId}::${action.planetCategory ?? 'null'}::${action.blockType}`;
+  if (typeof action.id === 'string' && action.id.length > 0) {
+    return action.id;
   }
 
-  if (action.type === 'ADD_HYPOTHETICAL_UNIT') {
-    return `${action.type}::${action.memberId}::${action.unitBaseId}::${action.rarity}::${action.relicTier}`;
-  }
+  switch (action.type) {
+    case 'USE_UNUSED_OWNER':
+      return `${action.type}::${action.requirementId}::${action.memberId}::${action.unitBaseId}`;
 
-  if ('slotKey' in action) {
-    return `${String(action.type)}::${String(action.slotKey)}::${String(action.memberId)}`;
-  }
+    case 'UPGRADE_OWNER_UNIT':
+      return `${action.type}::${action.requirementId}::${action.memberId}::${action.unitBaseId}::${action.missingRelicTiers}::${action.missingRarity}`;
 
-  return JSON.stringify(action);
+    case 'REMOVE_SOURCE_BLOCK':
+      return `${action.type}::${action.requirementId ?? 'none'}::${action.memberId}::${action.unitBaseId}::${action.planetCategory ?? 'null'}::${action.blockType}`;
+
+    default:
+      return JSON.stringify(action);
+  }
 }
 
 function dedupeActions(actions: PlatoonSimulatorAction[]): PlatoonSimulatorAction[] {
@@ -62,26 +82,45 @@ function getPlatoonLabel(targetPlatoonId: string | null | undefined): string {
   return `Phase ${phase} · ${zoneKey} · ${platoonKey}`;
 }
 
+function formatUpgradeSuffix(action: Extract<PlatoonSimulatorAction, { type: 'UPGRADE_OWNER_UNIT' }>): string {
+  const parts: string[] = [];
+
+  if (action.missingRelicTiers > 0) {
+    parts.push(
+      action.missingRelicTiers === 1
+        ? '+1 relic'
+        : `+${action.missingRelicTiers} relic`,
+    );
+  }
+
+  if (action.missingRarity > 0) {
+    parts.push(
+      action.missingRarity === 1
+        ? '+1 star'
+        : `+${action.missingRarity} stars`,
+    );
+  }
+
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+}
+
 function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): string {
-  const member = lookups?.memberNames[action.memberId] ?? action.memberId;
+  const member = lookups?.memberNames[action.memberId] ?? action.playerName ?? action.memberId;
+  const unit = lookups?.unitNames[action.unitBaseId] ?? action.unitName ?? action.unitBaseId;
 
-  if ('slotKey' in action) {
-    const unitFromSlotKey = String(action.slotKey).split('::').pop() ?? String(action.slotKey);
-    const reason = 'reason' in action ? String(action.reason) : 'slot eligible';
-    return `${member} → ${unitFromSlotKey} (${reason})`;
+  switch (action.type) {
+    case 'USE_UNUSED_OWNER':
+      return `${member} → ${unit}`;
+
+    case 'UPGRADE_OWNER_UNIT':
+      return `${member} → ${unit}${formatUpgradeSuffix(action)}`;
+
+    case 'REMOVE_SOURCE_BLOCK':
+      return `${member} → ${unit} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
+
+    default:
+      return `${member} → ${unit}`;
   }
-
-  const unit = lookups?.unitNames[action.unitBaseId] ?? action.unitBaseId;
-
-  if (action.type === 'REMOVE_SOURCE_BLOCK') {
-    return `${member} → ${unit} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
-  }
-
-  if (action.type === 'ADD_HYPOTHETICAL_UNIT') {
-    return `${member} → ${unit} (R${action.relicTier} · ${action.rarity}★)`;
-  }
-
-  return `${member} → ${unit}`;
 }
 
 function CandidateCard({
@@ -105,7 +144,7 @@ function CandidateCard({
         <div className="text-sm text-slate-400">{title}</div>
         <h2 className="mt-1 text-2xl font-semibold text-white">No candidate</h2>
         <p className="mt-3 text-sm text-slate-400">
-          Kein vollständiges Platoon mit den aktuell modellierten hypothetischen Aktionen gefunden.
+          Kein vollständig machbarer nächster Platoon-Pfad gefunden.
         </p>
       </section>
     );
@@ -168,39 +207,31 @@ function CandidateCard({
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-5">
-        {'targetCoveredSlotsBefore' in candidate &&
-        typeof candidate.targetCoveredSlotsBefore === 'number' ? (
-          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-            <div className="text-xs text-slate-400">Target covered</div>
-            <div className="mt-2 text-2xl font-semibold text-white">
-              {candidate.targetCoveredSlotsBefore} → {candidate.targetCoveredSlotsAfter}
-            </div>
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Target covered</div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {candidate.targetCoveredSlotsBefore} → {candidate.targetCoveredSlotsAfter}
           </div>
-        ) : null}
+        </div>
 
-        {'targetMissingSlotsBefore' in candidate &&
-        typeof candidate.targetMissingSlotsBefore === 'number' ? (
-          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-            <div className="text-xs text-slate-400">Target missing</div>
-            <div className="mt-2 text-2xl font-semibold text-white">
-              {candidate.targetMissingSlotsBefore} → {candidate.targetMissingSlotsAfter}
-            </div>
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Target missing</div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {candidate.targetMissingSlotsBefore} → {candidate.targetMissingSlotsAfter}
           </div>
-        ) : null}
+        </div>
 
-        {'targetBecomesFull' in candidate ? (
-          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-            <div className="text-xs text-slate-400">Target becomes full</div>
-            <div className="mt-2 text-2xl font-semibold text-white">
-              {candidate.targetBecomesFull ? 'Yes' : 'No'}
-            </div>
+        <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+          <div className="text-xs text-slate-400">Target becomes full</div>
+          <div className="mt-2 text-2xl font-semibold text-white">
+            {candidate.targetBecomesFull ? 'Yes' : 'No'}
           </div>
-        ) : null}
+        </div>
       </div>
 
       <div className="mt-6">
         <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-          Suggested hypothetical actions
+          Suggested real actions
         </div>
 
         {candidate.actions.length === 0 ? (
@@ -218,7 +249,9 @@ function CandidateCard({
                   <div className="truncate text-sm font-medium text-slate-100">
                     {describeAction(action, lookups)}
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">{action.type}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {getActionTypeLabel(action)}
+                  </div>
                 </div>
 
                 <button
@@ -248,8 +281,9 @@ export default function PublicGuildSimulatorPage({
   const [data, setData] = useState<SimulatorApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requestIdRef = useRef(0);
   const [debouncedActions, setDebouncedActions] = useState<PlatoonSimulatorAction[]>([]);
+  const requestIdRef = useRef(0);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -265,6 +299,14 @@ export default function PublicGuildSimulatorPage({
   }, [params]);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedActions(actions);
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [actions]);
+
+  useEffect(() => {
     if (!slug) return;
 
     const requestId = ++requestIdRef.current;
@@ -274,14 +316,14 @@ export default function PublicGuildSimulatorPage({
     async function run() {
       setLoading(true);
       setError(null);
-console.log('[client] sending actions', debouncedActions);
+
       try {
         const res = await fetch(`/api/public/guild/${slug}/simulator`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ actions: debouncedActions  }),
+          body: JSON.stringify({ actions: debouncedActions }),
           signal: controller.signal,
         });
 
@@ -340,27 +382,17 @@ console.log('[client] sending actions', debouncedActions);
       controller.abort();
     };
   }, [slug, debouncedActions]);
-useEffect(() => {
-  console.log('[client] actions state', actions);
-  const timeoutId = window.setTimeout(() => {
-    setDebouncedActions(actions);
-  }, 350);
 
-  return () => window.clearTimeout(timeoutId);
-}, [actions]);
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
   const lookups = data?.lookups;
 
   function applyOne(action: PlatoonSimulatorAction) {
-console.log('[client] applyOne', action);
     setActions((prev) => dedupeActions([...prev, action]));
   }
 
   function applyAll(nextActions: PlatoonSimulatorAction[]) {
-      console.log('[client] applyAll', nextActions);
-
     setActions((prev) => dedupeActions([...prev, ...nextActions]));
   }
 
@@ -464,7 +496,7 @@ console.log('[client] applyOne', action);
               <div>
                 <h2 className="text-xl font-semibold text-white">Active scenario</h2>
                 <div className="mt-1 text-sm text-slate-400">
-                  Hypothetical actions currently applied
+                  Actions currently applied
                 </div>
               </div>
 
@@ -474,14 +506,14 @@ console.log('[client] applyOne', action);
             </div>
 
             <div className="mt-5 rounded-2xl border border-slate-800 bg-black/20 p-4">
-              <div className="text-sm text-slate-400">Applied hypothetical actions</div>
+              <div className="text-sm text-slate-400">Applied actions</div>
               <div className="mt-2 text-4xl font-semibold text-white">{actions.length}</div>
             </div>
 
             <div className="mt-5 space-y-3">
               {actions.length === 0 ? (
                 <div className="rounded-2xl border border-slate-800 bg-black/20 p-4 text-sm text-slate-400">
-                  Noch keine hypothetischen Aktionen aktiv. Nutze rechts die Advisor-Vorschläge.
+                  Noch keine Aktionen aktiv. Nutze rechts die Advisor-Vorschläge.
                 </div>
               ) : (
                 actions.map((action) => (
@@ -492,7 +524,9 @@ console.log('[client] applyOne', action);
                     <div className="text-sm font-medium text-slate-100">
                       {describeAction(action, lookups)}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">{action.type}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {getActionTypeLabel(action)}
+                    </div>
 
                     <button
                       type="button"
