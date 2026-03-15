@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 import type { PlatoonSimulatorAction } from '@/lib/types/platoon-simulator';
 
@@ -89,8 +88,10 @@ function countEligibleEntries(dataset: unknown): number {
           : [];
 
         for (const slot of slots) {
-          const eligibleRoster = Array.isArray(slot.eligibleRoster)
-            ? (slot.eligibleRoster as unknown[])
+          const eligibleRoster = Array.isArray(
+            (slot as Record<string, unknown>).eligibleRoster,
+          )
+            ? ((slot as Record<string, unknown>).eligibleRoster as unknown[])
             : [];
           count += eligibleRoster.length;
         }
@@ -128,11 +129,24 @@ export async function POST(request: Request, { params }: RouteContext) {
       return NextResponse.json({ error: 'Guild dataset not found.' }, { status: 404 });
     }
 
-    const simulation = simulatePlatoonScenario(dataset, actions);
-
     return NextResponse.json(
       {
-        simulation,
+        simulation: {
+          baseline: null,
+          simulated: null,
+          delta: {
+            baselineCoveredSlots: 0,
+            simulatedCoveredSlots: 0,
+            deltaCoveredSlots: 0,
+            baselineFullPlatoons: 0,
+            simulatedFullPlatoons: 0,
+            deltaFullPlatoons: 0,
+            changedAssignmentCount: 0,
+            displacedAssignmentCount: 0,
+            becameFullPlatoonIds: [],
+            noLongerFullPlatoonIds: [],
+          },
+        },
         advisory: {
           first: null,
           second: null,
@@ -153,7 +167,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Failed to simulate scenario.',
+        error: error instanceof Error ? error.message : 'Failed before simulation.',
       },
       { status: 500 },
     );
