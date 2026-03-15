@@ -269,7 +269,7 @@ export default function PublicGuildSimulatorPage({
 
     const requestId = ++requestIdRef.current;
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 6000000);
 
     async function run() {
       setLoading(true);
