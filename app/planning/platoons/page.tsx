@@ -1555,17 +1555,39 @@ const platoonKeys = [...new Set([...assignmentsByPlatoon.keys(), ...gapsByPlatoo
                   {platoonKey}
                 </div>
 
-                {(assignmentsByPlatoon.get(platoonKey) ?? []).map((a) => (
-                  <div key={a.requirementId} className="text-sm text-gray-200">
-                    {a.unitName} → {a.playerName}
-                  </div>
-                ))}
+                {(assignmentsByPlatoon.get(platoonKey) ?? [])
+                  .sort((a, b) => a.slotNumber - b.slotNumber)
+                  .map((a) => (
+                    <div key={a.requirementId} className="text-sm text-gray-200">
+                      {a.unitName} → {a.playerName}
+                    </div>
+                  ))}
 
-                {(gapsByPlatoon.get(platoonKey) ?? []).map((g) => (
-                  <div key={g.requirementId} className="text-sm text-gray-400">
-                    {g.unitName} → offen
-                  </div>
-                ))}
+                {(gapsByPlatoon.get(platoonKey) ?? [])
+                  .sort((a, b) => a.slotNumber - b.slotNumber)
+                  .map((a) => {
+                  const source = a.possibleSources?.[0];
+
+                  let action = 'Acquire or unlock unit';
+
+                  if (a.recommendedAction === 'use_unused' && source) {
+                    action = `Assign ${source.playerName}`;
+                  }
+
+                  if (a.recommendedAction === 'upgrade' && source) {
+                    const parts: string[] = [];
+                    if (source.missingRelicTiers > 0) parts.push(`+${source.missingRelicTiers} relic`);
+                    if (source.missingRarity > 0) parts.push(`+${source.missingRarity} star`);
+                    action = `Upgrade ${source.playerName}${parts.length ? ` (${parts.join(', ')})` : ''}`;
+                  }
+
+                  return (
+                    <div key={a.requirementId} className="text-sm text-gray-400">
+                      <div>{a.unitName} → offen</div>
+                      <div className="text-xs text-gray-500">Best next action: {action}</div>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
