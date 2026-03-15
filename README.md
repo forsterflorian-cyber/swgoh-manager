@@ -248,13 +248,13 @@ PS E:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager> curl.exe -X POST 
 >>   -d $body
 {"ok":false,"error":"Request body must be valid JSON"}
 PS E:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager> $body = @{
->>   tb = "rote"
->>   force = $true
->> } | ConvertTo-Json
+   tb = "rote"
+   force = $true
+ } | ConvertTo-Json
 PS E:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager>
 PS E:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager> Invoke-RestMethod `
->>   -Method POST `
->>   -Uri "https://swgoh-manager.vercel.app/api/admin/tb-reference/import" `
->>   -Headers @{ "x-admin-secret" = "8c2f4e3c8f9b47a4b9e0e8e9c2a1d7f4" } `
->>   -ContentType "application/json" `
->>   -Body $body
+   -Method POST `
+   -Uri "https://swgoh-manager.vercel.app/api/admin/tb-reference/import" `
+   -Headers @{ "x-admin-secret" = "8c2f4e3c8f9b47a4b9e0e8e9c2a1d7f4" } `
+   -ContentType "application/json" `
+   -Body $body
