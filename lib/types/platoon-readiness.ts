@@ -302,6 +302,7 @@ export interface PlatoonMatchingAssignment {
   slotNumber: number;
   unitBaseId: string;
   unitName: string | null;
+  planetCategory: PlanetCategory | null;
   memberId: string;
   playerName: string;
 }

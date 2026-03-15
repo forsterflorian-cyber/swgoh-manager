@@ -590,6 +590,7 @@ export function computePlatoonMatching(dataset: StrategicPlannerDataset): Platoo
           slotNumber: slot.slotNumber,
           unitBaseId: slot.unitBaseId,
           unitName: slot.unitName,
+          planetCategory: slot.planetCategory,
           memberId,
           playerName: memberNameMap.get(memberId) ?? memberId,
         });

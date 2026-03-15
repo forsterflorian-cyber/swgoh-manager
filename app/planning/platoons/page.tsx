@@ -1482,7 +1482,13 @@ function MatchingView({
         gap.planetCategory === selectedCoverageCell.category
     )
   : [];
-
+  const selectedAssignments = selectedCoverageCell
+  ? matching.assignments.filter(
+      (a) =>
+        a.phase === selectedCoverageCell.phase &&
+        a.planetCategory === selectedCoverageCell.category
+    )
+  : [];
   const gapActionOrder: GapActionType[] = ['use_unused', 'reassign', 'upgrade', 'acquire'];
   const gapCounts = Object.fromEntries(
     gapActionOrder.map((a) => [a, matching.gaps.filter((g) => g.recommendedAction === a).length])
@@ -1525,14 +1531,14 @@ function MatchingView({
             coverage={matching.coverage}
             onSelect={onSelectCoverageCell}
           />
-          {selectedCoverageCell && (
-            <div className="mt-3 text-sm text-gray-400">
-              Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
-              <div className="mt-2 text-xs text-gray-500">
-                Gaps: {selectedGaps.length}
-              </div>
+        {selectedCoverageCell && (
+          <div className="mt-3 text-sm text-gray-400">
+            Selected: P{selectedCoverageCell.phase} · {selectedCoverageCell.category}
+            <div className="mt-2 text-xs text-gray-500">
+              Assignments: {selectedAssignments.length} · Gaps: {selectedGaps.length}
             </div>
-          )}
+          </div>
+        )}
         </div>
        
         <p className="mt-4 text-xs text-gray-500">
