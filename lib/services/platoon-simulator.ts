@@ -285,6 +285,10 @@ function buildSyntheticRosterEntry(
     unitBaseId: action.unitBaseId,
     rarity: action.rarity ?? 0,
     relicTier: action.relicTier ?? 0,
+    allyCode: `SIM-${index}`,
+    playerName: `[sim] ${action.memberId}`,
+    unitName: action.unitBaseId,
+    gearLevel: null,
   };
 }
 
@@ -400,7 +404,25 @@ function removeStrategicBlockLocal(
     return !(sameMember && sameUnit && samePlanet && sameBlockType);
   });
 }
+function ensureSyntheticMemberExists(
+  dataset: StrategicPlannerDataset,
+  memberId: string,
+  playerName: string,
+): void {
+  const exists = dataset.members.some((member) => member.memberId === memberId);
 
+  if (exists) {
+    return;
+  }
+
+  dataset.members.push({
+    memberId,
+    playerName,
+    allyCode: `SIM-${memberId}`,
+    galacticPower: 0,
+    lastSynced: new Date(0).toISOString(),
+  });
+}
 function applySingleAction(
   dataset: StrategicPlannerDataset,
   action: PlatoonSimulatorAction,
