@@ -15,7 +15,8 @@ export type NormalizedTbDefinition = {
     zones: Array<{
       zoneKey: string;
       zoneName: string;
-      sortOrder: number;
+      category: 'LS' | 'DS' | 'MIX';
+      sortOrder: number;      
       isBonus: boolean;
       platoons: Array<{
         platoonKey: string;
@@ -36,6 +37,14 @@ export type NormalizedTbDefinition = {
 
 const ROTE_TB_ID = 't05D';
 const ROTE_TB_NAME = 'Rise of the Empire';
+
+function mapForceAlignmentToCategory(
+  forceAlignment: number | null | undefined
+): 'LS' | 'DS' | 'MIX' {
+  if (forceAlignment === 2) return 'LS';
+  if (forceAlignment === 3) return 'DS';
+  return 'MIX';
+}
 
 function parseTokenNumber(value: string | null | undefined, prefix: string): number | null {
   if (!value) {
@@ -175,7 +184,7 @@ export function normalizeRoteDefinition(input: {
       operation.nameKey?.trim() ||
       linkedZone?.nameKey ||
       (isBonus ? `Phase ${phaseNumber} Bonus` : `Phase ${phaseNumber} Zone ${conflictNumber}`);
-
+    const zoneCategory = mapForceAlignmentToCategory(linkedZone?.forceAlignment);
     const platoons = [...operation.squads]
       .map((squad, squadIndex) => {
         const platoonNumber = parsePlatoonNumber(squad.id, squadIndex + 1);
@@ -213,6 +222,7 @@ export function normalizeRoteDefinition(input: {
     phase.zones.push({
       zoneKey,
       zoneName,
+      category: zoneCategory,
       sortOrder: isBonus
         ? (operation.sort ?? Number.MAX_SAFE_INTEGER)
         : (operation.sort ?? conflictNumber ?? Number.MAX_SAFE_INTEGER),
