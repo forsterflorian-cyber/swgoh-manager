@@ -6,6 +6,7 @@ import type {
   PlatoonSimulatorResponse,
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
+import type { PlanetCategory } from '@/lib/types/platoon-readiness';
 
 type Lookups = {
   memberNames: Record<string, string>;
@@ -19,6 +20,20 @@ type BonusZoneOption = {
   zoneKey: string;
   label: string;
 };
+
+type AutoTargetOption = {
+  phase: number;
+  category: PlanetCategory;
+  label: string;
+};
+
+type AutoTarget =
+  | {
+      kind: 'phase-category';
+      phase: number;
+      category: PlanetCategory;
+    }
+  | null;
 
 type FullNewAssignment = {
   requirementId: string;
@@ -41,8 +56,10 @@ type SimulatorApiResponse = {
   settings?: {
     includedBonusZoneKeys?: string[];
     mode?: PlannerMode;
+    autoTarget?: AutoTarget;
   };
   bonusZoneOptions?: BonusZoneOption[];
+  autoTargetOptions?: AutoTargetOption[];
   fullNewAssignments?: FullNewAssignment[];
 };
 
@@ -198,6 +215,8 @@ function buildExportPlanText(params: {
   mode: PlannerMode;
   includedBonusZoneKeys: string[];
   bonusZoneOptions: BonusZoneOption[];
+  autoTarget: AutoTarget;
+  autoTargetOptions: AutoTargetOption[];
   lookups?: Lookups;
   activeActions: PlatoonSimulatorAction[];
   firstCandidate: SequentialFullPlatoonPlan['first'] | null;
@@ -207,6 +226,8 @@ function buildExportPlanText(params: {
     mode,
     includedBonusZoneKeys,
     bonusZoneOptions,
+    autoTarget,
+    autoTargetOptions,
     lookups,
     activeActions,
     firstCandidate,
@@ -218,11 +239,21 @@ function buildExportPlanText(params: {
     .filter((zone) => includedBonusZoneKeys.includes(zone.zoneKey))
     .map((zone) => zone.label);
 
+  const autoTargetLabel =
+    autoTarget && autoTarget.kind === 'phase-category'
+      ? autoTargetOptions.find(
+          (option) =>
+            option.phase === autoTarget.phase &&
+            option.category === autoTarget.category,
+        )?.label ?? `${autoTarget.phase} · ${autoTarget.category}`
+      : 'None';
+
   lines.push('SWGOH TB Plan Export');
   lines.push(`Mode: ${mode === 'manual' ? 'Manual mode' : 'Auto mode'}`);
   lines.push(
     `Included bonus zones: ${includedBonusLabels.length ? includedBonusLabels.join(', ') : 'None'}`,
   );
+  lines.push(`Auto target: ${autoTargetLabel}`);
   lines.push('');
 
   if (activeActions.length > 0) {
@@ -271,20 +302,39 @@ function buildExportFullNewAssignmentText(params: {
   mode: PlannerMode;
   includedBonusZoneKeys: string[];
   bonusZoneOptions: BonusZoneOption[];
+  autoTarget: AutoTarget;
+  autoTargetOptions: AutoTargetOption[];
   assignments: FullNewAssignment[];
 }): string {
-  const { mode, includedBonusZoneKeys, bonusZoneOptions, assignments } = params;
+  const {
+    mode,
+    includedBonusZoneKeys,
+    bonusZoneOptions,
+    autoTarget,
+    autoTargetOptions,
+    assignments,
+  } = params;
 
   const lines: string[] = [];
   const includedBonusLabels = bonusZoneOptions
     .filter((zone) => includedBonusZoneKeys.includes(zone.zoneKey))
     .map((zone) => zone.label);
 
+  const autoTargetLabel =
+    autoTarget && autoTarget.kind === 'phase-category'
+      ? autoTargetOptions.find(
+          (option) =>
+            option.phase === autoTarget.phase &&
+            option.category === autoTarget.category,
+        )?.label ?? `${autoTarget.phase} · ${autoTarget.category}`
+      : 'None';
+
   lines.push('SWGOH TB Full New Assignment Export');
   lines.push(`Mode: ${mode === 'manual' ? 'Manual mode' : 'Auto mode'}`);
   lines.push(
     `Included bonus zones: ${includedBonusLabels.length ? includedBonusLabels.join(', ') : 'None'}`,
   );
+  lines.push(`Auto target: ${autoTargetLabel}`);
   lines.push('');
 
   let currentPlatoon = '';
@@ -545,6 +595,7 @@ export default function PublicGuildSimulatorPage({
   const [debouncedActions, setDebouncedActions] = useState<PlatoonSimulatorAction[]>([]);
   const [includedBonusZoneKeys, setIncludedBonusZoneKeys] = useState<string[]>([]);
   const [mode, setMode] = useState<PlannerMode>('manual');
+  const [autoTarget, setAutoTarget] = useState<AutoTarget>(null);
   const [exportPlanState, setExportPlanState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [exportFullState, setExportFullState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const requestIdRef = useRef(0);
@@ -592,6 +643,7 @@ export default function PublicGuildSimulatorPage({
             actions: debouncedActions,
             includedBonusZoneKeys,
             mode,
+            autoTarget,
           }),
           signal: controller.signal,
         });
@@ -650,13 +702,14 @@ export default function PublicGuildSimulatorPage({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [slug, debouncedActions, includedBonusZoneKeys, mode]);
+  }, [slug, debouncedActions, includedBonusZoneKeys, mode, autoTarget]);
 
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
   const lookups = data?.lookups;
   const bonusZoneOptions = data?.bonusZoneOptions ?? [];
+  const autoTargetOptions = data?.autoTargetOptions ?? [];
   const fullNewAssignments = data?.fullNewAssignments ?? [];
 
   const newlyFullLabels = useMemo(() => {
@@ -701,11 +754,50 @@ export default function PublicGuildSimulatorPage({
     );
   }
 
+  function handleModeChange(nextMode: PlannerMode) {
+    setMode(nextMode);
+
+    if (nextMode === 'manual') {
+      setAutoTarget(null);
+    } else if (!autoTarget && autoTargetOptions.length > 0) {
+      const first = autoTargetOptions[0];
+      setAutoTarget({
+        kind: 'phase-category',
+        phase: first.phase,
+        category: first.category,
+      });
+    }
+  }
+
+  function handleAutoTargetChange(value: string) {
+    if (!value) {
+      setAutoTarget(null);
+      return;
+    }
+
+    const [phaseRaw, categoryRaw] = value.split('::');
+    const phase = Number(phaseRaw);
+    const category = categoryRaw as PlanetCategory;
+
+    if (!Number.isFinite(phase) || !category) {
+      setAutoTarget(null);
+      return;
+    }
+
+    setAutoTarget({
+      kind: 'phase-category',
+      phase,
+      category,
+    });
+  }
+
   async function exportPlan() {
     const text = buildExportPlanText({
       mode,
       includedBonusZoneKeys,
       bonusZoneOptions,
+      autoTarget,
+      autoTargetOptions,
       lookups,
       activeActions: actions,
       firstCandidate,
@@ -727,6 +819,8 @@ export default function PublicGuildSimulatorPage({
       mode,
       includedBonusZoneKeys,
       bonusZoneOptions,
+      autoTarget,
+      autoTargetOptions,
       assignments: fullNewAssignments,
     });
 
@@ -740,6 +834,11 @@ export default function PublicGuildSimulatorPage({
     }
   }
 
+  const selectedAutoTargetValue =
+    autoTarget && autoTarget.kind === 'phase-category'
+      ? `${autoTarget.phase}::${autoTarget.category}`
+      : '';
+
   return (
     <main className="min-h-screen bg-black text-slate-100">
       <div className="mx-auto max-w-7xl px-6 py-8">
@@ -750,8 +849,8 @@ export default function PublicGuildSimulatorPage({
               Next Full Platoon Simulator
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-slate-400">
-              Manual mode für konkrete Entscheidungen je Slot. Auto mode ist vorbereitet,
-              aber noch nicht aktiv.
+              Manual mode für konkrete Entscheidungen je Slot. Auto mode optimiert
+              gezielt die ausgewählte Phase/Category-Zone.
             </p>
           </div>
 
@@ -759,7 +858,7 @@ export default function PublicGuildSimulatorPage({
             <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-[#020817] p-1">
               <button
                 type="button"
-                onClick={() => setMode('manual')}
+                onClick={() => handleModeChange('manual')}
                 className={`rounded-xl px-4 py-2 text-sm transition ${
                   mode === 'manual'
                     ? 'bg-indigo-500/20 text-indigo-200'
@@ -771,9 +870,12 @@ export default function PublicGuildSimulatorPage({
 
               <button
                 type="button"
-                disabled
-                className="rounded-xl px-4 py-2 text-sm text-slate-500 opacity-60"
-                title="Coming soon"
+                onClick={() => handleModeChange('auto')}
+                className={`rounded-xl px-4 py-2 text-sm transition ${
+                  mode === 'auto'
+                    ? 'bg-indigo-500/20 text-indigo-200'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
               >
                 Auto mode
               </button>
@@ -815,30 +917,59 @@ export default function PublicGuildSimulatorPage({
         </div>
 
         <div className="mb-8 rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-          <div className="text-sm text-slate-400">Bonus zones</div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            {bonusZoneOptions.length === 0 ? (
-              <div className="text-sm text-slate-500">No bonus zones available.</div>
-            ) : (
-              bonusZoneOptions.map((zone) => {
-                const checked = includedBonusZoneKeys.includes(zone.zoneKey);
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <div className="text-sm text-slate-400">Bonus zones</div>
+              <div className="mt-4 flex flex-wrap gap-3">
+                {bonusZoneOptions.length === 0 ? (
+                  <div className="text-sm text-slate-500">No bonus zones available.</div>
+                ) : (
+                  bonusZoneOptions.map((zone) => {
+                    const checked = includedBonusZoneKeys.includes(zone.zoneKey);
 
-                return (
-                  <label
-                    key={zone.zoneKey}
-                    className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-black/20 px-4 py-3 text-sm text-slate-200"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleBonusZone(zone.zoneKey)}
-                      className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
-                    />
-                    <span>{zone.label}</span>
-                  </label>
-                );
-              })
-            )}
+                    return (
+                      <label
+                        key={zone.zoneKey}
+                        className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-black/20 px-4 py-3 text-sm text-slate-200"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleBonusZone(zone.zoneKey)}
+                          className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
+                        />
+                        <span>{zone.label}</span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-sm text-slate-400">Auto target</div>
+              <div className="mt-4">
+                <select
+                  value={selectedAutoTargetValue}
+                  onChange={(e) => handleAutoTargetChange(e.target.value)}
+                  disabled={mode !== 'auto'}
+                  className="w-full rounded-2xl border border-slate-800 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none transition disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">Select target zone</option>
+                  {autoTargetOptions.map((option) => (
+                    <option
+                      key={`${option.phase}::${option.category}`}
+                      value={`${option.phase}::${option.category}`}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 text-xs text-slate-500">
+                  Im Auto mode wird genau diese Zone priorisiert, z. B. Phase 4 · MIX.
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -996,7 +1127,7 @@ export default function PublicGuildSimulatorPage({
 
           <section className="space-y-6">
             <CandidateCard
-              title="Current next full platoon"
+              title={mode === 'auto' ? 'Current auto step' : 'Current next full platoon'}
               candidate={firstCandidate}
               onApplyOne={applyOne}
               onApplyAll={applyAll}
@@ -1006,7 +1137,7 @@ export default function PublicGuildSimulatorPage({
             />
 
             <CandidateCard
-              title="Second next full platoon"
+              title={mode === 'auto' ? 'Second auto step' : 'Second next full platoon'}
               candidate={secondCandidate}
               onApplyOne={applyOne}
               onApplyAll={applyAll}

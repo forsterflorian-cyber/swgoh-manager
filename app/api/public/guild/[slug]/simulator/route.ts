@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { simulatePlatoonScenario } from '@/lib/services/platoon-simulator';
-import { findSequentialFullPlatoonPlan } from '@/lib/services/platoon-completion-advisor';
+import {
+  findSequentialFullPlatoonPlan,
+  type AutoModeTarget,
+} from '@/lib/services/platoon-completion-advisor';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
-import type { StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
+import type { StrategicPlannerDataset, PlanetCategory } from '@/lib/types/platoon-readiness';
 import type { PlatoonSimulatorAction } from '@/lib/types/platoon-simulator';
 
 type RouteParams = {
@@ -17,6 +20,12 @@ type PlannerMode = 'manual' | 'auto';
 
 type BonusZoneOption = {
   zoneKey: string;
+  label: string;
+};
+
+type AutoTargetOption = {
+  phase: number;
+  category: PlanetCategory;
   label: string;
 };
 
@@ -65,6 +74,35 @@ function parseIncludedBonusZoneKeys(body: unknown): string[] {
   return candidate.filter((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
+function parseAutoTarget(body: unknown): AutoModeTarget {
+  if (!body || typeof body !== 'object') {
+    return null;
+  }
+
+  const raw = (body as { autoTarget?: unknown }).autoTarget;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  if (record.kind !== 'phase-category') {
+    return null;
+  }
+
+  const phase = typeof record.phase === 'number' ? record.phase : Number(record.phase);
+  const category = typeof record.category === 'string' ? (record.category as PlanetCategory) : null;
+
+  if (!Number.isFinite(phase) || !category) {
+    return null;
+  }
+
+  return {
+    kind: 'phase-category',
+    phase,
+    category,
+  };
+}
+
 function filterDatasetBySelectedBonusZones(
   dataset: StrategicPlannerDataset,
   includedBonusZoneKeys: string[],
@@ -100,6 +138,42 @@ function collectBonusZoneOptions(dataset: StrategicPlannerDataset): BonusZoneOpt
   }
 
   return [...byZone.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function collectAutoTargetOptions(dataset: StrategicPlannerDataset): AutoTargetOption[] {
+  const seen = new Set<string>();
+  const result: AutoTargetOption[] = [];
+
+  for (const slot of dataset.slots) {
+    if (!slot.planetCategory || slot.planetCategory === 'SPECIAL') {
+      continue;
+    }
+
+    const phase = Number(slot.phase);
+    const category = slot.planetCategory;
+    const key = `${phase}::${category}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push({
+      phase,
+      category,
+      label: `Phase ${phase} · ${category}`,
+    });
+  }
+
+  result.sort((a, b) => {
+    if (a.phase !== b.phase) {
+      return a.phase - b.phase;
+    }
+
+    return a.category.localeCompare(b.category);
+  });
+
+  return result;
 }
 
 function buildPlatoonLabels(dataset: StrategicPlannerDataset): Record<string, string> {
@@ -215,6 +289,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const actions = parseActions(body);
     const includedBonusZoneKeys = parseIncludedBonusZoneKeys(body);
     const mode = parseMode(body);
+    const autoTarget = parseAutoTarget(body);
 
     const loadStartedAt = Date.now();
     const dataset = await withStageTimeout(
@@ -232,6 +307,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     }
 
     const bonusZoneOptions = collectBonusZoneOptions(dataset);
+    const autoTargetOptions = collectAutoTargetOptions(dataset);
     const effectiveDataset = filterDatasetBySelectedBonusZones(dataset, includedBonusZoneKeys);
 
     const simulationStartedAt = Date.now();
@@ -249,6 +325,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         findSequentialFullPlatoonPlan(
           simulation.simulatedDataset,
           simulation.simulated,
+          mode === 'auto' ? autoTarget : null,
         ),
       120000,
     );
@@ -291,8 +368,10 @@ export async function POST(request: Request, { params }: RouteContext) {
         settings: {
           includedBonusZoneKeys,
           mode,
+          autoTarget,
         },
         bonusZoneOptions,
+        autoTargetOptions,
         fullNewAssignments,
         debug: {
           actionsCount: actions.length,

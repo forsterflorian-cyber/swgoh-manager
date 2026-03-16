@@ -27,6 +27,7 @@ type SlotLike = StrategicPlannerDataset['slots'][number] & {
   requiredRarity: number | null;
   requiredRelicTier: number | null;
 };
+
 type SlotCandidateAction =
   | Extract<PlatoonSimulatorAction, { type: 'USE_UNUSED_OWNER' }>
   | Extract<PlatoonSimulatorAction, { type: 'UPGRADE_OWNER_UNIT' }>;
@@ -35,6 +36,7 @@ type SlotCandidateOption = {
   action: SlotCandidateAction;
   actionCost: number;
 };
+
 type RankedPlatoonCandidate = {
   targetPlatoonId: string;
   totalSlots: number;
@@ -43,6 +45,14 @@ type RankedPlatoonCandidate = {
   actions: PlatoonSimulatorAction[];
   actionCost: number;
 };
+
+export type AutoModeTarget =
+  | {
+      kind: 'phase-category';
+      phase: number;
+      category: PlanetCategory;
+    }
+  | null;
 
 const MEMBER_CAP_PER_CATEGORY = 10;
 const MAX_FINALISTS = 5;
@@ -218,160 +228,6 @@ function actionCost(action: PlatoonSimulatorAction): number {
   }
 }
 
-function buildRealClosurePlanForTargetPlatoon(
-  dataset: StrategicPlannerDataset,
-  baseline: PlatoonMatchingResult,
-  targetPlatoonId: string,
-): {
-  actions: PlatoonSimulatorAction[];
-  actionCost: number;
-} | null {
-  const uncoveredSlots = getUncoveredSlotsForPlatoon(dataset, baseline, targetPlatoonId);
-  if (uncoveredSlots.length === 0) {
-    return null;
-  }
-
-  const gapByRequirementId = buildGapIndex(baseline);
-  const baselineLoad = getBaselineMemberCategoryLoad(baseline);
-  const workingLoad = new Map(baselineLoad);
-  const usedOwnerUnits = new Set<string>();
-
-  const slotsWithGaps = uncoveredSlots
-    .map((slot) => {
-      const requirementId = getDatasetSlotKey(slot);
-      const gap = requirementId ? gapByRequirementId.get(requirementId) ?? null : null;
-
-      return {
-        slot,
-        requirementId,
-        gap,
-      };
-    })
-    .filter((entry) => entry.requirementId && entry.gap)
-    .sort((a, b) => {
-      const aSources = a.gap?.possibleSources.length ?? 0;
-      const bSources = b.gap?.possibleSources.length ?? 0;
-
-      if (aSources !== bSources) {
-        return aSources - bSources;
-      }
-
-      return (a.requirementId ?? '').localeCompare(b.requirementId ?? '');
-    });
-
-  if (slotsWithGaps.length !== uncoveredSlots.length) {
-    return null;
-  }
-
-  const actions: PlatoonSimulatorAction[] = [];
-
-  for (const entry of slotsWithGaps) {
-    const slot = entry.slot;
-    const gap = entry.gap!;
-    const requirementId = entry.requirementId!;
-
-    const options = buildSlotCandidateOptions(slot, gap);
-
-    let chosen: PlatoonSimulatorAction | null = null;
-
-    for (const option of options) {
-      const candidate = option.action;
-      const ownerUnitKey = makeOwnerUnitKey(candidate.memberId, slot.unitBaseId);
-
-      if (usedOwnerUnits.has(ownerUnitKey)) {
-        continue;
-      }
-
-      const memberCategoryKey = makeMemberCategoryKey(
-        slot.phase,
-        slot.planetCategory,
-        candidate.memberId,
-      );
-
-      const currentLoad = workingLoad.get(memberCategoryKey) ?? 0;
-      if (currentLoad >= MEMBER_CAP_PER_CATEGORY) {
-        continue;
-      }
-
-      chosen = attachAlternativesToChosenAction(candidate, options);
-      break;
-    }
-
-    if (!chosen) {
-      return null;
-    }
-
-    actions.push(chosen);
-
-    const ownerUnitKey = makeOwnerUnitKey(chosen.memberId, chosen.unitBaseId);
-    usedOwnerUnits.add(ownerUnitKey);
-
-    const memberCategoryKey = makeMemberCategoryKey(
-      slot.phase,
-      slot.planetCategory,
-      chosen.memberId,
-    );
-    workingLoad.set(memberCategoryKey, (workingLoad.get(memberCategoryKey) ?? 0) + 1);
-  }
-
-  return {
-    actions,
-    actionCost: actions.reduce((sum, action) => sum + actionCost(action), 0),
-  };
-}
-
-function rankPlatoonsForRealClosure(
-  dataset: StrategicPlannerDataset,
-  baseline: PlatoonMatchingResult,
-): RankedPlatoonCandidate[] {
-  const platoonIds = Array.from(
-    new Set((dataset.slots as SlotLike[]).map((slot) => getPlatoonIdFromSlot(slot))),
-  );
-
-  const ranked: RankedPlatoonCandidate[] = [];
-
-  for (const targetPlatoonId of platoonIds) {
-    const coverage = getTargetPlatoonCoverage(dataset, baseline, targetPlatoonId);
-
-    if (coverage.totalSlots === 0) continue;
-    if (coverage.isFull) continue;
-    if (coverage.missingSlots <= 0) continue;
-
-    const plan = buildRealClosurePlanForTargetPlatoon(dataset, baseline, targetPlatoonId);
-    if (!plan) continue;
-
-    ranked.push({
-      targetPlatoonId,
-      totalSlots: coverage.totalSlots,
-      coveredSlots: coverage.coveredSlots,
-      missingSlots: coverage.missingSlots,
-      actions: plan.actions,
-      actionCost: plan.actionCost,
-    });
-  }
-
-    ranked.sort((a, b) => {
-      if (a.missingSlots !== b.missingSlots) {
-        return a.missingSlots - b.missingSlots;
-      }
-
-      if (a.actionCost !== b.actionCost) {
-        return a.actionCost - b.actionCost;
-      }
-
-      if (a.coveredSlots !== b.coveredSlots) {
-        return b.coveredSlots - a.coveredSlots;
-      }
-
-      if (a.actions.length !== b.actions.length) {
-        return a.actions.length - b.actions.length;
-      }
-
-      return a.targetPlatoonId.localeCompare(b.targetPlatoonId);
-    });
-
-  return ranked;
-}
 function sourceActionCost(source: {
   kind: 'eligible' | 'near_miss';
   missingRelicTiers: number;
@@ -388,32 +244,32 @@ function buildSlotCandidateOptions(
   slot: SlotLike,
   gap: PlatoonMatchingGap,
 ): SlotCandidateOption[] {
-   const options: SlotCandidateOption[] = [];
+  const options: SlotCandidateOption[] = [];
 
   for (const source of gap.possibleSources) {
     const cost = sourceActionCost(source);
 
     if (source.kind === 'eligible') {
-options.push({
-  action: {
-    id: buildActionId([
-      'use_unused_owner',
-      gap.requirementId,
-      source.memberId,
-      slot.unitBaseId,
-    ]),
-    type: 'USE_UNUSED_OWNER',
-    requirementId: gap.requirementId,
-    memberId: source.memberId,
-    playerName: source.playerName,
-    unitBaseId: slot.unitBaseId,
-    unitName: slot.unitName ?? gap.unitName ?? slot.unitBaseId,
-    missingRelicTiers: 0,
-    missingRarity: 0,
-    alternatives: [],
-  },
-  actionCost: cost,
-});
+      options.push({
+        action: {
+          id: buildActionId([
+            'use_unused_owner',
+            gap.requirementId,
+            source.memberId,
+            slot.unitBaseId,
+          ]),
+          type: 'USE_UNUSED_OWNER',
+          requirementId: gap.requirementId,
+          memberId: source.memberId,
+          playerName: source.playerName,
+          unitBaseId: slot.unitBaseId,
+          unitName: slot.unitName ?? gap.unitName ?? slot.unitBaseId,
+          missingRelicTiers: 0,
+          missingRarity: 0,
+          alternatives: [],
+        },
+        actionCost: cost,
+      });
       continue;
     }
 
@@ -490,6 +346,189 @@ function attachAlternativesToChosenAction(
   };
 }
 
+function buildRealClosurePlanForTargetPlatoon(
+  dataset: StrategicPlannerDataset,
+  baseline: PlatoonMatchingResult,
+  targetPlatoonId: string,
+): {
+  actions: PlatoonSimulatorAction[];
+  actionCost: number;
+} | null {
+  const uncoveredSlots = getUncoveredSlotsForPlatoon(dataset, baseline, targetPlatoonId);
+  if (uncoveredSlots.length === 0) {
+    return null;
+  }
+
+  const gapByRequirementId = buildGapIndex(baseline);
+  const baselineLoad = getBaselineMemberCategoryLoad(baseline);
+  const workingLoad = new Map(baselineLoad);
+  const usedOwnerUnits = new Set<string>();
+
+  const slotsWithGaps = uncoveredSlots
+    .map((slot) => {
+      const requirementId = getDatasetSlotKey(slot);
+      const gap = requirementId ? gapByRequirementId.get(requirementId) ?? null : null;
+
+      return {
+        slot,
+        requirementId,
+        gap,
+      };
+    })
+    .filter((entry) => entry.requirementId && entry.gap)
+    .sort((a, b) => {
+      const aSources = a.gap?.possibleSources.length ?? 0;
+      const bSources = b.gap?.possibleSources.length ?? 0;
+
+      if (aSources !== bSources) {
+        return aSources - bSources;
+      }
+
+      return (a.requirementId ?? '').localeCompare(b.requirementId ?? '');
+    });
+
+  if (slotsWithGaps.length !== uncoveredSlots.length) {
+    return null;
+  }
+
+  const actions: PlatoonSimulatorAction[] = [];
+
+  for (const entry of slotsWithGaps) {
+    const slot = entry.slot;
+    const gap = entry.gap!;
+    const options = buildSlotCandidateOptions(slot, gap);
+
+    let chosen: PlatoonSimulatorAction | null = null;
+
+    for (const option of options) {
+      const candidate = option.action;
+      const ownerUnitKey = makeOwnerUnitKey(candidate.memberId, slot.unitBaseId);
+
+      if (usedOwnerUnits.has(ownerUnitKey)) {
+        continue;
+      }
+
+      const memberCategoryKey = makeMemberCategoryKey(
+        slot.phase,
+        slot.planetCategory,
+        candidate.memberId,
+      );
+
+      const currentLoad = workingLoad.get(memberCategoryKey) ?? 0;
+      if (currentLoad >= MEMBER_CAP_PER_CATEGORY) {
+        continue;
+      }
+
+      chosen = attachAlternativesToChosenAction(candidate, options);
+      break;
+    }
+
+    if (!chosen) {
+      return null;
+    }
+
+    actions.push(chosen);
+
+    const ownerUnitKey = makeOwnerUnitKey(chosen.memberId, chosen.unitBaseId);
+    usedOwnerUnits.add(ownerUnitKey);
+
+    const memberCategoryKey = makeMemberCategoryKey(
+      slot.phase,
+      slot.planetCategory,
+      chosen.memberId,
+    );
+    workingLoad.set(memberCategoryKey, (workingLoad.get(memberCategoryKey) ?? 0) + 1);
+  }
+
+  return {
+    actions,
+    actionCost: actions.reduce((sum, action) => sum + actionCost(action), 0),
+  };
+}
+
+function matchesAutoTarget(
+  platoonId: string,
+  dataset: StrategicPlannerDataset,
+  target: AutoModeTarget,
+): boolean {
+  if (!target) {
+    return true;
+  }
+
+  if (target.kind !== 'phase-category') {
+    return true;
+  }
+
+  const slots = (dataset.slots as SlotLike[]).filter(
+    (slot) => getPlatoonIdFromSlot(slot) === platoonId,
+  );
+
+  if (slots.length === 0) {
+    return false;
+  }
+
+  const first = slots[0];
+  return Number(first.phase) === target.phase && first.planetCategory === target.category;
+}
+
+function rankPlatoonsForRealClosure(
+  dataset: StrategicPlannerDataset,
+  baseline: PlatoonMatchingResult,
+  target: AutoModeTarget = null,
+): RankedPlatoonCandidate[] {
+  const platoonIds = Array.from(
+    new Set((dataset.slots as SlotLike[]).map((slot) => getPlatoonIdFromSlot(slot))),
+  );
+
+  const ranked: RankedPlatoonCandidate[] = [];
+
+  for (const targetPlatoonId of platoonIds) {
+    if (!matchesAutoTarget(targetPlatoonId, dataset, target)) {
+      continue;
+    }
+
+    const coverage = getTargetPlatoonCoverage(dataset, baseline, targetPlatoonId);
+
+    if (coverage.totalSlots === 0) continue;
+    if (coverage.isFull) continue;
+    if (coverage.missingSlots <= 0) continue;
+
+    const plan = buildRealClosurePlanForTargetPlatoon(dataset, baseline, targetPlatoonId);
+    if (!plan) continue;
+
+    ranked.push({
+      targetPlatoonId,
+      totalSlots: coverage.totalSlots,
+      coveredSlots: coverage.coveredSlots,
+      missingSlots: coverage.missingSlots,
+      actions: plan.actions,
+      actionCost: plan.actionCost,
+    });
+  }
+
+  ranked.sort((a, b) => {
+    if (a.missingSlots !== b.missingSlots) {
+      return a.missingSlots - b.missingSlots;
+    }
+
+    if (a.actionCost !== b.actionCost) {
+      return a.actionCost - b.actionCost;
+    }
+
+    if (a.coveredSlots !== b.coveredSlots) {
+      return b.coveredSlots - a.coveredSlots;
+    }
+
+    if (a.actions.length !== b.actions.length) {
+      return a.actions.length - b.actions.length;
+    }
+
+    return a.targetPlatoonId.localeCompare(b.targetPlatoonId);
+  });
+
+  return ranked;
+}
+
 function compareCandidateScore(
   a: NextFullPlatoonResult,
   b: NextFullPlatoonResult,
@@ -528,11 +567,13 @@ function compareCandidateScore(
 
   return b.targetPlatoonId.localeCompare(a.targetPlatoonId);
 }
+
 function findBestNextFullPlatoonCandidate(
   dataset: StrategicPlannerDataset,
   baseline: PlatoonMatchingResult,
+  target: AutoModeTarget = null,
 ): NextFullPlatoonResult | null {
-  const rankedAll = rankPlatoonsForRealClosure(dataset, baseline);
+  const rankedAll = rankPlatoonsForRealClosure(dataset, baseline, target);
   const ranked = rankedAll.slice(0, MAX_FINALISTS);
 
   let best: NextFullPlatoonResult | null = null;
@@ -594,10 +635,11 @@ function findBestNextFullPlatoonCandidate(
 export function findSequentialFullPlatoonPlan(
   dataset: StrategicPlannerDataset,
   precomputedBaseline?: PlatoonMatchingResult,
+  target: AutoModeTarget = null,
 ): SequentialFullPlatoonPlan {
   const baseline = precomputedBaseline ?? computePlatoonMatching(dataset);
 
-  const first = findBestNextFullPlatoonCandidate(dataset, baseline);
+  const first = findBestNextFullPlatoonCandidate(dataset, baseline, target);
 
   if (!first) {
     return {
@@ -612,6 +654,7 @@ export function findSequentialFullPlatoonPlan(
   const second = findBestNextFullPlatoonCandidate(
     datasetAfterFirst,
     baselineAfterFirst,
+    target,
   );
 
   return {
