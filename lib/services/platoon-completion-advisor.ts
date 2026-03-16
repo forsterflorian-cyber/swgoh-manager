@@ -374,25 +374,25 @@ function rankPlatoonsForRealClosure(
     });
   }
 
-  ranked.sort((a, b) => {
-    if (a.missingSlots !== b.missingSlots) {
-      return a.missingSlots - b.missingSlots;
-    }
+    ranked.sort((a, b) => {
+      if (a.missingSlots !== b.missingSlots) {
+        return a.missingSlots - b.missingSlots;
+      }
 
-    if (a.actionCost !== b.actionCost) {
-      return a.actionCost - b.actionCost;
-    }
+      if (a.actionCost !== b.actionCost) {
+        return a.actionCost - b.actionCost;
+      }
 
-    if (a.coveredSlots !== b.coveredSlots) {
-      return b.coveredSlots - a.coveredSlots;
-    }
+      if (a.coveredSlots !== b.coveredSlots) {
+        return b.coveredSlots - a.coveredSlots;
+      }
 
-    if (a.actions.length !== b.actions.length) {
-      return a.actions.length - b.actions.length;
-    }
+      if (a.actions.length !== b.actions.length) {
+        return a.actions.length - b.actions.length;
+      }
 
-    return a.targetPlatoonId.localeCompare(b.targetPlatoonId);
-  });
+      return a.targetPlatoonId.localeCompare(b.targetPlatoonId);
+    });
 
   return ranked;
 }
@@ -405,13 +405,6 @@ function compareCandidateScore(
     return a.targetBecomesFull ? 1 : -1;
   }
 
-  const aTargetGain = a.targetCoveredSlotsAfter - a.targetCoveredSlotsBefore;
-  const bTargetGain = b.targetCoveredSlotsAfter - b.targetCoveredSlotsBefore;
-
-  if (aTargetGain !== bTargetGain) {
-    return aTargetGain - bTargetGain;
-  }
-
   if (a.deltaFullPlatoons !== b.deltaFullPlatoons) {
     return a.deltaFullPlatoons - b.deltaFullPlatoons;
   }
@@ -420,21 +413,28 @@ function compareCandidateScore(
     return a.deltaCoveredSlots - b.deltaCoveredSlots;
   }
 
+  if ((a.actionCost ?? 0) !== (b.actionCost ?? 0)) {
+    return (b.actionCost ?? 0) - (a.actionCost ?? 0);
+  }
+
   if ((a.displacedAssignmentCount ?? 0) !== (b.displacedAssignmentCount ?? 0)) {
     return (b.displacedAssignmentCount ?? 0) - (a.displacedAssignmentCount ?? 0);
   }
 
   if ((a.changedAssignmentCount ?? 0) !== (b.changedAssignmentCount ?? 0)) {
-    return (a.changedAssignmentCount ?? 0) - (b.changedAssignmentCount ?? 0);
+    return (b.changedAssignmentCount ?? 0) - (a.changedAssignmentCount ?? 0);
+  }
+
+  if (a.targetMissingSlotsAfter !== b.targetMissingSlotsAfter) {
+    return b.targetMissingSlotsAfter - a.targetMissingSlotsAfter;
   }
 
   if (a.actions.length !== b.actions.length) {
     return b.actions.length - a.actions.length;
   }
 
-  return 0;
+  return b.targetPlatoonId.localeCompare(a.targetPlatoonId);
 }
-
 function findBestNextFullPlatoonCandidate(
   dataset: StrategicPlannerDataset,
   baseline: PlatoonMatchingResult,
@@ -451,33 +451,40 @@ function findBestNextFullPlatoonCandidate(
       finalist.targetPlatoonId,
     );
 
-    const targetCoveredSlotsAfter = before.coveredSlots + finalist.actions.length;
-    const targetMissingSlotsAfter = Math.max(
-      0,
-      before.missingSlots - finalist.actions.length,
+    const simulation = simulatePlatoonScenario(
+      dataset,
+      finalist.actions,
+      baseline,
     );
-    const targetBecomesFull =
-      before.totalSlots > 0 && targetMissingSlotsAfter === 0;
+
+    const after = getTargetPlatoonCoverage(
+      simulation.simulatedDataset,
+      simulation.simulated,
+      finalist.targetPlatoonId,
+    );
 
     const candidate: NextFullPlatoonResult = {
       targetPlatoonId: finalist.targetPlatoonId,
       actions: finalist.actions,
-      deltaCoveredSlots: finalist.actions.length,
-      deltaFullPlatoons: targetBecomesFull ? 1 : 0,
-      changedAssignmentCount: 0,
-      displacedAssignmentCount: 0,
+      deltaCoveredSlots: simulation.delta.deltaCoveredSlots,
+      deltaFullPlatoons: simulation.delta.deltaFullPlatoons,
+      actionCost: finalist.actionCost,
+      changedAssignmentCount: simulation.delta.changedAssignmentCount,
+      displacedAssignmentCount: simulation.delta.displacedAssignmentCount,
+      becameFullPlatoonIds: simulation.delta.becameFullPlatoonIds,
+      noLongerFullPlatoonIds: simulation.delta.noLongerFullPlatoonIds,
       targetCoveredSlotsBefore: before.coveredSlots,
-      targetCoveredSlotsAfter,
+      targetCoveredSlotsAfter: after.coveredSlots,
       targetMissingSlotsBefore: before.missingSlots,
-      targetMissingSlotsAfter,
-      targetBecomesFull,
+      targetMissingSlotsAfter: after.missingSlots,
+      targetBecomesFull: !before.isFull && after.isFull,
     };
 
     const hasUsefulProgress =
-      candidate.targetCoveredSlotsAfter > candidate.targetCoveredSlotsBefore ||
       candidate.targetBecomesFull ||
+      candidate.deltaFullPlatoons > 0 ||
       candidate.deltaCoveredSlots > 0 ||
-      candidate.deltaFullPlatoons > 0;
+      candidate.targetCoveredSlotsAfter > candidate.targetCoveredSlotsBefore;
 
     if (!hasUsefulProgress) {
       continue;

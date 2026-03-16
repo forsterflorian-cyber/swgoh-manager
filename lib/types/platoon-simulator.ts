@@ -86,6 +86,7 @@ export type NextFullPlatoonResult = {
   targetMissingSlotsBefore: number;
   targetMissingSlotsAfter: number;
   targetBecomesFull: boolean;
+  actionCost?: number;
 };
 
 export type SequentialFullPlatoonPlan = {
