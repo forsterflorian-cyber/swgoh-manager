@@ -1,12 +1,12 @@
 import { NextRequest } from 'next/server';
-
+import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import { jsonError, jsonOk, readJsonObject } from '@/lib/api/responses';
 import {
-  getPrimaryGuildSettingsForUser,
-  isGuildManagerRole,
+  connectOrUpdateGuildSettings,
   isValidGuildSlug,
-  updateGuildSettings,
+  getPrimaryGuildSettingsForUser,
+  isGuildManagerRole
 } from '@/lib/services/guild-settings';
 
 export const runtime = 'nodejs';
@@ -43,29 +43,30 @@ export async function POST(request: NextRequest) {
       return jsonError('Guild slug must use lowercase letters, numbers, and hyphens only', 400);
     }
 
-    const guild = await getPrimaryGuildSettingsForUser(user.id);
-    if (!guild) {
-      return jsonError('Guild not found', 404);
-    }
+const existingGuild = await getPrimaryGuildSettingsForUser(user.id);
 
-    if (!isGuildManagerRole(guild.role)) {
-      return jsonError('Forbidden', 403);
-    }
+if (existingGuild && !isGuildManagerRole(existingGuild.role)) {
+  return jsonError('Forbidden', 403);
+}
 
-    const result = await updateGuildSettings({
-      guildDbId: guild.id,
-      guildId,
-      slug,
-    });
+const result = await connectOrUpdateGuildSettings({
+  userId: user.id,
+  guildId,
+  slug,
+});
 
-    if (!result.success) {
-      return jsonError(result.error, result.status);
-    }
+if (!result.success) {
+  return jsonError(result.error, result.status);
+}
 
-    return jsonOk({
-      guildId: result.guildId,
-      slug: result.slug,
-    });
+return NextResponse.json({
+  ok: true,
+  data: {
+    guildId: result.guildId,
+    slug: result.slug,
+    created: result.created,
+  },
+});
   } catch (error: unknown) {
     return jsonError(
       error instanceof Error ? error.message : 'Guild settings update failed',

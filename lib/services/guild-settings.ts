@@ -211,3 +211,121 @@ export async function updateGuildSettings({
     slug: row.slug,
   };
 }
+type ConnectOrUpdateGuildSettingsInput = {
+  userId: string;
+  guildId: string;
+  slug: string;
+};
+
+type ConnectOrUpdateGuildSettingsResult =
+  | {
+      success: true;
+      guildDbId: string;
+      guildId: string;
+      slug: string;
+      created: boolean;
+    }
+  | {
+      success: false;
+      error: string;
+      status: number;
+    };
+
+export async function connectOrUpdateGuildSettings({
+  userId,
+  guildId,
+  slug,
+}: ConnectOrUpdateGuildSettingsInput): Promise<ConnectOrUpdateGuildSettingsResult> {
+  const existingGuildForUser = await getPrimaryGuildSettingsForUser(userId);
+
+  if (existingGuildForUser) {
+    const updated = await updateGuildSettings({
+      guildDbId: existingGuildForUser.id,
+      guildId,
+      slug,
+    });
+
+    if (!updated.success) {
+      return updated;
+    }
+
+    await sql`
+      UPDATE users
+      SET guild_id = ${existingGuildForUser.id}
+      WHERE id = ${userId}
+    `;
+
+    return {
+      success: true,
+      guildDbId: existingGuildForUser.id,
+      guildId: updated.guildId,
+      slug: updated.slug,
+      created: false,
+    };
+  }
+
+  const guildIdConflict = await sql<{ id: string }>`
+    SELECT id
+    FROM guilds
+    WHERE swgoh_gg_id = ${guildId}
+    LIMIT 1
+  `;
+
+  if (guildIdConflict.rows.length > 0) {
+    return {
+      success: false,
+      error: 'Guild ID is already in use.',
+      status: 409,
+    };
+  }
+
+  const slugConflict = await sql<{ id: string }>`
+    SELECT id
+    FROM guilds
+    WHERE slug = ${slug}
+    LIMIT 1
+  `;
+
+  if (slugConflict.rows.length > 0) {
+    return {
+      success: false,
+      error: 'Guild slug is already in use.',
+      status: 409,
+    };
+  }
+
+  const createdGuild = await sql<{ id: string; swgoh_gg_id: string; slug: string }>`
+    INSERT INTO guilds (name, slug, swgoh_gg_id)
+    VALUES (${slug}, ${slug}, ${guildId})
+    RETURNING id, swgoh_gg_id, slug
+  `;
+
+  const row = createdGuild.rows[0];
+
+  if (!row) {
+    return {
+      success: false,
+      error: 'Guild could not be created.',
+      status: 500,
+    };
+  }
+
+  await sql`
+    INSERT INTO permissions (user_id, guild_id, role)
+    VALUES (${userId}, ${row.id}, 'owner')
+  `;
+
+  await sql`
+    UPDATE users
+    SET guild_id = ${row.id}
+    WHERE id = ${userId}
+  `;
+
+  return {
+    success: true,
+    guildDbId: row.id,
+    guildId: row.swgoh_gg_id,
+    slug: row.slug,
+    created: true,
+  };
+}
