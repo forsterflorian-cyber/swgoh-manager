@@ -216,43 +216,51 @@ function buildExportPlanText(params: {
   activeActions: PlatoonSimulatorAction[];
   firstCandidate: SequentialFullPlatoonPlan['first'] | null;
   secondCandidate: SequentialFullPlatoonPlan['second'] | null;
-  autoPlan: AutoZonePlan | null;
 }): string {
-  const { mode, includedBonusZoneKeys, bonusZoneOptions, autoTarget, autoTargetOptions, lookups, activeActions, firstCandidate, secondCandidate, autoPlan } = params;
+  const {
+    mode,
+    includedBonusZoneKeys,
+    bonusZoneOptions,
+    autoTarget,
+    autoTargetOptions,
+    lookups,
+    activeActions,
+    firstCandidate,
+    secondCandidate,
+  } = params;
+
   const lines: string[] = [];
-  const includedBonusLabels = bonusZoneOptions.filter((zone) => includedBonusZoneKeys.includes(zone.zoneKey)).map((zone) => zone.label);
-  const autoTargetLabel = autoTarget && autoTarget.kind === 'phase-category'
-    ? autoTargetOptions.find((option) => option.phase === autoTarget.phase && option.category === autoTarget.category)?.label ?? `${autoTarget.phase} · ${autoTarget.category}`
-    : 'None';
+  const includedBonusLabels = bonusZoneOptions
+    .filter((zone) => includedBonusZoneKeys.includes(zone.zoneKey))
+    .map((zone) => zone.label);
+
+  const autoTargetLabel =
+    autoTarget && autoTarget.kind === 'phase-category'
+      ? autoTargetOptions.find(
+          (option) =>
+            option.phase === autoTarget.phase &&
+            option.category === autoTarget.category,
+        )?.label ?? `${autoTarget.phase} · ${autoTarget.category}`
+      : 'None';
 
   lines.push('SWGOH TB Plan Export');
   lines.push(`Mode: ${mode === 'manual' ? 'Manual mode' : 'Auto mode'}`);
-  lines.push(`Included bonus zones: ${includedBonusLabels.length ? includedBonusLabels.join(', ') : 'None'}`);
+  lines.push(
+    `Included bonus zones: ${includedBonusLabels.length ? includedBonusLabels.join(', ') : 'None'}`,
+  );
   lines.push(`Auto target: ${autoTargetLabel}`);
   lines.push('');
 
-  if (mode === 'auto' && autoPlan) {
-    lines.push(`Auto plan target: ${autoTargetLabel}`);
-    lines.push(`Coverage: ${autoPlan.currentCoveredSlots}/${autoPlan.currentRequiredSlots} (${autoPlan.currentCoveragePercent}%) → ${autoPlan.projectedCoveredSlots}/${autoPlan.projectedRequiredSlots} (${autoPlan.projectedCoveragePercent}%)`);
-    lines.push(`Full platoons: ${autoPlan.currentFullPlatoons}/${autoPlan.totalPlatoons} → ${autoPlan.projectedFullPlatoons}/${autoPlan.totalPlatoons}`);
+  if (activeActions.length > 0) {
+    lines.push('Active scenario actions');
+    lines.push(`Count: ${activeActions.length}`);
     lines.push('');
 
-    for (const step of autoPlan.steps) {
-      lines.push(`Step ${step.stepNumber}: ${getPlatoonLabel(step.targetPlatoonId, lookups?.platoonLabels)}`);
-      lines.push(`Zone progress: ${step.zoneCoveredSlotsBefore}/${step.zoneRequiredSlots} (${step.zoneCoveragePercentBefore}%) → ${step.zoneCoveredSlotsAfter}/${step.zoneRequiredSlots} (${step.zoneCoveragePercentAfter}%)`);
-      for (const action of step.actions) {
-        lines.push(`- ${describeAction(action, lookups)}`);
-      }
-      lines.push('');
+    for (const action of activeActions) {
+      lines.push(`- ${describeAction(action, lookups)}`);
     }
 
     return lines.join('\n');
-  }
-
-  if (activeActions.length > 0) {
-    lines.push('Active scenario actions');
-    for (const action of activeActions) lines.push(`- ${describeAction(action, lookups)}`);
-    lines.push('');
   }
 
   const appendCandidate = (
@@ -267,16 +275,31 @@ function buildExportPlanText(params: {
 
     lines.push(title);
     lines.push(getPlatoonLabel(candidate.targetPlatoonId, lookups?.platoonLabels));
-    lines.push(`Target covered: ${candidate.targetCoveredSlotsBefore} → ${candidate.targetCoveredSlotsAfter}`);
-    lines.push(`Target missing: ${candidate.targetMissingSlotsBefore} → ${candidate.targetMissingSlotsAfter}`);
+    lines.push(
+      `Target covered: ${candidate.targetCoveredSlotsBefore} → ${candidate.targetCoveredSlotsAfter}`,
+    );
+    lines.push(
+      `Target missing: ${candidate.targetMissingSlotsBefore} → ${candidate.targetMissingSlotsAfter}`,
+    );
     lines.push(`Target becomes full: ${candidate.targetBecomesFull ? 'Yes' : 'No'}`);
     lines.push('Actions:');
-    for (const action of candidate.actions) lines.push(`- ${describeAction(action, lookups)}`);
+
+    for (const action of candidate.actions) {
+      lines.push(`- ${describeAction(action, lookups)}`);
+    }
+
     lines.push('');
   };
 
-  appendCandidate('Current next full platoon', firstCandidate);
-  appendCandidate('Second next full platoon', secondCandidate);
+  appendCandidate(
+    mode === 'auto' ? 'Current auto step' : 'Current next full platoon',
+    firstCandidate,
+  );
+  appendCandidate(
+    mode === 'auto' ? 'Second auto step' : 'Second next full platoon',
+    secondCandidate,
+  );
+
   return lines.join('\n');
 }
 
@@ -614,7 +637,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   }
 
   async function exportPlan() {
-    const text = buildExportPlanText({ mode, includedBonusZoneKeys, bonusZoneOptions, autoTarget, autoTargetOptions, lookups, activeActions: actions, firstCandidate, secondCandidate, autoPlan });
+    const text = buildExportPlanText({ mode, includedBonusZoneKeys, bonusZoneOptions, autoTarget, autoTargetOptions, lookups, activeActions: actions, firstCandidate, secondCandidate });
     try {
       await copyOrDownloadText(text, 'swgoh-tb-plan.txt');
       setExportPlanState('copied');
