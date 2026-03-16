@@ -26,4 +26,4 @@ export default function AccountDeletedPage() {
       </div>
     </main>
   );
-}
+} 
