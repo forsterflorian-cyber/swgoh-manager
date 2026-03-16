@@ -1,3 +1,4 @@
+
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -54,13 +55,49 @@ export default async function GuildSettingsPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
               Guild Settings
             </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">No guild connected</h1>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Connect a guild</h1>
             <p className="mt-3 text-sm text-gray-400">
-              Connect a guild first before updating its public identifier and slug.
+              Add your SWGOH guild identifier and choose the public slug. After that you can sync
+              members and roster data and start using matching and simulator.
             </p>
+
+            <div className="mt-8">
+              <GuildSettingsForm
+                appBaseUrl={appBaseUrl}
+                initialGuildId=""
+                initialSlug={""}
+              />
+            </div>
+
+            <div className="mt-8 grid gap-4 md:grid-cols-3">
+              <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step 1</div>
+                <div className="mt-2 text-lg font-medium text-white">Connect guild</div>
+                <p className="mt-2 text-sm text-gray-400">
+                  Set guild ID and public slug.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step 2</div>
+                <div className="mt-2 text-lg font-medium text-white">Sync roster</div>
+                <p className="mt-2 text-sm text-gray-400">
+                  Import members and roster data.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Step 3</div>
+                <div className="mt-2 text-lg font-medium text-white">Plan and manage</div>
+                <p className="mt-2 text-sm text-gray-400">
+                  Use public matching and simulator.
+                </p>
+              </div>
+            </div>
+
             <Link
               href="/dashboard"
-              className="mt-6 inline-flex rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              className="mt-8 inline-flex rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
             >
               Back to dashboard
             </Link>
@@ -251,23 +288,9 @@ export default async function GuildSettingsPage() {
             Delete guild configuration
           </h2>
           <p className="mt-3 max-w-3xl text-sm text-rose-100/90">
-            This action is intended to remove the guild configuration from the app and unlink the
-            current user from that guild, so switching to another guild does not leave old guild
-            bindings behind. Historical guild-specific app data should be removed together with the
-            user-to-guild link.
+            Delete the guild configuration, remove guild-specific synced data, and unlink the current
+            user from this guild so a new guild can be connected cleanly afterwards.
           </p>
-
-          <div className="mt-6 rounded-2xl border border-rose-900/60 bg-black/20 p-5">
-            <div className="text-sm text-rose-100/90">
-              Recommended backend behavior:
-            </div>
-            <ul className="mt-3 space-y-2 text-sm text-rose-100/80">
-              <li>• remove the user ↔ guild association</li>
-              <li>• remove stored guild config and slug</li>
-              <li>• remove synced member and roster data for that guild</li>
-              <li>• prevent old state from showing up after the user connects a new guild</li>
-            </ul>
-          </div>
 
           <form action={`/api/guild/${guild.id}/delete`} method="post" className="mt-6">
             <button
