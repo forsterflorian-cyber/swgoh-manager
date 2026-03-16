@@ -13,10 +13,16 @@ type Lookups = {
   platoonLabels: Record<string, string>;
 };
 
+type PlannerMode = 'manual' | 'auto';
+
 type SimulatorApiResponse = {
   simulation: PlatoonSimulatorResponse;
   advisory: SequentialFullPlatoonPlan;
   lookups: Lookups;
+  settings?: {
+    includeBonusZones?: boolean;
+    mode?: PlannerMode;
+  };
 };
 
 type ErrorResponse = {
@@ -31,11 +37,10 @@ function getActionTypeLabel(action: PlatoonSimulatorAction): string {
       return 'Upgrade owner unit';
     case 'REMOVE_SOURCE_BLOCK':
       return 'Remove source block';
-    default:
-      {
-  const exhaustiveCheck: never = action;
-  return String(exhaustiveCheck);
-}
+    default: {
+      const exhaustiveCheck: never = action;
+      return String(exhaustiveCheck);
+    }
   }
 }
 
@@ -73,6 +78,32 @@ function dedupeActions(actions: PlatoonSimulatorAction[]): PlatoonSimulatorActio
   return result;
 }
 
+function upsertActionByRequirementId(
+  existing: PlatoonSimulatorAction[],
+  action: PlatoonSimulatorAction,
+): PlatoonSimulatorAction[] {
+  if (!('requirementId' in action) || typeof action.requirementId !== 'string') {
+    return dedupeActions([...existing, action]);
+  }
+
+  const filtered = existing.filter((item) => {
+    if (!('requirementId' in item)) {
+      return true;
+    }
+
+    return item.requirementId !== action.requirementId;
+  });
+
+  return dedupeActions([...filtered, action]);
+}
+
+function mergeActions(
+  existing: PlatoonSimulatorAction[],
+  nextActions: PlatoonSimulatorAction[],
+): PlatoonSimulatorAction[] {
+  return nextActions.reduce((acc, action) => upsertActionByRequirementId(acc, action), existing);
+}
+
 function getPlatoonLabel(
   targetPlatoonId: string | null | undefined,
   platoonLabels?: Record<string, string>,
@@ -91,28 +122,6 @@ function getPlatoonLabel(
   const platoonNumber = platoonMatch ? platoonMatch[1] : platoonKey;
 
   return `Phase ${phase} · Platoon ${platoonNumber}`;
-}
-
-function formatUpgradeSuffix(action: Extract<PlatoonSimulatorAction, { type: 'UPGRADE_OWNER_UNIT' }>): string {
-  const parts: string[] = [];
-
-  if (action.missingRelicTiers > 0) {
-    parts.push(
-      action.missingRelicTiers === 1
-        ? '+1 relic'
-        : `+${action.missingRelicTiers} relic`,
-    );
-  }
-
-  if (action.missingRarity > 0) {
-    parts.push(
-      action.missingRarity === 1
-        ? '+1 star'
-        : `+${action.missingRarity} stars`,
-    );
-  }
-
-  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
 function formatAlternativeCost(
@@ -162,6 +171,72 @@ function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): stri
       return String(exhaustiveCheck);
     }
   }
+}
+
+function buildExportText(params: {
+  mode: PlannerMode;
+  includeBonusZones: boolean;
+  lookups?: Lookups;
+  activeActions: PlatoonSimulatorAction[];
+  firstCandidate: SequentialFullPlatoonPlan['first'] | null;
+  secondCandidate: SequentialFullPlatoonPlan['second'] | null;
+}): string {
+  const {
+    mode,
+    includeBonusZones,
+    lookups,
+    activeActions,
+    firstCandidate,
+    secondCandidate,
+  } = params;
+
+  const lines: string[] = [];
+
+  lines.push(`SWGOH TB Plan Export`);
+  lines.push(`Mode: ${mode === 'manual' ? 'Manual mode' : 'Auto mode'}`);
+  lines.push(`Include bonus zones: ${includeBonusZones ? 'Yes' : 'No'}`);
+  lines.push('');
+
+  if (activeActions.length > 0) {
+    lines.push(`Active scenario actions`);
+    for (const action of activeActions) {
+      lines.push(`- ${describeAction(action, lookups)}`);
+    }
+    lines.push('');
+  }
+
+  const appendCandidate = (
+    title: string,
+    candidate: SequentialFullPlatoonPlan['first'] | SequentialFullPlatoonPlan['second'] | null,
+  ) => {
+    if (!candidate) {
+      lines.push(`${title}: No candidate`);
+      lines.push('');
+      return;
+    }
+
+    lines.push(title);
+    lines.push(getPlatoonLabel(candidate.targetPlatoonId, lookups?.platoonLabels));
+    lines.push(
+      `Target covered: ${candidate.targetCoveredSlotsBefore} → ${candidate.targetCoveredSlotsAfter}`,
+    );
+    lines.push(
+      `Target missing: ${candidate.targetMissingSlotsBefore} → ${candidate.targetMissingSlotsAfter}`,
+    );
+    lines.push(`Target becomes full: ${candidate.targetBecomesFull ? 'Yes' : 'No'}`);
+    lines.push(`Actions:`);
+
+    for (const action of candidate.actions) {
+      lines.push(`- ${describeAction(action, lookups)}`);
+    }
+
+    lines.push('');
+  };
+
+  appendCandidate('Current next full platoon', firstCandidate);
+  appendCandidate('Second next full platoon', secondCandidate);
+
+  return lines.join('\n');
 }
 
 function CandidateCard({
@@ -252,7 +327,7 @@ function CandidateCard({
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-5">
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
           <div className="text-xs text-slate-400">Target covered</div>
           <div className="mt-2 text-2xl font-semibold text-white">
@@ -287,89 +362,89 @@ function CandidateCard({
         ) : (
           <div className="space-y-3">
             {candidate.actions.map((action) => (
-<div
-  key={getActionKey(action)}
-  className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-black/20 p-4"
->
-  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-    <div className="min-w-0">
-      <div className="truncate text-sm font-medium text-slate-100">
-        {describeAction(action, lookups)}
-      </div>
-      <div className="mt-1 text-xs text-slate-500">
-        {getActionTypeLabel(action)}
-      </div>
-    </div>
+              <div
+                key={getActionKey(action)}
+                className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-black/20 p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-slate-100">
+                      {describeAction(action, lookups)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {getActionTypeLabel(action)}
+                    </div>
+                  </div>
 
-    <button
-      type="button"
-      onClick={() => onApplyOne(action)}
-      disabled={!canApply}
-      className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      Apply
-    </button>
-  </div>
+                  <button
+                    type="button"
+                    onClick={() => onApplyOne(action)}
+                    disabled={!canApply}
+                    className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Apply
+                  </button>
+                </div>
 
-  {'alternatives' in action && action.alternatives && action.alternatives.length > 0 ? (
-    <div className="mt-2 space-y-2">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-        Alternatives
-      </div>
+                {'alternatives' in action && action.alternatives && action.alternatives.length > 0 ? (
+                  <div className="mt-2 space-y-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Alternatives
+                    </div>
 
-      {action.alternatives.map((alt, index) => {
-        const replacement: PlatoonSimulatorAction =
-          action.type === 'USE_UNUSED_OWNER'
-            ? {
-                ...action,
-                id: `${action.id}::alt::${alt.memberId}::${index}`,
-                memberId: alt.memberId,
-                playerName: alt.playerName,
-                unitBaseId: alt.unitBaseId,
-                unitName: alt.unitName,
-                missingRelicTiers: 0,
-                missingRarity: 0,
-              }
-            : action.type === 'UPGRADE_OWNER_UNIT'
-              ? {
-                  ...action,
-                  id: `${action.id}::alt::${alt.memberId}::${index}`,
-                  memberId: alt.memberId,
-                  playerName: alt.playerName,
-                  unitBaseId: alt.unitBaseId,
-                  unitName: alt.unitName,
-                  missingRelicTiers: alt.missingRelicTiers,
-                  missingRarity: alt.missingRarity,
-                  actionCost: alt.actionCost,
-                }
-              : action;
+                    {action.alternatives.map((alt, index) => {
+                      const replacement: PlatoonSimulatorAction =
+                        action.type === 'USE_UNUSED_OWNER'
+                          ? {
+                              ...action,
+                              id: `${action.id}::alt::${alt.memberId}::${index}`,
+                              memberId: alt.memberId,
+                              playerName: alt.playerName,
+                              unitBaseId: alt.unitBaseId,
+                              unitName: alt.unitName,
+                              missingRelicTiers: 0,
+                              missingRarity: 0,
+                            }
+                          : action.type === 'UPGRADE_OWNER_UNIT'
+                            ? {
+                                ...action,
+                                id: `${action.id}::alt::${alt.memberId}::${index}`,
+                                memberId: alt.memberId,
+                                playerName: alt.playerName,
+                                unitBaseId: alt.unitBaseId,
+                                unitName: alt.unitName,
+                                missingRelicTiers: alt.missingRelicTiers,
+                                missingRarity: alt.missingRarity,
+                                actionCost: alt.actionCost,
+                              }
+                            : action;
 
-        return (
-          <div
-            key={`${action.id}::alt::${alt.memberId}::${index}`}
-            className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 lg:flex-row lg:items-center lg:justify-between"
-          >
-            <div className="text-xs text-slate-300">
-              {alt.playerName} → {alt.unitName} ({formatAlternativeCost(
-                alt.missingRelicTiers,
-                alt.missingRarity,
-              )})
-            </div>
+                      return (
+                        <div
+                          key={`${action.id}::alt::${alt.memberId}::${index}`}
+                          className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <div className="text-xs text-slate-300">
+                            {alt.playerName} → {alt.unitName} ({formatAlternativeCost(
+                              alt.missingRelicTiers,
+                              alt.missingRarity,
+                            )})
+                          </div>
 
-            <button
-              type="button"
-              onClick={() => onReplaceOne(action, replacement)}
-              disabled={!canApply}
-              className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Use this instead
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  ) : null}
-</div>
+                          <button
+                            type="button"
+                            onClick={() => onReplaceOne(action, replacement)}
+                            disabled={!canApply}
+                            className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Use this instead
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         )}
@@ -389,6 +464,9 @@ export default function PublicGuildSimulatorPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debouncedActions, setDebouncedActions] = useState<PlatoonSimulatorAction[]>([]);
+  const [includeBonusZones, setIncludeBonusZones] = useState(false);
+  const [mode, setMode] = useState<PlannerMode>('manual');
+  const [exportState, setExportState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const requestIdRef = useRef(0);
 
   useEffect(() => {
@@ -430,7 +508,11 @@ export default function PublicGuildSimulatorPage({
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ actions: debouncedActions }),
+          body: JSON.stringify({
+            actions: debouncedActions,
+            includeBonusZones,
+            mode,
+          }),
           signal: controller.signal,
         });
 
@@ -488,53 +570,76 @@ export default function PublicGuildSimulatorPage({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [slug, debouncedActions]);
+  }, [slug, debouncedActions, includeBonusZones, mode]);
 
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
   const lookups = data?.lookups;
 
-function applyOne(action: PlatoonSimulatorAction) {
-  setActions((prev) => {
-    const next =
-      'requirementId' in action
-        ? prev.filter((item) => {
-            if (!('requirementId' in item)) {
-              return true;
-            }
+  const newlyFullLabels = useMemo(() => {
+    if (!summary?.becameFullPlatoonIds?.length) {
+      return [];
+    }
 
-            return item.requirementId !== action.requirementId;
-          })
-        : prev;
+    return summary.becameFullPlatoonIds.map((id) => {
+      return lookups?.platoonLabels?.[id] ?? id;
+    });
+  }, [summary, lookups]);
 
-    return dedupeActions([...next, action]);
-  });
-}
+  function applyOne(action: PlatoonSimulatorAction) {
+    setActions((prev) => upsertActionByRequirementId(prev, action));
+  }
 
   function applyAll(nextActions: PlatoonSimulatorAction[]) {
-    setActions((prev) => dedupeActions([...prev, ...nextActions]));
+    setActions((prev) => mergeActions(prev, nextActions));
   }
 
   function removeAction(action: PlatoonSimulatorAction) {
     const keyToRemove = getActionKey(action);
     setActions((prev) => prev.filter((item) => getActionKey(item) !== keyToRemove));
   }
-function replaceAction(
-  currentAction: PlatoonSimulatorAction,
-  replacement: PlatoonSimulatorAction,
-) {
-  const keyToRemove = getActionKey(currentAction);
 
-  setActions((prev) =>
-    dedupeActions([
-      ...prev.filter((item) => getActionKey(item) !== keyToRemove),
-      replacement,
-    ]),
-  );
-}
+  function replaceAction(
+    _currentAction: PlatoonSimulatorAction,
+    replacement: PlatoonSimulatorAction,
+  ) {
+    setActions((prev) => upsertActionByRequirementId(prev, replacement));
+  }
+
   function resetScenario() {
     setActions([]);
+  }
+
+  async function exportPlan() {
+    const text = buildExportText({
+      mode,
+      includeBonusZones,
+      lookups,
+      activeActions: actions,
+      firstCandidate,
+      secondCandidate,
+    });
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setExportState('copied');
+      } else {
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'swgoh-tb-plan.txt';
+        anchor.click();
+        URL.revokeObjectURL(url);
+        setExportState('copied');
+      }
+    } catch {
+      setExportState('failed');
+    } finally {
+      window.setTimeout(() => setExportState('idle'), 2000);
+    }
   }
 
   return (
@@ -547,19 +652,66 @@ function replaceAction(
               Next Full Platoon Simulator
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-slate-400">
-              Advisor-zentrierte Simulation. Aktionen werden aus den vorgeschlagenen
-              Kandidaten übernommen. Es werden keine Änderungen gespeichert.
+              Manual mode für konkrete Entscheidungen je Slot. Auto mode ist vorbereitet,
+              aber noch nicht aktiv.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={resetScenario}
-            disabled={actions.length === 0}
-            className="rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Reset scenario
-          </button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-[#020817] p-1">
+              <button
+                type="button"
+                onClick={() => setMode('manual')}
+                className={`rounded-xl px-4 py-2 text-sm transition ${
+                  mode === 'manual'
+                    ? 'bg-indigo-500/20 text-indigo-200'
+                    : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                Manual mode
+              </button>
+
+              <button
+                type="button"
+                disabled
+                className="rounded-xl px-4 py-2 text-sm text-slate-500 opacity-60"
+                title="Coming soon"
+              >
+                Auto mode
+              </button>
+            </div>
+
+            <label className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-[#020817] px-4 py-3 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={includeBonusZones}
+                onChange={(e) => setIncludeBonusZones(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
+              />
+              <span>Include bonus zones</span>
+            </label>
+
+            <button
+              type="button"
+              onClick={exportPlan}
+              className="rounded-2xl border border-emerald-700/70 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20"
+            >
+              {exportState === 'copied'
+                ? 'Exported'
+                : exportState === 'failed'
+                  ? 'Export failed'
+                  : 'Export Plan'}
+            </button>
+
+            <button
+              type="button"
+              onClick={resetScenario}
+              disabled={actions.length === 0}
+              className="rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Reset scenario
+            </button>
+          </div>
         </div>
 
         {error ? (
@@ -596,19 +748,21 @@ function replaceAction(
                   : 'No data'}
             </div>
           </div>
-        <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-          <div className="text-sm text-slate-400">Full zones</div>
-          <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
-            {summary ? summary.simulatedFullZones : '—'}
+
+          <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+            <div className="text-sm text-slate-400">Full zones</div>
+            <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
+              {summary ? summary.simulatedFullZones : '—'}
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              {summary
+                ? `${summary.baselineFullZones} → ${summary.simulatedFullZones}`
+                : loading
+                  ? 'Loading…'
+                  : 'No data'}
+            </div>
           </div>
-          <div className="mt-2 text-sm text-slate-500">
-            {summary
-              ? `${summary.baselineFullZones} → ${summary.simulatedFullZones}`
-              : loading
-                ? 'Loading…'
-                : 'No data'}
-          </div>
-        </div>
+
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
             <div className="text-sm text-slate-400">Changed assignments</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
@@ -622,13 +776,11 @@ function replaceAction(
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
             <div className="text-sm text-slate-400">Newly full</div>
             <div className="mt-3 text-3xl font-semibold tracking-tight text-white">
-              {summary?.becameFullPlatoonIds?.length
-                ? summary.becameFullPlatoonIds.length
-                : '0'}
+              {newlyFullLabels.length ? newlyFullLabels.length : '0'}
             </div>
             <div className="mt-2 break-words text-sm text-slate-500">
-              {summary?.becameFullPlatoonIds?.length
-                ? summary.becameFullPlatoonIds.join(', ')
+              {newlyFullLabels.length
+                ? newlyFullLabels.join(', ')
                 : 'No newly completed platoons'}
             </div>
           </div>
@@ -644,7 +796,13 @@ function replaceAction(
                 </div>
               </div>
 
-              <div className="text-xs text-slate-500">
+              <div
+                className={`text-xs font-medium ${
+                  loading
+                    ? 'animate-pulse text-rose-400'
+                    : 'text-slate-500'
+                }`}
+              >
                 {loading ? 'Recalculating…' : 'Auto-updated'}
               </div>
             </div>
@@ -693,13 +851,13 @@ function replaceAction(
                   <span>{data?.simulation.delta.deltaCoveredSlots ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span>Delta full Platoons</span>
+                  <span>Delta full platoons</span>
                   <span>{data?.simulation.delta.deltaFullPlatoons ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-  <span>Delta full zones</span>
-  <span>{data?.simulation.delta.deltaFullZones ?? '—'}</span>
-</div>
+                  <span>Delta full zones</span>
+                  <span>{data?.simulation.delta.deltaFullZones ?? '—'}</span>
+                </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>Displaced assignments</span>
                   <span>{data?.simulation.delta.displacedAssignmentCount ?? '—'}</span>
@@ -709,25 +867,25 @@ function replaceAction(
           </aside>
 
           <section className="space-y-6">
-<CandidateCard
-  title="Current next full platoon"
-  candidate={firstCandidate}
-  onApplyOne={applyOne}
-  onApplyAll={applyAll}
-  onReplaceOne={replaceAction}
-  canApply={!loading}
-  lookups={lookups}
-/>
+            <CandidateCard
+              title="Current next full platoon"
+              candidate={firstCandidate}
+              onApplyOne={applyOne}
+              onApplyAll={applyAll}
+              onReplaceOne={replaceAction}
+              canApply={!loading}
+              lookups={lookups}
+            />
 
-<CandidateCard
-  title="Second next full platoon"
-  candidate={secondCandidate}
-  onApplyOne={applyOne}
-  onApplyAll={applyAll}
-  onReplaceOne={replaceAction}
-  canApply={!loading}
-  lookups={lookups}
-/>
+            <CandidateCard
+              title="Second next full platoon"
+              candidate={secondCandidate}
+              onApplyOne={applyOne}
+              onApplyAll={applyAll}
+              onReplaceOne={replaceAction}
+              canApply={!loading}
+              lookups={lookups}
+            />
           </section>
         </div>
       </div>
