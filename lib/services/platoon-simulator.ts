@@ -351,18 +351,29 @@ function buildDelta(
   };
 }
 
-function cloneSlotForSimulation(slot: StrategicPlannerDataset['slots'][number]): StrategicPlannerDataset['slots'][number] {
-  return { ...slot };
+function cloneSlotForSimulation(
+  slot: StrategicPlannerDataset['slots'][number],
+): StrategicPlannerDataset['slots'][number] {
+  const s = slot as unknown as Record<string, unknown>;
+
+  const eligibleRoster = Array.isArray(s.eligibleRoster)
+    ? (s.eligibleRoster as Array<Record<string, unknown>>).map((entry) => ({ ...entry }))
+    : undefined;
+
+  return {
+    ...slot,
+    ...(eligibleRoster ? { eligibleRoster } : {}),
+  };
 }
 
 function cloneDatasetForSimulation(dataset: StrategicPlannerDataset): StrategicPlannerDataset {
   return {
     ...dataset,
-    members: [...dataset.members],
-    roster: [...dataset.roster],
-    slots: dataset.slots.map(cloneSlotForSimulation),
+    members: dataset.members.map((member) => ({ ...member })),
+    roster: dataset.roster.map((entry) => ({ ...entry })),
+    slots: dataset.slots.map((slot) => cloneSlotForSimulation(slot)),
     strategicAssignments: Array.isArray(dataset.strategicAssignments)
-      ? [...dataset.strategicAssignments]
+      ? dataset.strategicAssignments.map((assignment) => ({ ...assignment }))
       : [],
   };
 }
