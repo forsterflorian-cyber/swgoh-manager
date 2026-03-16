@@ -15,7 +15,6 @@ type NavbarProps = {
 
 const NAV_LINKS = [
   { href: '/dashboard', label: 'Dashboard', match: '/dashboard' },
-  { href: '/planning/platoons', label: 'Planner', match: '/planning' },
 ] as const;
 
 export function Navbar({

@@ -360,7 +360,7 @@ export default function DashboardPage() {
               </button>
 
               <Link href="/settings/guild" className={actionButtonClasses()}>
-                Guild settings
+                Open guild settings
               </Link>
             </div>
           </div>
@@ -502,7 +502,12 @@ export default function DashboardPage() {
                 </div>
                 <div className="mt-4">
                   {publicMatchingHref ? (
-                    <Link href={publicMatchingHref} className={actionButtonClasses()}>
+                    <Link
+                      href={publicMatchingHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={actionButtonClasses()}
+                    >
                       Open matching
                     </Link>
                   ) : (
@@ -518,7 +523,12 @@ export default function DashboardPage() {
                 </div>
                 <div className="mt-4">
                   {publicSimulatorHref ? (
-                    <Link href={publicSimulatorHref} className={actionButtonClasses()}>
+                    <Link
+                      href={publicSimulatorHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={actionButtonClasses()}
+                    >
                       Open simulator
                     </Link>
                   ) : (
@@ -528,14 +538,18 @@ export default function DashboardPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                <div className="text-sm font-medium text-slate-100">Guild settings</div>
+                <div className="text-sm font-medium text-slate-100">Live planner</div>
                 <div className="mt-1 text-sm text-slate-500">
-                  Manage slug and guild-level configuration
+                  Operational TB planner for active events
                 </div>
                 <div className="mt-4">
-                  <Link href="/settings/guild" className={actionButtonClasses()}>
-                    Open settings
-                  </Link>
+                  {activeTb ? (
+                    <Link href={`/tb/${activeTb.id}/phase/1`} className={actionButtonClasses()}>
+                      Open live planner
+                    </Link>
+                  ) : (
+                    <div className="text-sm text-slate-500">No active TB linked.</div>
+                  )}
                 </div>
               </div>
             </div>
