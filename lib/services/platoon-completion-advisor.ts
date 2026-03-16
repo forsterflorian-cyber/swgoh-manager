@@ -97,7 +97,9 @@ export type AutoZonePlan = {
 
 const MEMBER_CAP_PER_CATEGORY = 10;
 const MAX_FINALISTS = 5;
-const MAX_AUTO_STEPS = 6;
+const MAX_AUTO_STEPS = 3;
+const MAX_AUTO_FINALISTS = 3;
+
 
 function getPlatoonIdFromSlot(slot: {
   phase: string | number;
@@ -606,9 +608,10 @@ function findBestNextFullPlatoonCandidate(
   dataset: StrategicPlannerDataset,
   baseline: PlatoonMatchingResult,
   target: AutoModeTarget = null,
+  maxFinalists = MAX_FINALISTS,
 ): NextFullPlatoonResult | null {
   const rankedAll = rankPlatoonsForRealClosure(dataset, baseline, target);
-  const ranked = rankedAll.slice(0, MAX_FINALISTS);
+  const ranked = rankedAll.slice(0, maxFinalists);
 
   let best: NextFullPlatoonResult | null = null;
 
@@ -740,9 +743,18 @@ export function findAutoZonePlan(
       workingDataset,
       workingMatching,
       target,
+      MAX_AUTO_FINALISTS,
     );
 
     if (!candidate) {
+      break;
+    }
+
+    if (
+      !candidate.targetBecomesFull &&
+      candidate.deltaFullPlatoons <= 0 &&
+      candidate.deltaCoveredSlots <= 0
+    ) {
       break;
     }
 
