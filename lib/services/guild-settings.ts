@@ -294,11 +294,11 @@ export async function connectOrUpdateGuildSettings({
     };
   }
 
-  const createdGuild = await sql<{ id: string; swgoh_gg_id: string; slug: string }>`
-    INSERT INTO guilds (name, slug, swgoh_gg_id)
-    VALUES (${slug}, ${slug}, ${guildId})
-    RETURNING id, swgoh_gg_id, slug
-  `;
+const createdGuild = await sql<{ id: string; swgoh_gg_id: string; slug: string }>`
+  INSERT INTO guilds (name, slug, swgoh_gg_id, owner_id)
+  VALUES (${slug}, ${slug}, ${guildId}, ${userId})
+  RETURNING id, swgoh_gg_id, slug
+`;
 
   const row = createdGuild.rows[0];
 
