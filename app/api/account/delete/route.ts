@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { db } from '@vercel/postgres';
 
@@ -12,7 +11,7 @@ export async function POST(request: Request) {
   const user = await getAuthenticatedUser();
 
   if (!user) {
-    return NextResponse.redirect(buildUrl(request, '/login'));
+    return NextResponse.redirect(buildUrl(request, '/login'), 303);
   }
 
   const client = await db.connect();
@@ -30,6 +29,7 @@ export async function POST(request: Request) {
     if (guildId) {
       return NextResponse.redirect(
         buildUrl(request, '/dashboard?error=account_delete_blocked'),
+        303,
       );
     }
 
@@ -48,7 +48,8 @@ export async function POST(request: Request) {
     await client.sql`COMMIT`;
 
     return NextResponse.redirect(
-      buildUrl(request, '/login?deleted=1'),
+      buildUrl(request, '/account-deleted'),
+      303,
     );
   } catch (error) {
     await client.sql`ROLLBACK`;
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
 
     return NextResponse.redirect(
       buildUrl(request, '/dashboard?error=account_delete_failed'),
+      303,
     );
   } finally {
     client.release();

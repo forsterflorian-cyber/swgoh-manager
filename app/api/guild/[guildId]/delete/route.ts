@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db, sql } from '@vercel/postgres';
+import { db } from '@vercel/postgres';
 
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import {
@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   const user = await getAuthenticatedUser();
 
   if (!user) {
-    return NextResponse.redirect(buildUrl(request, '/login'));
+    return NextResponse.redirect(buildUrl(request, '/login'), 303);
   }
 
   const { guildId } = await params;
@@ -29,12 +29,14 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!guild || guild.id !== guildId) {
     return NextResponse.redirect(
       buildUrl(request, '/settings/guild?error=guild_not_found'),
+      303,
     );
   }
 
   if (!isGuildManagerRole(guild.role)) {
     return NextResponse.redirect(
       buildUrl(request, '/settings/guild?error=forbidden'),
+      303,
     );
   }
 
@@ -100,13 +102,14 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     await client.sql`COMMIT`;
 
-    return NextResponse.redirect(buildUrl(request, '/dashboard?deleted=1'));
+    return NextResponse.redirect(buildUrl(request, '/dashboard?deleted=1'), 303);
   } catch (error) {
     await client.sql`ROLLBACK`;
     console.error('Guild delete failed', error);
 
     return NextResponse.redirect(
       buildUrl(request, '/settings/guild?error=delete_failed'),
+      303,
     );
   } finally {
     client.release();
