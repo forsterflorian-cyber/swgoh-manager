@@ -1,8 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-
+import { useEffect, useMemo, useState } from 'react';
 import { Navbar } from '@/components/layout/Navbar';
 
 type ApiEnvelope<T> =
@@ -29,44 +28,6 @@ type DashboardStrategicReadiness = {
     name: string;
     tbKey: string;
   } | null;
-  summary: {
-    totalZones: number;
-    totalPlatoons: number;
-    totalSlots: number;
-    coverableSlots: number;
-    missingSlots: number;
-    coveragePercent: number;
-    estimatedCoverablePlatoons: number;
-    blockedPlatoons: number;
-    blockedZones: number;
-    bottleneckUnitCount: number;
-  } | null;
-  topMissingUnits: Array<{
-    unitName: string;
-    missingSlots: number;
-    blockedSlots: number;
-    blockedZones: number;
-    blockedPlatoons: number;
-    limitingZones: number;
-    limitingPlatoons: number;
-    nearMissOwners: number;
-    nearMissSlots: number;
-    hardMissingSlots: number;
-    estimatedUnlockSlots: number;
-    primaryConstraint: 'near_miss' | 'ownership_shortage' | 'hard_missing' | 'mixed';
-    reasonSummary: string;
-    impactScore: number;
-  }>;
-  zones: Array<{
-    phase: number;
-    zoneName: string;
-    missingSlots: number;
-    status: 'ready' | 'partial' | 'blocked';
-    estimatedCoverablePlatoons: number;
-    totalPlatoons: number;
-    blockers: string[];
-  }>;
-  recommendedActions: string[];
   dataState: {
     hasGuild: boolean;
     hasRosterData: boolean;
@@ -102,19 +63,100 @@ type Notice = {
   message: string;
 };
 
-function buildPlannerHref(view: 'overview' | 'priorities' | 'targets', fixture?: 'demo') {
-  const params = new URLSearchParams();
+type RosterState = {
+  label: string;
+  tone: 'good' | 'warn' | 'bad';
+  detail: string;
+};
 
-  if (fixture === 'demo') {
-    params.set('fixture', 'demo');
+function formatDateTime(value: string | null): string {
+  if (!value) return 'Never';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
   }
 
-  if (view !== 'overview') {
-    params.set('view', view);
+  return new Intl.DateTimeFormat('de-DE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function getRosterState(
+  memberCount: number,
+  rosteredMembers: number,
+  lastRosterSync: string | null,
+): RosterState {
+  if (memberCount <= 0) {
+    return {
+      label: 'No guild data',
+      tone: 'bad',
+      detail: 'Connect a guild first.',
+    };
   }
 
-  const query = params.toString();
-  return query ? `/planning/platoons?${query}` : '/planning/platoons';
+  if (rosteredMembers <= 0) {
+    return {
+      label: 'Roster missing',
+      tone: 'bad',
+      detail: 'Run the initial roster sync.',
+    };
+  }
+
+  const ratio = memberCount > 0 ? rosteredMembers / memberCount : 0;
+
+  if (ratio >= 0.95) {
+    return {
+      label: 'Healthy',
+      tone: 'good',
+      detail: `Last sync: ${formatDateTime(lastRosterSync)}`,
+    };
+  }
+
+  if (ratio >= 0.7) {
+    return {
+      label: 'Partial',
+      tone: 'warn',
+      detail: `${rosteredMembers}/${memberCount} rostered · last sync ${formatDateTime(lastRosterSync)}`,
+    };
+  }
+
+  return {
+    label: 'Needs sync',
+    tone: 'bad',
+    detail: `${rosteredMembers}/${memberCount} rostered · last sync ${formatDateTime(lastRosterSync)}`,
+  };
+}
+
+async function fetchDashboard(): Promise<DashboardData> {
+  const res = await fetch('/api/dashboard', { cache: 'no-store' });
+  const payload = (await res.json()) as ApiEnvelope<DashboardData>;
+
+  if (!res.ok || !payload.ok) {
+    throw new Error(payload.ok ? 'Dashboard could not be loaded.' : payload.error);
+  }
+
+  return payload.data;
+}
+
+function cardToneClasses(tone: RosterState['tone']) {
+  switch (tone) {
+    case 'good':
+      return 'border-emerald-900/70 bg-emerald-950/20 text-emerald-200';
+    case 'warn':
+      return 'border-amber-900/70 bg-amber-950/20 text-amber-200';
+    case 'bad':
+      return 'border-rose-900/70 bg-rose-950/20 text-rose-200';
+    default:
+      return 'border-slate-800 bg-slate-950 text-slate-200';
+  }
+}
+
+function actionButtonClasses(primary = false) {
+  return primary
+    ? 'inline-flex items-center justify-center rounded-2xl border border-indigo-700/70 bg-indigo-500/10 px-4 py-3 text-sm font-medium text-indigo-200 transition hover:bg-indigo-500/20'
+    : 'inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800';
 }
 
 export default function DashboardPage() {
@@ -125,9 +167,11 @@ export default function DashboardPage() {
     useState<DashboardStrategicReadiness | null>(null);
   const [canManageGuild, setCanManageGuild] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+
   const navbar = (
     <Navbar
       guildName={guild?.name ?? null}
@@ -156,11 +200,31 @@ export default function DashboardPage() {
     void loadDashboard();
   }, []);
 
+  const rosterState = useMemo(
+    () => getRosterState(guild?.memberCount ?? 0, guild?.rosteredMembers ?? 0, lastRosterSync),
+    [guild?.memberCount, guild?.rosteredMembers, lastRosterSync],
+  );
+
+  const publicMatchingHref =
+    guild?.slug ? `/public/guild/${guild.slug}/matching` : null;
+  const publicSimulatorHref =
+    guild?.slug ? `/public/guild/${guild.slug}/simulator` : null;
+
+  async function refreshDashboardAfterSync() {
+    const dashboard = await fetchDashboard();
+    setGuild(dashboard.guild);
+    setActiveTb(dashboard.activeTb);
+    setLastRosterSync(dashboard.lastRosterSync);
+    setStrategicReadiness(dashboard.strategicReadiness);
+    setCanManageGuild(dashboard.permissions.canManageGuild);
+  }
+
   const handleSync = async () => {
-    if (!guild?.id) {
+    if (!guild?.id || syncing) {
       return;
     }
 
+    setSyncing(true);
     setError(null);
     setNotice(null);
 
@@ -184,6 +248,7 @@ export default function DashboardPage() {
       }
 
       const members = membersData.data.members;
+
       if (members.length === 0) {
         throw new Error('No guild members found.');
       }
@@ -195,6 +260,7 @@ export default function DashboardPage() {
       });
 
       let count = 0;
+
       for (const member of members) {
         count += 1;
         setSyncStatus({
@@ -210,7 +276,7 @@ export default function DashboardPage() {
 
         if (!response.ok || !payload.ok) {
           throw new Error(
-            payload.ok ? `Roster sync failed for ${member.player_name}.` : payload.error
+            payload.ok ? `Roster sync failed for ${member.player_name}.` : payload.error,
           );
         }
       }
@@ -221,12 +287,8 @@ export default function DashboardPage() {
         msg: 'Roster sync completed.',
       });
 
-      const dashboard = await fetchDashboard();
-      setGuild(dashboard.guild);
-      setActiveTb(dashboard.activeTb);
-      setLastRosterSync(dashboard.lastRosterSync);
-      setStrategicReadiness(dashboard.strategicReadiness);
-      setCanManageGuild(dashboard.permissions.canManageGuild);
+      await refreshDashboardAfterSync();
+
       setNotice({
         tone: 'success',
         message: 'Roster sync completed successfully.',
@@ -242,81 +304,18 @@ export default function DashboardPage() {
         message,
       });
       setSyncStatus(null);
+    } finally {
+      setSyncing(false);
     }
   };
-
-  const rosterState = getRosterState(
-    guild?.memberCount ?? 0,
-    guild?.rosteredMembers ?? 0,
-    lastRosterSync
-  );
-  const topBlocker = strategicReadiness?.topMissingUnits[0] ?? null;
-  const summary = strategicReadiness?.summary ?? null;
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 text-white">
         {navbar}
         <div className="mx-auto max-w-6xl px-4 py-10">
-          <div className="rounded-3xl border border-gray-800 bg-gray-900/70 p-8">
-            <div className="h-4 w-32 animate-pulse rounded bg-gray-800" />
-            <div className="mt-4 h-10 w-72 animate-pulse rounded bg-gray-800" />
-            <div className="mt-3 h-4 w-56 animate-pulse rounded bg-gray-800" />
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <div
-                key={index}
-                className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5"
-              >
-                <div className="h-4 w-24 animate-pulse rounded bg-gray-800" />
-                <div className="mt-4 h-8 w-20 animate-pulse rounded bg-gray-800" />
-                <div className="mt-3 h-4 w-32 animate-pulse rounded bg-gray-800" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!guild) {
-    return (
-      <div className="min-h-screen bg-gray-950 text-white">
-        {navbar}
-        <div className="mx-auto max-w-4xl px-4 py-16">
-          <div className="rounded-3xl border border-gray-800 bg-gray-900/70 p-8 text-center">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
-              Dashboard
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-              No guild connected yet
-            </h1>
-            <p className="mt-3 text-base text-gray-400">
-              Strategic platoon planning starts with a guild roster. Connect a guild to analyze
-              bottlenecks, or use the demo planner to review overview, priorities, and member
-              targets.
-            </p>
-            {error && (
-              <div className="mx-auto mt-6 max-w-xl rounded-2xl border border-red-900 bg-red-950/40 px-4 py-3 text-left text-sm text-red-200">
-                {error}
-              </div>
-            )}
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Link
-                href={buildPlannerHref('overview', 'demo')}
-                className="inline-flex rounded-xl border border-blue-500 bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-              >
-                Open demo overview
-              </Link>
-              <Link
-                href="/login"
-                className="inline-flex rounded-xl border border-gray-700 bg-gray-900 px-5 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-              >
-                Back to login
-              </Link>
-            </div>
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-8 text-sm text-slate-400">
+            Loading dashboard…
           </div>
         </div>
       </div>
@@ -326,478 +325,223 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {navbar}
-      <div className="mx-auto max-w-6xl px-4 py-10">
-        <section className="rounded-3xl border border-gray-800 bg-gradient-to-br from-blue-950/50 via-gray-900 to-gray-950 p-6 sm:p-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-300">
-                Strategic TB Readiness
-              </p>
-              <h1 className="mt-3 truncate text-3xl font-semibold tracking-tight sm:text-4xl">
-                {guild.name}
+
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
+        <section className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.25)]">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-sm text-slate-400">Guild configuration</div>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+                {guild?.name ?? 'No guild connected'}
               </h1>
-              <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                {guild.slug && <DashboardPill label={`Slug: ${guild.slug}`} />}
-                <DashboardPill label={rosterState.label} tone={rosterState.tone} />
-                {strategicReadiness?.reference && (
-                  <DashboardPill
-                    label={`Reference: ${strategicReadiness.reference.name}`}
-                    tone="info"
-                  />
-                )}
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
+                <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
+                  Slug: {guild?.slug ?? 'not set'}
+                </span>
+                <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
+                  Manage access: {canManageGuild ? 'Yes' : 'No'}
+                </span>
+                {activeTb ? (
+                  <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
+                    Active TB: {activeTb.name}
+                  </span>
+                ) : null}
               </div>
-              <p className="mt-4 max-w-3xl text-sm text-gray-300">
-                Use the planner&apos;s Overview, Missing Units, and Member Targets views to focus the
-                guild on the units that unlock the most platoon coverage. This dashboard stays
-                useful even without an active Territory Battle instance.
-              </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <button
-                onClick={() => void handleSync()}
-                disabled={Boolean(syncStatus)}
-                className="rounded-xl border border-emerald-500 bg-emerald-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
+                type="button"
+                onClick={handleSync}
+                disabled={!canManageGuild || !guild?.id || syncing}
+                className={actionButtonClasses(true)}
               >
-                {syncStatus ? 'Syncing...' : 'Sync roster'}
+                {syncing ? 'Sync running…' : 'Sync roster'}
               </button>
-              <Link
-                href={buildPlannerHref('overview')}
-                className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-              >
-                Open planner overview
+
+              <Link href="/settings/guild" className={actionButtonClasses()}>
+                Guild settings
               </Link>
-              {activeTb && (
-                <Link
-                  href={`/tb/${activeTb.id}/phase/1`}
-                  className="rounded-xl border border-gray-700 bg-gray-900/80 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-                >
-                  Open live TB planner
-                </Link>
-              )}
             </div>
           </div>
         </section>
 
-        {error && <Banner tone="error" message={error} className="mt-6" />}
-        {notice && <Banner tone={notice.tone} message={notice.message} className="mt-6" />}
-
-        {syncStatus && (
-          <section className="mt-6 rounded-2xl border border-blue-900 bg-blue-950/30 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium text-blue-100">{syncStatus.msg}</p>
-                <p className="mt-1 text-sm text-blue-200/80">
-                  {syncStatus.current} of {syncStatus.total || '?'} members processed
-                </p>
-              </div>
-              <span className="text-sm text-blue-200">
-                {Math.round(
-                  (syncStatus.current / (syncStatus.total || syncStatus.current || 1)) * 100
-                )}
-                %
-              </span>
-            </div>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-blue-950/80">
-              <div
-                className="h-full bg-blue-400 transition-all duration-300"
-                style={{
-                  width: `${(syncStatus.current / (syncStatus.total || syncStatus.current || 1)) * 100}%`,
-                }}
-              />
-            </div>
+        {error ? (
+          <section className="rounded-3xl border border-rose-900/60 bg-rose-950/30 p-5 text-sm text-rose-200">
+            {error}
           </section>
-        )}
+        ) : null}
 
-        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <MetricCard
-            title="Guild members"
-            value={`${guild.memberCount}`}
-            detail={`${guild.rosteredMembers} members currently contribute relevant roster data`}
-            tone="neutral"
-          />
-          <MetricCard
-            title="Roster freshness"
-            value={formatSyncDisplay(lastRosterSync)}
-            detail={rosterState.detail}
-            tone={rosterState.tone}
-          />
-          <MetricCard
-            title="Coverable slots"
-            value={summary ? `${summary.coverableSlots}/${summary.totalSlots}` : 'Waiting'}
-            detail={
-              summary
-                ? `${summary.coveragePercent}% of imported platoon slots are currently coverable`
-                : 'Reference or roster data is still incomplete'
-            }
-            tone={summary ? 'info' : 'warning'}
-          />
-          <MetricCard
-            title="Missing slots"
-            value={summary ? `${summary.missingSlots}` : 'Waiting'}
-            detail={
-              summary
-                ? `${summary.blockedZones} blocked zones and ${summary.blockedPlatoons} blocked platoons`
-                : 'Strategic readiness becomes available once data is present'
-            }
-            tone={summary && summary.missingSlots > 0 ? 'danger' : 'neutral'}
-          />
-          <MetricCard
-            title="Top bottleneck"
-            value={topBlocker ? topBlocker.unitName : 'None'}
-            detail={
-              topBlocker
-                ? `${topBlocker.blockedSlots} blocked slots, ${topBlocker.limitingZones} primary zones`
-                : 'No guild-wide blocker detected'
-            }
-            tone={topBlocker ? 'danger' : 'positive'}
-          />
+        {notice ? (
+          <section
+            className={`rounded-3xl border p-5 text-sm ${
+              notice.tone === 'success'
+                ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200'
+                : 'border-rose-900/60 bg-rose-950/30 text-rose-200'
+            }`}
+          >
+            {notice.message}
+          </section>
+        ) : null}
+
+        <section className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+            <div className="text-sm text-slate-400">Guild members</div>
+            <div className="mt-3 text-4xl font-semibold text-white">
+              {guild?.memberCount ?? 0}
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              Imported guild members
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+            <div className="text-sm text-slate-400">Rostered members</div>
+            <div className="mt-3 text-4xl font-semibold text-white">
+              {guild?.rosteredMembers ?? 0}
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              Members with synced roster data
+            </div>
+          </div>
+
+          <div className={`rounded-3xl border p-6 ${cardToneClasses(rosterState.tone)}`}>
+            <div className="text-sm opacity-80">Roster status</div>
+            <div className="mt-3 text-2xl font-semibold">{rosterState.label}</div>
+            <div className="mt-2 text-sm opacity-80">{rosterState.detail}</div>
+          </div>
         </section>
 
-        <section className="mt-6 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Overview preview
+        <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-white">Data status</h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  Keep guild membership and roster data up to date.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                  Last roster sync
+                </div>
+                <div className="mt-2 text-lg font-medium text-slate-100">
+                  {formatDateTime(lastRosterSync)}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                  Reference dataset
+                </div>
+                <div className="mt-2 text-lg font-medium text-slate-100">
+                  {strategicReadiness?.reference?.name ?? 'Not available'}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                  SWGOH.GG ID
+                </div>
+                <div className="mt-2 text-lg font-medium text-slate-100">
+                  {guild?.swgoh_gg_id ?? 'Not connected'}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                  Roster coverage ratio
+                </div>
+                <div className="mt-2 text-lg font-medium text-slate-100">
+                  {strategicReadiness?.dataState
+                    ? `${Math.round(strategicReadiness.dataState.rosterCoverageRatio * 100)}%`
+                    : '—'}
+                </div>
+              </div>
+            </div>
+
+            {syncStatus ? (
+              <div className="mt-5 rounded-2xl border border-indigo-900/60 bg-indigo-950/20 p-4">
+                <div className="text-sm font-medium text-indigo-200">{syncStatus.msg}</div>
+                <div className="mt-2 text-sm text-indigo-300/80">
+                  {syncStatus.total > 0
+                    ? `${syncStatus.current}/${syncStatus.total}`
+                    : 'Preparing…'}
+                </div>
+                {syncStatus.total > 0 ? (
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-900">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.max(0, (syncStatus.current / syncStatus.total) * 100),
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+            <h2 className="text-xl font-semibold text-white">Public surfaces</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Matching is the shared status board. Simulator is the officer planning tool.
             </p>
 
-            {summary ? (
-              <>
-                <h2 className="mt-3 text-2xl font-semibold text-white">
-                  Platoon coverage at guild level
-                </h2>
-                <p className="mt-2 text-sm text-gray-400">
-                  The current roster can fully cover {summary.estimatedCoverablePlatoons} of{' '}
-                  {summary.totalPlatoons} platoons in the imported reference set.
-                </p>
-
-                <div className="mt-5 space-y-3">
-                  {strategicReadiness?.topMissingUnits.slice(0, 4).map((unit) => (
-                    <div
-                      key={unit.unitName}
-                      className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3"
-                    >
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">{unit.unitName}</p>
-                          <p className="mt-1 text-sm text-gray-400">{unit.reasonSummary}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <span className="rounded-full border border-blue-900 bg-blue-950/50 px-3 py-1 text-xs text-blue-200">
-                            Impact {unit.impactScore}
-                          </span>
-                          <span className="rounded-full border border-amber-900 bg-amber-950/50 px-3 py-1 text-xs text-amber-200">
-                            Upgradeable {unit.estimatedUnlockSlots}
-                          </span>
-                          <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-300">
-                            {formatConstraintLabel(unit.primaryConstraint)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {strategicReadiness?.topMissingUnits.length === 0 && (
-                    <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100">
-                      No strategic blockers detected with current data.
-                    </div>
+            <div className="mt-5 space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-sm font-medium text-slate-100">Public matching</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  Read-only current state with filters
+                </div>
+                <div className="mt-4">
+                  {publicMatchingHref ? (
+                    <Link href={publicMatchingHref} className={actionButtonClasses()}>
+                      Open matching
+                    </Link>
+                  ) : (
+                    <div className="text-sm text-slate-500">Set a slug first.</div>
                   )}
                 </div>
-              </>
-            ) : (
-              <>
-                <h2 className="mt-3 text-2xl font-semibold text-white">
-                  Strategic planner waiting for data
-                </h2>
-                <p className="mt-2 text-sm text-gray-400">
-                  Import TB reference data and sync rosters to rank missing units and blocked
-                  zones.
-                </p>
-              </>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Highest-pressure zones
-            </p>
-
-            {strategicReadiness?.zones.length ? (
-              <div className="mt-4 space-y-3">
-                {strategicReadiness.zones.map((zone) => (
-                  <div
-                    key={`${zone.phase}-${zone.zoneName}`}
-                    className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white">
-                          Phase {zone.phase} {zone.zoneName}
-                        </p>
-                        <p className="mt-1 text-sm text-gray-400">
-                          {zone.estimatedCoverablePlatoons}/{zone.totalPlatoons} platoons coverable
-                          with {zone.missingSlots} missing slot
-                          {zone.missingSlots === 1 ? '' : 's'}
-                        </p>
-                      </div>
-                      <span
-                        className={`rounded-full border px-3 py-1 text-xs ${
-                          zone.status === 'ready'
-                            ? 'border-emerald-900 bg-emerald-950/50 text-emerald-200'
-                            : zone.status === 'partial'
-                              ? 'border-amber-900 bg-amber-950/50 text-amber-200'
-                              : 'border-red-900 bg-red-950/50 text-red-200'
-                        }`}
-                      >
-                        {zone.status}
-                      </span>
-                    </div>
-
-                    {zone.blockers.length > 0 && (
-                      <p className="mt-3 text-sm text-gray-500">
-                        Blocking units: {zone.blockers.join(', ')}
-                      </p>
-                    )}
-                  </div>
-                ))}
               </div>
-            ) : (
-              <div className="mt-4 rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-400">
-                Zone readiness will appear here once the strategic planner has enough data.
-              </div>
-            )}
-          </div>
-        </section>
 
-        <section className="mt-6 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Planner workflow
-            </p>
-            <div className="mt-4 space-y-3">
-              {(strategicReadiness?.recommendedActions.length
-                ? strategicReadiness.recommendedActions
-                : [
-                    'Open the planner overview to review guild readiness, then move into missing-unit priorities and member targets.',
-                  ]
-              ).map((action, index) => (
-                <div
-                  key={`${action}-${index}`}
-                  className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-200"
-                >
-                  {action}
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-sm font-medium text-slate-100">Public simulator</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  Manual and auto planning with export
                 </div>
-              ))}
-            </div>
+                <div className="mt-4">
+                  {publicSimulatorHref ? (
+                    <Link href={publicSimulatorHref} className={actionButtonClasses()}>
+                      Open simulator
+                    </Link>
+                  ) : (
+                    <div className="text-sm text-slate-500">Set a slug first.</div>
+                  )}
+                </div>
+              </div>
 
-            <p className="mt-5 text-sm text-gray-400">Jump directly into the right workspace.</p>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <Link
-                href={buildPlannerHref('overview')}
-                className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-              >
-                Open overview
-              </Link>
-              <Link
-                href={buildPlannerHref('priorities')}
-                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-              >
-                Missing units
-              </Link>
-              <Link
-                href={buildPlannerHref('targets')}
-                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-              >
-                Member targets
-              </Link>
-              <Link
-                href={buildPlannerHref('overview', 'demo')}
-                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-              >
-                Review demo mode
-              </Link>
+              <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+                <div className="text-sm font-medium text-slate-100">Guild settings</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  Manage slug and guild-level configuration
+                </div>
+                <div className="mt-4">
+                  <Link href="/settings/guild" className={actionButtonClasses()}>
+                    Open settings
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
-
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Operational planner
-            </p>
-
-            {activeTb ? (
-              <>
-                <h2 className="mt-3 text-2xl font-semibold text-white">{activeTb.name}</h2>
-                <p className="mt-2 text-sm text-gray-400">
-                  Live Territory Battle operations remain available, but they are now a secondary
-                  workflow after guild-level strategic readiness.
-                </p>
-                <div className="mt-5 flex flex-wrap gap-2 text-sm">
-                  <DashboardPill
-                    label={`Status: ${formatStatus(activeTb.status)}`}
-                    tone={activeTb.status === 'active' ? 'positive' : 'info'}
-                  />
-                  <DashboardPill label={`Roster sync: ${formatSyncDisplay(lastRosterSync)}`} />
-                </div>
-                <Link
-                  href={`/tb/${activeTb.id}/phase/1`}
-                  className="mt-6 inline-flex rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-                >
-                  Open live planner
-                </Link>
-              </>
-            ) : (
-              <>
-                <h2 className="mt-3 text-2xl font-semibold text-white">No live TB instance linked</h2>
-                <p className="mt-2 text-sm text-gray-400">
-                  Strategic planning is still fully available from roster plus reference data, so
-                  the dashboard remains useful between events.
-                </p>
-              </>
-            )}
-          </div>
         </section>
-      </div>
-    </div>
-  );
-}
-
-async function fetchDashboard() {
-  const response = await fetch('/api/dashboard');
-  const payload = (await response.json()) as ApiEnvelope<DashboardData>;
-
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.ok ? 'Dashboard could not be loaded.' : payload.error);
-  }
-
-  return payload.data;
-}
-
-function getRosterState(
-  memberCount: number,
-  rosteredMembers: number,
-  lastRosterSync: string | null
-) {
-  if (memberCount === 0) {
-    return {
-      label: 'Guild import pending',
-      detail: 'Import guild members first so readiness analysis can use real roster data.',
-      tone: 'danger' as const,
-    };
-  }
-
-  if (rosteredMembers === 0 || !lastRosterSync) {
-    return {
-      label: 'Roster sync recommended',
-      detail: 'Guild members exist, but no current roster cache is available for strategic planning.',
-      tone: 'warning' as const,
-    };
-  }
-
-  return {
-    label: 'Roster data available',
-    detail: `${rosteredMembers} members currently contribute roster data.`,
-    tone: 'positive' as const,
-  };
-}
-
-function formatSyncDisplay(lastRosterSync: string | null) {
-  if (!lastRosterSync) {
-    return 'Never';
-  }
-
-  const date = new Date(lastRosterSync);
-  if (Number.isNaN(date.getTime())) {
-    return 'Unknown';
-  }
-
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
-}
-
-function formatStatus(status: string) {
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
-function formatConstraintLabel(
-  constraint: DashboardStrategicReadiness['topMissingUnits'][number]['primaryConstraint']
-) {
-  switch (constraint) {
-    case 'near_miss':
-      return 'Upgrade target';
-    case 'ownership_shortage':
-      return 'Copy shortage';
-    case 'hard_missing':
-      return 'Hard missing';
-    default:
-      return 'Mixed pressure';
-  }
-}
-
-function Banner({
-  tone,
-  message,
-  className,
-}: {
-  tone: 'success' | 'error';
-  message: string;
-  className?: string;
-}) {
-  const toneClasses = {
-    success: 'border-emerald-900 bg-emerald-950/40 text-emerald-200',
-    error: 'border-red-900 bg-red-950/40 text-red-200',
-  };
-
-  return (
-    <div className={`rounded-2xl border px-4 py-3 text-sm ${toneClasses[tone]} ${className ?? ''}`}>
-      {message}
-    </div>
-  );
-}
-
-function DashboardPill({
-  label,
-  tone = 'neutral',
-}: {
-  label: string;
-  tone?: 'neutral' | 'positive' | 'warning' | 'danger' | 'info';
-}) {
-  const toneClasses = {
-    neutral: 'border-gray-800 bg-gray-900/80 text-gray-300',
-    positive: 'border-emerald-900 bg-emerald-950/50 text-emerald-200',
-    warning: 'border-amber-900 bg-amber-950/50 text-amber-200',
-    danger: 'border-red-900 bg-red-950/50 text-red-200',
-    info: 'border-blue-900 bg-blue-950/50 text-blue-200',
-  };
-
-  return <span className={`rounded-full border px-3 py-1 ${toneClasses[tone]}`}>{label}</span>;
-}
-
-function MetricCard({
-  title,
-  value,
-  detail,
-  tone,
-}: {
-  title: string;
-  value: string;
-  detail: string;
-  tone: 'neutral' | 'positive' | 'warning' | 'danger' | 'info';
-}) {
-  const toneClasses = {
-    neutral: 'border-gray-800 bg-gray-900/70',
-    positive: 'border-emerald-900 bg-emerald-950/30',
-    warning: 'border-amber-900 bg-amber-950/30',
-    danger: 'border-red-900 bg-red-950/30',
-    info: 'border-blue-900 bg-blue-950/30',
-  };
-
-  return (
-    <div className={`rounded-2xl border p-5 ${toneClasses[tone]}`}>
-      <p className="text-sm text-gray-400">{title}</p>
-      <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
-      <p className="mt-3 text-sm text-gray-500">{detail}</p>
+      </main>
     </div>
   );
 }
