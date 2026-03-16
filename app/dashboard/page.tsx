@@ -381,6 +381,27 @@ export default function DashboardPage() {
     );
   }
 
+  if (error === 'Unauthorized') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white">
+        {navbar}
+        <main className="mx-auto max-w-4xl px-4 py-10">
+          <section className="rounded-3xl border border-rose-900/60 bg-rose-950/30 p-8">
+            <p className="text-sm text-rose-200">Your session is no longer valid.</p>
+            <p className="mt-3 text-sm text-rose-100/80">
+              Log in again to continue.
+            </p>
+            <div className="mt-6">
+              <Link href="/login" className={actionButtonClasses(true)}>
+                Log in again
+              </Link>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   const noGuildConnected = !guild;
 
   return (
