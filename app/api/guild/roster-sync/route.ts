@@ -13,7 +13,7 @@ const BATCH_LIMIT_MAX = 20;
 
 /**
  * POST /api/guild/roster-sync?limit=5&offset=0
- *
+ *dd
  * Syncs one batch of guild member rosters from Comlink into player_roster.
  * Call repeatedly with increasing offset until done=true.
  *
