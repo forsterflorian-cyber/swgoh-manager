@@ -8,7 +8,7 @@ import {
 } from '@/lib/services/guild-settings';
 
 type RouteContext = {
-  params: Promise<{ id: string }>;
+  params: Promise<{ guildId: string }>;
 };
 
 function buildUrl(request: Request, path: string) {
@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     return NextResponse.redirect(buildUrl(request, '/login'));
   }
 
-  const { id: guildId } = await params;
+  const { guildId } = await params;
 
   const guild = await getPrimaryGuildSettingsForUser(user.id);
 
