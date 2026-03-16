@@ -25,6 +25,9 @@ type AutoTargetOption = {
   phase: number;
   category: PlanetCategory;
   label: string;
+  assignedCount: number;
+  requirementCount: number;
+  coveragePercent: number;
 };
 
 type AutoTarget =
@@ -292,8 +295,8 @@ function buildExportPlanText(params: {
     lines.push('');
   };
 
-  appendCandidate('Current next full platoon', firstCandidate);
-  appendCandidate('Second next full platoon', secondCandidate);
+  appendCandidate(mode === 'auto' ? 'Current auto step' : 'Current next full platoon', firstCandidate);
+  appendCandidate(mode === 'auto' ? 'Second auto step' : 'Second next full platoon', secondCandidate);
 
   return lines.join('\n');
 }
@@ -849,8 +852,8 @@ export default function PublicGuildSimulatorPage({
               Next Full Platoon Simulator
             </h1>
             <p className="mt-3 max-w-3xl text-sm text-slate-400">
-              Manual mode für konkrete Entscheidungen je Slot. Auto mode optimiert
-              gezielt die ausgewählte Phase/Category-Zone.
+              Manual mode für konkrete Entscheidungen je Slot. Auto mode baut automatisch
+              einen Pfad für die ausgewählte unvollständige Zone.
             </p>
           </div>
 
@@ -966,7 +969,7 @@ export default function PublicGuildSimulatorPage({
                   ))}
                 </select>
                 <div className="mt-2 text-xs text-slate-500">
-                  Im Auto mode wird genau diese Zone priorisiert, z. B. Phase 4 · MIX.
+                  Im Auto mode sind nur unvollständige Zonen auswählbar.
                 </div>
               </div>
             </div>

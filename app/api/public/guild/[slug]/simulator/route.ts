@@ -27,6 +27,9 @@ type AutoTargetOption = {
   phase: number;
   category: PlanetCategory;
   label: string;
+  assignedCount: number;
+  requirementCount: number;
+  coveragePercent: number;
 };
 
 type ExportAssignment = {
@@ -140,40 +143,40 @@ function collectBonusZoneOptions(dataset: StrategicPlannerDataset): BonusZoneOpt
   return [...byZone.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function collectAutoTargetOptions(dataset: StrategicPlannerDataset): AutoTargetOption[] {
-  const seen = new Set<string>();
-  const result: AutoTargetOption[] = [];
+function collectAutoTargetOptions(
+  dataset: StrategicPlannerDataset,
+  matching: {
+    coverage: Array<{
+      phase: number;
+      category: PlanetCategory;
+      assignedCount: number;
+      requirementCount: number;
+      coveragePercent: number;
+      isBonus?: boolean;
+    }>;
+  },
+): AutoTargetOption[] {
+  return matching.coverage
+    .filter((entry) => !entry.isBonus && entry.requirementCount > 0 && entry.assignedCount < entry.requirementCount)
+    .map((entry) => ({
+      phase: entry.phase,
+      category: entry.category,
+      label: `Phase ${entry.phase} · ${entry.category} · ${entry.coveragePercent}% · ${entry.assignedCount}/${entry.requirementCount}`,
+      assignedCount: entry.assignedCount,
+      requirementCount: entry.requirementCount,
+      coveragePercent: entry.coveragePercent,
+    }))
+    .sort((a, b) => {
+      if (a.phase !== b.phase) {
+        return a.phase - b.phase;
+      }
 
-  for (const slot of dataset.slots) {
-    if (!slot.planetCategory || slot.planetCategory === 'SPECIAL') {
-      continue;
-    }
+      if (a.coveragePercent !== b.coveragePercent) {
+        return a.coveragePercent - b.coveragePercent;
+      }
 
-    const phase = Number(slot.phase);
-    const category = slot.planetCategory;
-    const key = `${phase}::${category}`;
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push({
-      phase,
-      category,
-      label: `Phase ${phase} · ${category}`,
+      return a.category.localeCompare(b.category);
     });
-  }
-
-  result.sort((a, b) => {
-    if (a.phase !== b.phase) {
-      return a.phase - b.phase;
-    }
-
-    return a.category.localeCompare(b.category);
-  });
-
-  return result;
 }
 
 function buildPlatoonLabels(dataset: StrategicPlannerDataset): Record<string, string> {
@@ -307,7 +310,6 @@ export async function POST(request: Request, { params }: RouteContext) {
     }
 
     const bonusZoneOptions = collectBonusZoneOptions(dataset);
-    const autoTargetOptions = collectAutoTargetOptions(dataset);
     const effectiveDataset = filterDatasetBySelectedBonusZones(dataset, includedBonusZoneKeys);
 
     const simulationStartedAt = Date.now();
@@ -317,6 +319,20 @@ export async function POST(request: Request, { params }: RouteContext) {
       120000,
     );
     timings.simulation_ms = Date.now() - simulationStartedAt;
+
+    const autoTargetOptions = collectAutoTargetOptions(
+      simulation.simulatedDataset,
+      simulation.simulated as unknown as {
+        coverage: Array<{
+          phase: number;
+          category: PlanetCategory;
+          assignedCount: number;
+          requirementCount: number;
+          coveragePercent: number;
+          isBonus?: boolean;
+        }>;
+      },
+    );
 
     const advisoryStartedAt = Date.now();
     const advisory = await withStageTimeout(
