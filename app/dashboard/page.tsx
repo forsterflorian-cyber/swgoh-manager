@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+
 import { Navbar } from '@/components/layout/Navbar';
 
 type ApiEnvelope<T> =
@@ -162,7 +162,7 @@ function actionButtonClasses(primary = false) {
 }
 
 export default function DashboardPage() {
-  const searchParams = useSearchParams();
+  
   const [guild, setGuild] = useState<DashboardGuild | null>(null);
   const [activeTb, setActiveTb] = useState<DashboardTb | null>(null);
   const [lastRosterSync, setLastRosterSync] = useState<string | null>(null);
@@ -203,26 +203,38 @@ export default function DashboardPage() {
     void loadDashboard();
   }, []);
 
-  useEffect(() => {
-    const deleted = searchParams.get('deleted');
-    const queryError = searchParams.get('error');
+useEffect(() => {
+  if (typeof window === 'undefined') {
+    return;
+  }
 
-    if (deleted === '1') {
-      setNotice({
-        tone: 'success',
-        message: 'Guild configuration was deleted. Connect a new guild to continue.',
-      });
-      return;
-    }
+  const params = new URLSearchParams(window.location.search);
+  const deleted = params.get('deleted');
+  const queryError = params.get('error');
 
-    if (queryError === 'delete_failed') {
-      setNotice({
-        tone: 'error',
-        message: 'Guild deletion failed.',
-      });
-      return;
-    }
-  }, [searchParams]);
+  if (deleted === '1') {
+    setNotice({
+      tone: 'success',
+      message: 'Guild configuration was deleted. Connect a new guild to continue.',
+    });
+    return;
+  }
+
+  if (queryError === 'delete_failed') {
+    setNotice({
+      tone: 'error',
+      message: 'Guild deletion failed.',
+    });
+    return;
+  }
+
+  if (queryError === 'forbidden') {
+    setNotice({
+      tone: 'error',
+      message: 'You are not allowed to delete this guild.',
+    });
+  }
+}, []);
 
   const rosterState = useMemo(
     () => getRosterState(guild?.memberCount ?? 0, guild?.rosteredMembers ?? 0, lastRosterSync),
