@@ -51,6 +51,10 @@ export type PlatoonSimulatorDelta = {
   simulatedFullPlatoons: number;
   deltaFullPlatoons: number;
 
+  baselineFullZones: number;
+  simulatedFullZones: number;
+  deltaFullZones: number;
+
   changedAssignmentCount: number;
   displacedAssignmentCount: number;
 

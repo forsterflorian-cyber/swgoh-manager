@@ -10,6 +10,7 @@ import type {
 type Lookups = {
   memberNames: Record<string, string>;
   unitNames: Record<string, string>;
+  platoonLabels: Record<string, string>;
 };
 
 type SimulatorApiResponse = {
@@ -72,24 +73,24 @@ function dedupeActions(actions: PlatoonSimulatorAction[]): PlatoonSimulatorActio
   return result;
 }
 
-function getPlatoonLabel(targetPlatoonId: string | null | undefined, platoonNames?: Record<string, string>): string {
+function getPlatoonLabel(
+  targetPlatoonId: string | null | undefined,
+  platoonLabels?: Record<string, string>,
+): string {
   if (!targetPlatoonId) return '—';
 
-  if (platoonNames?.[targetPlatoonId]) {
-    return platoonNames[targetPlatoonId];
+  if (platoonLabels?.[targetPlatoonId]) {
+    return platoonLabels[targetPlatoonId];
   }
 
   const parts = targetPlatoonId.split('::');
   if (parts.length < 3) return targetPlatoonId;
 
-  const [phase, zoneKey, platoonKey] = parts;
-
+  const [phase, , platoonKey] = parts;
   const platoonMatch = platoonKey.match(/platoon-(\d+)$/i);
   const platoonNumber = platoonMatch ? platoonMatch[1] : platoonKey;
 
-  const zoneLabel = zoneKey.replace(/^rote-p\d+-/i, '').toUpperCase();
-
-  return `Phase ${phase} · ${zoneLabel} · Platoon ${platoonNumber}`;
+  return `Phase ${phase} · Platoon ${platoonNumber}`;
 }
 
 function formatUpgradeSuffix(action: Extract<PlatoonSimulatorAction, { type: 'UPGRADE_OWNER_UNIT' }>): string {
@@ -172,7 +173,7 @@ function CandidateCard({
         <div>
           <div className="text-sm text-slate-400">{title}</div>
           <h2 className="mt-1 text-2xl font-semibold text-white">
-            {getPlatoonLabel(candidate.targetPlatoonId)}
+            {getPlatoonLabel(candidate.targetPlatoonId, lookups?.platoonLabels)}
           </h2>
         </div>
 
@@ -446,7 +447,7 @@ export default function PublicGuildSimulatorPage({
           </div>
         ) : null}
 
-        <div className="mb-8 grid gap-4 md:grid-cols-4">
+        <div className="mb-8 grid gap-4 md:grid-cols-5">
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
             <div className="text-sm text-slate-400">Covered slots</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
@@ -462,7 +463,7 @@ export default function PublicGuildSimulatorPage({
           </div>
 
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-            <div className="text-sm text-slate-400">Full Zones</div>
+            <div className="text-sm text-slate-400">Full platoons</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
               {summary ? summary.simulatedFullPlatoons : '—'}
             </div>
@@ -474,7 +475,19 @@ export default function PublicGuildSimulatorPage({
                   : 'No data'}
             </div>
           </div>
-
+        <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+          <div className="text-sm text-slate-400">Full zones</div>
+          <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
+            {summary ? summary.simulatedFullZones : '—'}
+          </div>
+          <div className="mt-2 text-sm text-slate-500">
+            {summary
+              ? `${summary.baselineFullZones} → ${summary.simulatedFullZones}`
+              : loading
+                ? 'Loading…'
+                : 'No data'}
+          </div>
+        </div>
           <div className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
             <div className="text-sm text-slate-400">Changed assignments</div>
             <div className="mt-3 text-5xl font-semibold tracking-tight text-white">
@@ -559,9 +572,13 @@ export default function PublicGuildSimulatorPage({
                   <span>{data?.simulation.delta.deltaCoveredSlots ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span>Delta full zones</span>
+                  <span>Delta full Platoons</span>
                   <span>{data?.simulation.delta.deltaFullPlatoons ?? '—'}</span>
                 </div>
+                <div className="flex items-center justify-between gap-3">
+  <span>Delta full zones</span>
+  <span>{data?.simulation.delta.deltaFullZones ?? '—'}</span>
+</div>
                 <div className="flex items-center justify-between gap-3">
                   <span>Displaced assignments</span>
                   <span>{data?.simulation.delta.displacedAssignmentCount ?? '—'}</span>

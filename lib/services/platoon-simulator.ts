@@ -172,26 +172,149 @@ function getAssignmentKeys(result: MatchingLike): Set<string> {
 
   return keys;
 }
+function buildPlatoonIdFromAssignment(assignment: AnyRecord): string | null {
+  const phase =
+    getNumber(assignment, 'phase')?.toString() ??
+    getString(assignment, 'phase');
+  const zoneKey = getString(assignment, 'zoneKey');
+  const platoonKey = getString(assignment, 'platoonKey');
+
+  if (!phase || !zoneKey || !platoonKey) {
+    return null;
+  }
+
+  return `${phase}::${zoneKey}::${platoonKey}`;
+}
+
+function countFullZones(result: MatchingLike): number {
+  const resultRecord = result as unknown as AnyRecord;
+
+  if (!Array.isArray(resultRecord.coverage)) {
+    return 0;
+  }
+
+  return (resultRecord.coverage as AnyRecord[]).filter((entry) => {
+    const assignedCount = getNumber(entry, 'assignedCount') ?? 0;
+    const requirementCount = getNumber(entry, 'requirementCount') ?? 0;
+    return requirementCount > 0 && assignedCount >= requirementCount;
+  }).length;
+}
+
+function getFullZoneIds(result: MatchingLike): string[] {
+  const resultRecord = result as unknown as AnyRecord;
+
+  if (!Array.isArray(resultRecord.coverage)) {
+    return [];
+  }
+
+  return (resultRecord.coverage as AnyRecord[])
+    .filter((entry) => {
+      const assignedCount = getNumber(entry, 'assignedCount') ?? 0;
+      const requirementCount = getNumber(entry, 'requirementCount') ?? 0;
+      return requirementCount > 0 && assignedCount >= requirementCount;
+    })
+    .map((entry) => {
+      const phase =
+        getNumber(entry, 'phase')?.toString() ??
+        getString(entry, 'phase');
+      const category = getString(entry, 'category');
+
+      if (!phase || !category) {
+        return '';
+      }
+
+      return `${phase}::${category}`;
+    })
+    .filter(Boolean);
+}
+
+function countFullPlatoonsFromAssignments(
+  dataset: StrategicPlannerDataset,
+  result: MatchingLike,
+): number {
+  const resultRecord = result as unknown as AnyRecord;
+
+  const totalByPlatoon = new Map<string, number>();
+  for (const slot of dataset.slots as DatasetSlot[]) {
+    const platoonId = getPlatoonIdFromSlot(slot);
+    totalByPlatoon.set(platoonId, (totalByPlatoon.get(platoonId) ?? 0) + 1);
+  }
+
+  const assignedByPlatoon = new Map<string, number>();
+  if (Array.isArray(resultRecord.assignments)) {
+    for (const assignment of resultRecord.assignments as AnyRecord[]) {
+      const platoonId = buildPlatoonIdFromAssignment(assignment);
+      if (!platoonId) continue;
+      assignedByPlatoon.set(platoonId, (assignedByPlatoon.get(platoonId) ?? 0) + 1);
+    }
+  }
+
+  let fullCount = 0;
+  for (const [platoonId, total] of totalByPlatoon.entries()) {
+    const assigned = assignedByPlatoon.get(platoonId) ?? 0;
+    if (total > 0 && assigned >= total) {
+      fullCount += 1;
+    }
+  }
+
+  return fullCount;
+}
+
+function getFullPlatoonIdsFromAssignments(
+  dataset: StrategicPlannerDataset,
+  result: MatchingLike,
+): string[] {
+  const resultRecord = result as unknown as AnyRecord;
+
+  const totalByPlatoon = new Map<string, number>();
+  for (const slot of dataset.slots as DatasetSlot[]) {
+    const platoonId = getPlatoonIdFromSlot(slot);
+    totalByPlatoon.set(platoonId, (totalByPlatoon.get(platoonId) ?? 0) + 1);
+  }
+
+  const assignedByPlatoon = new Map<string, number>();
+  if (Array.isArray(resultRecord.assignments)) {
+    for (const assignment of resultRecord.assignments as AnyRecord[]) {
+      const platoonId = buildPlatoonIdFromAssignment(assignment);
+      if (!platoonId) continue;
+      assignedByPlatoon.set(platoonId, (assignedByPlatoon.get(platoonId) ?? 0) + 1);
+    }
+  }
+
+  const fullIds: string[] = [];
+  for (const [platoonId, total] of totalByPlatoon.entries()) {
+    const assigned = assignedByPlatoon.get(platoonId) ?? 0;
+    if (total > 0 && assigned >= total) {
+      fullIds.push(platoonId);
+    }
+  }
+
+  return fullIds.sort();
+}
 
 function buildDelta(
+  dataset: StrategicPlannerDataset,
   baseline: MatchingLike,
   simulated: MatchingLike,
 ): PlatoonSimulatorDelta {
   const baselineCoveredSlots = countCoveredSlots(baseline);
   const simulatedCoveredSlots = countCoveredSlots(simulated);
 
-  const baselineFullPlatoons = countFullPlatoons(baseline);
-  const simulatedFullPlatoons = countFullPlatoons(simulated);
+  const baselineFullPlatoons = countFullPlatoonsFromAssignments(dataset, baseline);
+  const simulatedFullPlatoons = countFullPlatoonsFromAssignments(dataset, simulated);
 
-  const baselineFullIds = new Set(getFullPlatoonIds(baseline));
-  const simulatedFullIds = new Set(getFullPlatoonIds(simulated));
+  const baselineFullZones = countFullZones(baseline);
+  const simulatedFullZones = countFullZones(simulated);
 
-  const becameFullPlatoonIds = [...simulatedFullIds]
-    .filter((id) => !baselineFullIds.has(id))
+  const baselineFullPlatoonIds = new Set(getFullPlatoonIdsFromAssignments(dataset, baseline));
+  const simulatedFullPlatoonIds = new Set(getFullPlatoonIdsFromAssignments(dataset, simulated));
+
+  const becameFullPlatoonIds = [...simulatedFullPlatoonIds]
+    .filter((id) => !baselineFullPlatoonIds.has(id))
     .sort();
 
-  const noLongerFullPlatoonIds = [...baselineFullIds]
-    .filter((id) => !simulatedFullIds.has(id))
+  const noLongerFullPlatoonIds = [...baselineFullPlatoonIds]
+    .filter((id) => !simulatedFullPlatoonIds.has(id))
     .sort();
 
   const baselineAssignments = getAssignmentKeys(baseline);
@@ -212,9 +335,15 @@ function buildDelta(
     baselineCoveredSlots,
     simulatedCoveredSlots,
     deltaCoveredSlots: simulatedCoveredSlots - baselineCoveredSlots,
+
     baselineFullPlatoons,
     simulatedFullPlatoons,
     deltaFullPlatoons: simulatedFullPlatoons - baselineFullPlatoons,
+
+    baselineFullZones,
+    simulatedFullZones,
+    deltaFullZones: simulatedFullZones - baselineFullZones,
+
     changedAssignmentCount,
     displacedAssignmentCount,
     becameFullPlatoonIds,
@@ -431,7 +560,7 @@ export function simulatePlatoonScenario(
 
   const simulatedDataset = applySimulationActions(dataset, actions);
   const simulated = computePlatoonMatching(simulatedDataset);
-  const delta = buildDelta(baseline, simulated);
+  const delta = buildDelta(dataset, baseline, simulated);
 
   const coverageByPlatoon = getCoveredSlotsByPlatoon(simulated);
   const targetPlatoonId = getTargetPlatoonIdFromActions(simulatedDataset, actions);

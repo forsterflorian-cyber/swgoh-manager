@@ -103,7 +103,15 @@ export async function POST(request: Request, { params }: RouteContext) {
         unitNames[r.unitBaseId] = r.unitName;
       }
     }
+    const platoonLabels: Record<string, string> = {};
 
+    for (const slot of dataset.slots) {
+      const platoonId = `${String(slot.phase)}::${slot.zoneKey}::${slot.platoonKey}`;
+
+      if (!platoonLabels[platoonId]) {
+        platoonLabels[platoonId] = `Phase ${slot.phase} · ${slot.zoneName} · Platoon ${slot.platoonNumber}`;
+      }
+    }
     return NextResponse.json(
       {
         simulation: {
@@ -113,6 +121,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         lookups: {
           memberNames,
           unitNames,
+          platoonLabels,
         },
         debug: {
           actionsCount: actions.length,
