@@ -115,6 +115,31 @@ function formatUpgradeSuffix(action: Extract<PlatoonSimulatorAction, { type: 'UP
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
+function formatAlternativeCost(
+  missingRelicTiers: number,
+  missingRarity: number,
+): string {
+  const parts: string[] = [];
+
+  if (missingRelicTiers > 0) {
+    parts.push(
+      missingRelicTiers === 1
+        ? '+1 relic'
+        : `+${missingRelicTiers} relic`,
+    );
+  }
+
+  if (missingRarity > 0) {
+    parts.push(
+      missingRarity === 1
+        ? '+1 star'
+        : `+${missingRarity} stars`,
+    );
+  }
+
+  return parts.length > 0 ? parts.join(', ') : 'ready';
+}
+
 function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): string {
   const member = lookups?.memberNames[action.memberId] ?? action.playerName ?? action.memberId;
   const unit = lookups?.unitNames[action.unitBaseId] ?? action.unitName ?? action.unitBaseId;
@@ -124,13 +149,18 @@ function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): stri
       return `${member} → ${unit}`;
 
     case 'UPGRADE_OWNER_UNIT':
-      return `${member} → ${unit}${formatUpgradeSuffix(action)}`;
+      return `${member} → ${unit} (${formatAlternativeCost(
+        action.missingRelicTiers,
+        action.missingRarity,
+      )})`;
 
     case 'REMOVE_SOURCE_BLOCK':
       return `${member} → ${unit} (${action.blockType}${action.planetCategory ? ` · ${action.planetCategory}` : ''})`;
 
-    default:
-      return `${member} → ${unit}`;
+    default: {
+      const exhaustiveCheck: never = action;
+      return String(exhaustiveCheck);
+    }
   }
 }
 
@@ -139,6 +169,7 @@ function CandidateCard({
   candidate,
   onApplyOne,
   onApplyAll,
+  onReplaceOne,
   canApply,
   lookups,
 }: {
@@ -146,6 +177,10 @@ function CandidateCard({
   candidate: SequentialFullPlatoonPlan['first'] | SequentialFullPlatoonPlan['second'] | null;
   onApplyOne: (action: PlatoonSimulatorAction) => void;
   onApplyAll: (actions: PlatoonSimulatorAction[]) => void;
+  onReplaceOne: (
+    currentAction: PlatoonSimulatorAction,
+    replacement: PlatoonSimulatorAction,
+  ) => void;
   canApply: boolean;
   lookups?: Lookups;
 }) {
@@ -252,28 +287,89 @@ function CandidateCard({
         ) : (
           <div className="space-y-3">
             {candidate.actions.map((action) => (
-              <div
-                key={getActionKey(action)}
-                className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-black/20 p-4 lg:flex-row lg:items-center lg:justify-between"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-100">
-                    {describeAction(action, lookups)}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {getActionTypeLabel(action)}
-                  </div>
-                </div>
+<div
+  key={getActionKey(action)}
+  className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-black/20 p-4"
+>
+  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="min-w-0">
+      <div className="truncate text-sm font-medium text-slate-100">
+        {describeAction(action, lookups)}
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        {getActionTypeLabel(action)}
+      </div>
+    </div>
 
-                <button
-                  type="button"
-                  onClick={() => onApplyOne(action)}
-                  disabled={!canApply}
-                  className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Apply
-                </button>
-              </div>
+    <button
+      type="button"
+      onClick={() => onApplyOne(action)}
+      disabled={!canApply}
+      className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      Apply
+    </button>
+  </div>
+
+  {'alternatives' in action && action.alternatives && action.alternatives.length > 0 ? (
+    <div className="mt-2 space-y-2">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Alternatives
+      </div>
+
+      {action.alternatives.map((alt, index) => {
+        const replacement: PlatoonSimulatorAction =
+          action.type === 'USE_UNUSED_OWNER'
+            ? {
+                ...action,
+                id: `${action.id}::alt::${alt.memberId}::${index}`,
+                memberId: alt.memberId,
+                playerName: alt.playerName,
+                unitBaseId: alt.unitBaseId,
+                unitName: alt.unitName,
+                missingRelicTiers: 0,
+                missingRarity: 0,
+              }
+            : action.type === 'UPGRADE_OWNER_UNIT'
+              ? {
+                  ...action,
+                  id: `${action.id}::alt::${alt.memberId}::${index}`,
+                  memberId: alt.memberId,
+                  playerName: alt.playerName,
+                  unitBaseId: alt.unitBaseId,
+                  unitName: alt.unitName,
+                  missingRelicTiers: alt.missingRelicTiers,
+                  missingRarity: alt.missingRarity,
+                  actionCost: alt.actionCost,
+                }
+              : action;
+
+        return (
+          <div
+            key={`${action.id}::alt::${alt.memberId}::${index}`}
+            className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 lg:flex-row lg:items-center lg:justify-between"
+          >
+            <div className="text-xs text-slate-300">
+              {alt.playerName} → {alt.unitName} ({formatAlternativeCost(
+                alt.missingRelicTiers,
+                alt.missingRarity,
+              )})
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onReplaceOne(action, replacement)}
+              disabled={!canApply}
+              className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Use this instead
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  ) : null}
+</div>
             ))}
           </div>
         )}
@@ -411,7 +507,19 @@ export default function PublicGuildSimulatorPage({
     const keyToRemove = getActionKey(action);
     setActions((prev) => prev.filter((item) => getActionKey(item) !== keyToRemove));
   }
+function replaceAction(
+  currentAction: PlatoonSimulatorAction,
+  replacement: PlatoonSimulatorAction,
+) {
+  const keyToRemove = getActionKey(currentAction);
 
+  setActions((prev) =>
+    dedupeActions([
+      ...prev.filter((item) => getActionKey(item) !== keyToRemove),
+      replacement,
+    ]),
+  );
+}
   function resetScenario() {
     setActions([]);
   }
@@ -588,23 +696,25 @@ export default function PublicGuildSimulatorPage({
           </aside>
 
           <section className="space-y-6">
-            <CandidateCard
-              title="Current next full platoon"
-              candidate={firstCandidate}
-              onApplyOne={applyOne}
-              onApplyAll={applyAll}
-              canApply={!loading}
-              lookups={lookups}
-            />
+<CandidateCard
+  title="Current next full platoon"
+  candidate={firstCandidate}
+  onApplyOne={applyOne}
+  onApplyAll={applyAll}
+  onReplaceOne={replaceAction}
+  canApply={!loading}
+  lookups={lookups}
+/>
 
-            <CandidateCard
-              title="Second next full platoon"
-              candidate={secondCandidate}
-              onApplyOne={applyOne}
-              onApplyAll={applyAll}
-              canApply={!loading}
-              lookups={lookups}
-            />
+<CandidateCard
+  title="Second next full platoon"
+  candidate={secondCandidate}
+  onApplyOne={applyOne}
+  onApplyAll={applyAll}
+  onReplaceOne={replaceAction}
+  canApply={!loading}
+  lookups={lookups}
+/>
           </section>
         </div>
       </div>

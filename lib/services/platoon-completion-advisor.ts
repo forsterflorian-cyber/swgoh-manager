@@ -27,7 +27,14 @@ type SlotLike = StrategicPlannerDataset['slots'][number] & {
   requiredRarity: number | null;
   requiredRelicTier: number | null;
 };
+type SlotCandidateAction =
+  | Extract<PlatoonSimulatorAction, { type: 'USE_UNUSED_OWNER' }>
+  | Extract<PlatoonSimulatorAction, { type: 'UPGRADE_OWNER_UNIT' }>;
 
+type SlotCandidateOption = {
+  action: SlotCandidateAction;
+  actionCost: number;
+};
 type RankedPlatoonCandidate = {
   targetPlatoonId: string;
   totalSlots: number;
@@ -263,10 +270,14 @@ function buildRealClosurePlanForTargetPlatoon(
     const gap = entry.gap!;
     const requirementId = entry.requirementId!;
 
+    const options = buildSlotCandidateOptions(slot, gap);
+
     let chosen: PlatoonSimulatorAction | null = null;
 
-    for (const source of gap.possibleSources) {
-      const ownerUnitKey = makeOwnerUnitKey(source.memberId, slot.unitBaseId);
+    for (const option of options) {
+      const candidate = option.action;
+      const ownerUnitKey = makeOwnerUnitKey(candidate.memberId, slot.unitBaseId);
+
       if (usedOwnerUnits.has(ownerUnitKey)) {
         continue;
       }
@@ -274,7 +285,7 @@ function buildRealClosurePlanForTargetPlatoon(
       const memberCategoryKey = makeMemberCategoryKey(
         slot.phase,
         slot.planetCategory,
-        source.memberId,
+        candidate.memberId,
       );
 
       const currentLoad = workingLoad.get(memberCategoryKey) ?? 0;
@@ -282,43 +293,8 @@ function buildRealClosurePlanForTargetPlatoon(
         continue;
       }
 
-      if (gap.recommendedAction === 'use_unused' && source.kind === 'eligible') {
-        chosen = {
-          id: buildActionId([
-            'use_unused_owner',
-            requirementId,
-            source.memberId,
-            slot.unitBaseId,
-          ]),
-          type: 'USE_UNUSED_OWNER',
-          requirementId,
-          memberId: source.memberId,
-          playerName: source.playerName,
-          unitBaseId: slot.unitBaseId,
-          unitName: slot.unitName ?? gap.unitName ?? slot.unitBaseId,
-        };
-        break;
-      }
-
-      if (source.kind === 'near_miss') {
-        chosen = {
-          id: buildActionId([
-            'upgrade_owner_unit',
-            requirementId,
-            source.memberId,
-            slot.unitBaseId,
-          ]),
-          type: 'UPGRADE_OWNER_UNIT',
-          requirementId,
-          memberId: source.memberId,
-          playerName: source.playerName,
-          unitBaseId: slot.unitBaseId,
-          unitName: slot.unitName ?? gap.unitName ?? slot.unitBaseId,
-          missingRelicTiers: source.missingRelicTiers,
-          missingRarity: source.missingRarity,
-        };
-        break;
-      }
+      chosen = attachAlternativesToChosenAction(candidate, options);
+      break;
     }
 
     if (!chosen) {
@@ -395,6 +371,123 @@ function rankPlatoonsForRealClosure(
     });
 
   return ranked;
+}
+function sourceActionCost(source: {
+  kind: 'eligible' | 'near_miss';
+  missingRelicTiers: number;
+  missingRarity: number;
+}): number {
+  if (source.kind === 'eligible') {
+    return 0;
+  }
+
+  return source.missingRelicTiers * 100 + source.missingRarity * 10;
+}
+
+function buildSlotCandidateOptions(
+  slot: SlotLike,
+  gap: PlatoonMatchingGap,
+): SlotCandidateOption[] {
+   const options: SlotCandidateOption[] = [];
+
+  for (const source of gap.possibleSources) {
+    const cost = sourceActionCost(source);
+
+    if (source.kind === 'eligible') {
+options.push({
+  action: {
+    id: buildActionId([
+      'use_unused_owner',
+      gap.requirementId,
+      source.memberId,
+      slot.unitBaseId,
+    ]),
+    type: 'USE_UNUSED_OWNER',
+    requirementId: gap.requirementId,
+    memberId: source.memberId,
+    playerName: source.playerName,
+    unitBaseId: slot.unitBaseId,
+    unitName: slot.unitName ?? gap.unitName ?? slot.unitBaseId,
+    missingRelicTiers: 0,
+    missingRarity: 0,
+    alternatives: [],
+  },
+  actionCost: cost,
+});
+      continue;
+    }
+
+    options.push({
+      action: {
+        id: buildActionId([
+          'upgrade_owner_unit',
+          gap.requirementId,
+          source.memberId,
+          slot.unitBaseId,
+        ]),
+        type: 'UPGRADE_OWNER_UNIT',
+        requirementId: gap.requirementId,
+        memberId: source.memberId,
+        playerName: source.playerName,
+        unitBaseId: slot.unitBaseId,
+        unitName: slot.unitName ?? gap.unitName ?? slot.unitBaseId,
+        missingRelicTiers: source.missingRelicTiers,
+        missingRarity: source.missingRarity,
+        actionCost: cost,
+        alternatives: [],
+      },
+      actionCost: cost,
+    });
+  }
+
+  options.sort((a, b) => {
+    if (a.actionCost !== b.actionCost) {
+      return a.actionCost - b.actionCost;
+    }
+
+    return a.action.playerName.localeCompare(b.action.playerName);
+  });
+
+  return options;
+}
+
+function attachAlternativesToChosenAction(
+  chosen: SlotCandidateAction,
+  options: SlotCandidateOption[],
+): SlotCandidateAction {
+  const alternatives = options
+    .filter((option) => option.action.memberId !== chosen.memberId)
+    .slice(0, 3)
+    .map((option) => {
+      if (option.action.type === 'USE_UNUSED_OWNER') {
+        return {
+          memberId: option.action.memberId,
+          playerName: option.action.playerName,
+          unitBaseId: option.action.unitBaseId,
+          unitName: option.action.unitName,
+          missingRelicTiers: 0,
+          missingRarity: 0,
+          actionCost: option.actionCost,
+          displacedAssignmentCount: undefined,
+        };
+      }
+
+      return {
+        memberId: option.action.memberId,
+        playerName: option.action.playerName,
+        unitBaseId: option.action.unitBaseId,
+        unitName: option.action.unitName,
+        missingRelicTiers: option.action.missingRelicTiers,
+        missingRarity: option.action.missingRarity,
+        actionCost: option.actionCost,
+        displacedAssignmentCount: undefined,
+      };
+    });
+
+  return {
+    ...chosen,
+    alternatives,
+  };
 }
 
 function compareCandidateScore(

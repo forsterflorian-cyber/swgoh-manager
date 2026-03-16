@@ -1,0 +1,35 @@
+"filename", "language", "TypeScript JSX", "TypeScript", "PostCSS", "comment", "blank", "total"
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\admin\tb-reference\import\route.ts", "TypeScript", 0, 90, 0, 0, 21, 111
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\assignments\route.ts", "TypeScript", 0, 8, 0, 0, 3, 11
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\auth\[...nextauth]\route.ts", "TypeScript", 0, 5, 0, 0, 5, 10
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\dashboard\route.ts", "TypeScript", 0, 133, 0, 0, 9, 142
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\guild\[guildId]\members\route.ts", "TypeScript", 0, 35, 0, 0, 7, 42
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\guild\[guildId]\sync\route.ts", "TypeScript", 0, 50, 0, 0, 10, 60
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\guild\create\route.ts", "TypeScript", 0, 69, 0, 0, 16, 85
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\guild\roster-sync\route.ts", "TypeScript", 0, 94, 0, 19, 20, 133
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\guild\sync\route.ts", "TypeScript", 0, 44, 0, 0, 12, 56
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\guild\update\route.ts", "TypeScript", 0, 61, 0, 0, 15, 76
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\init-db\route.ts", "TypeScript", 0, 8, 0, 0, 3, 11
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\members\route.ts", "TypeScript", 0, 8, 0, 0, 3, 11
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\planning\platoons\route.ts", "TypeScript", 0, 29, 0, 0, 8, 37
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\planning\platoons\targets\route.ts", "TypeScript", 0, 172, 0, 0, 41, 213
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\public\guild\[slug]\route.ts", "TypeScript", 0, 152, 0, 0, 16, 168
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\public\guild\[slug]\simulator\route.ts", "TypeScript", 0, 143, 0, 0, 22, 165
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\sync-guild\route.ts", "TypeScript", 0, 8, 0, 0, 3, 11
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\tb\[instanceId]\assign\route.ts", "TypeScript", 0, 85, 0, 0, 22, 107
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\tb\[instanceId]\auto-assign\route.ts", "TypeScript", 0, 50, 0, 0, 12, 62
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\api\tb\[instanceId]\gap\route.ts", "TypeScript", 0, 39, 0, 0, 9, 48
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\dashboard\page.tsx", "TypeScript JSX", 732, 0, 0, 0, 72, 804
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\gilde\[slug]\page.tsx", "TypeScript JSX", 430, 0, 0, 0, 40, 470
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\globals.css", "PostCSS", 0, 0, 22, 0, 5, 27
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\layout.tsx", "TypeScript JSX", 15, 0, 0, 0, 2, 17
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\login\page.tsx", "TypeScript JSX", 72, 0, 0, 0, 11, 83
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\page.tsx", "TypeScript JSX", 59, 0, 0, 0, 4, 63
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\planning\platoons\page.tsx", "TypeScript JSX", 2805, 0, 0, 41, 232, 3078
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\public\guild\[slug]\matching\PublicGuildMatchingBoard.tsx", "TypeScript JSX", 473, 0, 0, 0, 59, 532
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\public\guild\[slug]\matching\page.tsx", "TypeScript JSX", 24, 0, 0, 0, 7, 31
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\public\guild\[slug]\simulator\page.tsx", "TypeScript JSX", 532, 0, 0, 0, 81, 613
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\public\guild\[slug]\targets\page.tsx", "TypeScript JSX", 227, 0, 0, 0, 34, 261
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\settings\guild\page.tsx", "TypeScript JSX", 167, 0, 0, 0, 12, 179
+"e:\Verwaltung\07_IT & Identität\IT Projekte\swgoh-manager\app\tb\[instanceId]\phase\[phase]\page.tsx", "TypeScript JSX", 374, 0, 0, 0, 37, 411
+"Total", "-", 5910, 1283, 22, 60, 853, 8128

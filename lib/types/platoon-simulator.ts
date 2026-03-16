@@ -1,5 +1,17 @@
 import type { PlanetCategory, PlatoonMatchingResult, StrategicPlannerDataset } from '@/lib/types/platoon-readiness';
 
+export type PlatoonSimulatorActionAlternative = {
+  memberId: string;
+  playerName: string;
+  unitBaseId: string;
+  unitName: string;
+  missingRelicTiers: number;
+  missingRarity: number;
+  actionCost: number;
+  displacedAssignmentCount?: number;
+};
+
+
 export type PlatoonSimulatorAction =
   | {
       id: string;
@@ -9,6 +21,9 @@ export type PlatoonSimulatorAction =
       playerName: string;
       unitBaseId: string;
       unitName: string;
+      missingRelicTiers: 0;
+      missingRarity: 0;
+      alternatives?: PlatoonSimulatorActionAlternative[];
     }
   | {
       id: string;
@@ -20,6 +35,8 @@ export type PlatoonSimulatorAction =
       unitName: string;
       missingRelicTiers: number;
       missingRarity: number;
+      actionCost?: number;
+      alternatives?: PlatoonSimulatorActionAlternative[];
     }
   | {
       id: string;
