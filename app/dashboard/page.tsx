@@ -162,7 +162,6 @@ function actionButtonClasses(primary = false) {
 }
 
 export default function DashboardPage() {
-  
   const [guild, setGuild] = useState<DashboardGuild | null>(null);
   const [activeTb, setActiveTb] = useState<DashboardTb | null>(null);
   const [lastRosterSync, setLastRosterSync] = useState<string | null>(null);
@@ -203,38 +202,62 @@ export default function DashboardPage() {
     void loadDashboard();
   }, []);
 
-useEffect(() => {
-  if (typeof window === 'undefined') {
-    return;
-  }
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
 
-  const params = new URLSearchParams(window.location.search);
-  const deleted = params.get('deleted');
-  const queryError = params.get('error');
+    const params = new URLSearchParams(window.location.search);
+    const deleted = params.get('deleted');
+    const queryError = params.get('error');
 
-  if (deleted === '1') {
-    setNotice({
-      tone: 'success',
-      message: 'Guild configuration was deleted. Connect a new guild to continue.',
-    });
-    return;
-  }
+    if (deleted === '1') {
+      setNotice({
+        tone: 'success',
+        message: 'Guild configuration was deleted. Connect a new guild to continue.',
+      });
+      return;
+    }
 
-  if (queryError === 'delete_failed') {
-    setNotice({
-      tone: 'error',
-      message: 'Guild deletion failed.',
-    });
-    return;
-  }
+    if (queryError === 'delete_failed') {
+      setNotice({
+        tone: 'error',
+        message: 'Guild deletion failed.',
+      });
+      return;
+    }
 
-  if (queryError === 'forbidden') {
-    setNotice({
-      tone: 'error',
-      message: 'You are not allowed to delete this guild.',
-    });
-  }
-}, []);
+    if (queryError === 'forbidden') {
+      setNotice({
+        tone: 'error',
+        message: 'You are not allowed to delete this guild.',
+      });
+      return;
+    }
+
+    if (queryError === 'account_deleted') {
+      setNotice({
+        tone: 'success',
+        message: 'Account deleted successfully.',
+      });
+      return;
+    }
+
+    if (queryError === 'account_delete_failed') {
+      setNotice({
+        tone: 'error',
+        message: 'Account deletion failed.',
+      });
+      return;
+    }
+
+    if (queryError === 'account_delete_blocked') {
+      setNotice({
+        tone: 'error',
+        message: 'Delete guild first before deleting your account.',
+      });
+    }
+  }, []);
 
   const rosterState = useMemo(
     () => getRosterState(guild?.memberCount ?? 0, guild?.rosteredMembers ?? 0, lastRosterSync),
@@ -642,6 +665,42 @@ useEffect(() => {
             </section>
           </>
         )}
+
+        <section className="rounded-3xl border border-rose-900/70 bg-rose-950/20 p-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-200">
+            Danger Zone
+          </p>
+          <h2 className="mt-3 text-xl font-semibold tracking-tight text-white">
+            Delete account
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm text-rose-100/90">
+            Permanently delete your account. In V1 this is only allowed when no guild is connected.
+          </p>
+
+          {noGuildConnected ? (
+            <form action="/api/account/delete" method="post" className="mt-6">
+              <button
+                type="submit"
+                className="inline-flex rounded-xl border border-rose-700 bg-rose-950/50 px-4 py-3 text-sm font-medium text-rose-100 transition-colors hover:bg-rose-900/50"
+              >
+                Delete account
+              </button>
+            </form>
+          ) : (
+            <div className="mt-6">
+              <button
+                type="button"
+                disabled
+                className="inline-flex cursor-not-allowed rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm font-medium text-slate-500"
+              >
+                Delete account
+              </button>
+              <p className="mt-3 text-sm text-rose-100/80">
+                Delete guild first before deleting your account.
+              </p>
+            </div>
+          )}
+        </section>
       </main>
     </div>
   );
