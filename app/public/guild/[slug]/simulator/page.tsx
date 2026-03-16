@@ -495,9 +495,22 @@ export default function PublicGuildSimulatorPage({
   const secondCandidate = data?.advisory.second ?? null;
   const lookups = data?.lookups;
 
-  function applyOne(action: PlatoonSimulatorAction) {
-    setActions((prev) => dedupeActions([...prev, action]));
-  }
+function applyOne(action: PlatoonSimulatorAction) {
+  setActions((prev) => {
+    const next =
+      'requirementId' in action
+        ? prev.filter((item) => {
+            if (!('requirementId' in item)) {
+              return true;
+            }
+
+            return item.requirementId !== action.requirementId;
+          })
+        : prev;
+
+    return dedupeActions([...next, action]);
+  });
+}
 
   function applyAll(nextActions: PlatoonSimulatorAction[]) {
     setActions((prev) => dedupeActions([...prev, ...nextActions]));
