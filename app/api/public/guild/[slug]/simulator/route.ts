@@ -15,6 +15,25 @@ type RouteContext = {
 
 type PlannerMode = 'manual' | 'auto';
 
+type BonusZoneOption = {
+  zoneKey: string;
+  label: string;
+};
+
+type ExportAssignment = {
+  requirementId: string;
+  phase: number | string;
+  zoneKey: string;
+  platoonKey: string;
+  slotNumber: number | string;
+  unitBaseId: string;
+  unitName: string;
+  planetCategory: string | null;
+  memberId: string;
+  playerName: string;
+  platoonLabel: string;
+};
+
 function parseActions(body: unknown): PlatoonSimulatorAction[] {
   if (!body || typeof body !== 'object') {
     return [];
@@ -22,14 +41,6 @@ function parseActions(body: unknown): PlatoonSimulatorAction[] {
 
   const candidate = (body as { actions?: unknown }).actions;
   return Array.isArray(candidate) ? (candidate as PlatoonSimulatorAction[]) : [];
-}
-
-function parseIncludeBonusZones(body: unknown): boolean {
-  if (!body || typeof body !== 'object') {
-    return false;
-  }
-
-  return Boolean((body as { includeBonusZones?: unknown }).includeBonusZones);
 }
 
 function parseMode(body: unknown): PlannerMode {
@@ -41,18 +52,141 @@ function parseMode(body: unknown): PlannerMode {
   return mode === 'auto' ? 'auto' : 'manual';
 }
 
-function filterDatasetByBonusZoneSetting(
-  dataset: StrategicPlannerDataset,
-  includeBonusZones: boolean,
-): StrategicPlannerDataset {
-  if (includeBonusZones) {
-    return dataset;
+function parseIncludedBonusZoneKeys(body: unknown): string[] {
+  if (!body || typeof body !== 'object') {
+    return [];
   }
+
+  const candidate = (body as { includedBonusZoneKeys?: unknown }).includedBonusZoneKeys;
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  return candidate.filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function filterDatasetBySelectedBonusZones(
+  dataset: StrategicPlannerDataset,
+  includedBonusZoneKeys: string[],
+): StrategicPlannerDataset {
+  const included = new Set(includedBonusZoneKeys);
 
   return {
     ...dataset,
-    slots: dataset.slots.filter((slot) => slot.planetCategory !== 'SPECIAL'),
+    slots: dataset.slots.filter((slot) => {
+      if (slot.planetCategory !== 'SPECIAL') {
+        return true;
+      }
+
+      return included.has(slot.zoneKey);
+    }),
   };
+}
+
+function collectBonusZoneOptions(dataset: StrategicPlannerDataset): BonusZoneOption[] {
+  const byZone = new Map<string, BonusZoneOption>();
+
+  for (const slot of dataset.slots) {
+    if (slot.planetCategory !== 'SPECIAL') {
+      continue;
+    }
+
+    if (!byZone.has(slot.zoneKey)) {
+      byZone.set(slot.zoneKey, {
+        zoneKey: slot.zoneKey,
+        label: `Phase ${slot.phase} · ${slot.zoneName}`,
+      });
+    }
+  }
+
+  return [...byZone.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildPlatoonLabels(dataset: StrategicPlannerDataset): Record<string, string> {
+  const platoonLabels: Record<string, string> = {};
+
+  for (const slot of dataset.slots) {
+    const platoonId = `${String(slot.phase)}::${slot.zoneKey}::${slot.platoonKey}`;
+
+    if (!platoonLabels[platoonId]) {
+      platoonLabels[platoonId] = `Phase ${slot.phase} · ${slot.zoneName} · Platoon ${slot.platoonNumber}`;
+    }
+  }
+
+  return platoonLabels;
+}
+
+function buildExportAssignments(
+  simulatedAssignments: unknown,
+  platoonLabels: Record<string, string>,
+): ExportAssignment[] {
+  if (!Array.isArray(simulatedAssignments)) {
+    return [];
+  }
+
+  return simulatedAssignments
+    .map((assignment) => {
+      const a = assignment as Record<string, unknown>;
+
+      const phase =
+        typeof a.phase === 'number' || typeof a.phase === 'string'
+          ? a.phase
+          : '';
+
+      const zoneKey = typeof a.zoneKey === 'string' ? a.zoneKey : '';
+      const platoonKey = typeof a.platoonKey === 'string' ? a.platoonKey : '';
+      const requirementId = typeof a.requirementId === 'string' ? a.requirementId : '';
+      const unitBaseId = typeof a.unitBaseId === 'string' ? a.unitBaseId : '';
+      const unitName = typeof a.unitName === 'string' ? a.unitName : unitBaseId;
+      const memberId = typeof a.memberId === 'string' ? a.memberId : '';
+      const playerName = typeof a.playerName === 'string' ? a.playerName : memberId;
+      const slotNumber =
+        typeof a.slotNumber === 'number' || typeof a.slotNumber === 'string'
+          ? a.slotNumber
+          : '';
+      const planetCategory =
+        typeof a.planetCategory === 'string' ? a.planetCategory : null;
+
+      const platoonId = `${String(phase)}::${zoneKey}::${platoonKey}`;
+      const platoonLabel = platoonLabels[platoonId] ?? platoonId;
+
+      return {
+        requirementId,
+        phase,
+        zoneKey,
+        platoonKey,
+        slotNumber,
+        unitBaseId,
+        unitName,
+        planetCategory,
+        memberId,
+        playerName,
+        platoonLabel,
+      };
+    })
+    .filter(
+      (item) =>
+        item.requirementId &&
+        item.zoneKey &&
+        item.platoonKey &&
+        item.memberId &&
+        item.unitBaseId,
+    )
+    .sort((a, b) => {
+      if (String(a.phase) !== String(b.phase)) {
+        return String(a.phase).localeCompare(String(b.phase), undefined, { numeric: true });
+      }
+
+      if (a.zoneKey !== b.zoneKey) {
+        return a.zoneKey.localeCompare(b.zoneKey);
+      }
+
+      if (a.platoonKey !== b.platoonKey) {
+        return a.platoonKey.localeCompare(b.platoonKey);
+      }
+
+      return String(a.slotNumber).localeCompare(String(b.slotNumber), undefined, { numeric: true });
+    });
 }
 
 async function withStageTimeout<T>(
@@ -79,7 +213,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const body = await request.json();
 
     const actions = parseActions(body);
-    const includeBonusZones = parseIncludeBonusZones(body);
+    const includedBonusZoneKeys = parseIncludedBonusZoneKeys(body);
     const mode = parseMode(body);
 
     const loadStartedAt = Date.now();
@@ -97,7 +231,8 @@ export async function POST(request: Request, { params }: RouteContext) {
       );
     }
 
-    const effectiveDataset = filterDatasetByBonusZoneSetting(dataset, includeBonusZones);
+    const bonusZoneOptions = collectBonusZoneOptions(dataset);
+    const effectiveDataset = filterDatasetBySelectedBonusZones(dataset, includedBonusZoneKeys);
 
     const simulationStartedAt = Date.now();
     const simulation = await withStageTimeout(
@@ -136,14 +271,11 @@ export async function POST(request: Request, { params }: RouteContext) {
       }
     }
 
-    const platoonLabels: Record<string, string> = {};
-    for (const slot of effectiveDataset.slots) {
-      const platoonId = `${String(slot.phase)}::${slot.zoneKey}::${slot.platoonKey}`;
-
-      if (!platoonLabels[platoonId]) {
-        platoonLabels[platoonId] = `Phase ${slot.phase} · ${slot.zoneName} · Platoon ${slot.platoonNumber}`;
-      }
-    }
+    const platoonLabels = buildPlatoonLabels(effectiveDataset);
+    const fullNewAssignments = buildExportAssignments(
+      (simulation.simulated as unknown as { assignments?: unknown[] }).assignments,
+      platoonLabels,
+    );
 
     return NextResponse.json(
       {
@@ -157,9 +289,11 @@ export async function POST(request: Request, { params }: RouteContext) {
           platoonLabels,
         },
         settings: {
-          includeBonusZones,
+          includedBonusZoneKeys,
           mode,
         },
+        bonusZoneOptions,
+        fullNewAssignments,
         debug: {
           actionsCount: actions.length,
           timings,
