@@ -206,7 +206,7 @@ function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): stri
   }
 }
 
-function  (params: {
+function buildExportPlanText(params: {
   mode: PlannerMode;
   includedBonusZoneKeys: string[];
   bonusZoneOptions: BonusZoneOption[];
