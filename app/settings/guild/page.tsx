@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
 import { GuildSettingsForm } from '@/components/guild/guild-settings-form';
+import { CopyDiscordButton } from '@/components/guild/copy-discord-button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -195,6 +196,13 @@ export default async function GuildSettingsPage() {
           <Card className="animate-fade-in">
             <div className="metric-label">Public Surfaces</div>
             <h2 className="mt-3 text-xl font-semibold">Shared links</h2>
+            <div className="mt-4">
+              <CopyDiscordButton
+                guildName={guild.name}
+                matchingUrl={publicMatchingHref}
+                simulatorUrl={publicSimulatorHref}
+              />
+            </div>
             <div className="mt-5 space-y-4">
               <div className="rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] p-4">
                 <div className="flex items-center gap-3">

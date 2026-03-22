@@ -2,7 +2,6 @@
 
 import { FormEvent, useState } from 'react';
 
-import { CopyPublicGuildLinkButton } from '@/components/guild/copy-public-guild-link-button';
 import { buildPublicGuildTargetsUrl } from '@/lib/utils/base-url';
 
 type ApiEnvelope<T> =
@@ -226,8 +225,6 @@ export function GuildSettingsForm({
         >
           {saving ? 'Saving...' : 'Save'}
         </button>
-
-        {publicUrl && <CopyPublicGuildLinkButton publicUrl={publicUrl} />}
       </div>
 
       {notice && (

@@ -791,14 +791,21 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
         {/* Header */}
         <header className="mb-8 animate-fade-in">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-sm text-[var(--color-text-muted)]">Public guild simulator</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight">
-                Platoon Simulator · {guildName}
-              </h1>
-              <p className="mt-3 max-w-3xl text-[var(--color-text-secondary)]">
-                Manual mode für konkrete Entscheidungen je Slot. Auto mode baut automatisch einen umsetzbaren Plan für die ausgewählte unvollständige Zone.
-              </p>
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-purple)]">
+                <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm text-[var(--color-text-muted)]">Public guild simulator</p>
+                <h1 className="mt-2 text-3xl font-bold tracking-tight">
+                  Platoon Simulator · {guildName}
+                </h1>
+                <p className="mt-3 max-w-3xl text-[var(--color-text-secondary)]">
+                  Manual mode für konkrete Entscheidungen je Slot. Auto mode baut automatisch einen umsetzbaren Plan für die ausgewählte unvollständige Zone.
+                </p>
+              </div>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">

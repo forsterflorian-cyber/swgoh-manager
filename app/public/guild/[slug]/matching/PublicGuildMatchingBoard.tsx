@@ -326,15 +326,22 @@ export default function PublicGuildMatchingBoard({
         {/* Header */}
         <header className="mb-8 animate-fade-in">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-sm text-[var(--color-text-muted)]">Public guild matching board</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight">
-                Platoon Matching · {guildName}
-              </h1>
-              <p className="mt-2 text-[var(--color-text-secondary)]">
-                Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
-                {matching.totalAssigned}/{matching.totalRequired} assigned
-              </p>
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-blue)]">
+                <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm text-[var(--color-text-muted)]">Public guild matching board</p>
+                <h1 className="mt-2 text-3xl font-bold tracking-tight">
+                  Platoon Matching · {guildName}
+                </h1>
+                <p className="mt-2 text-[var(--color-text-secondary)]">
+                  Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
+                  {matching.totalAssigned}/{matching.totalRequired} assigned
+                </p>
+              </div>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Link href={`/public/guild/${slug}/simulator`}>
