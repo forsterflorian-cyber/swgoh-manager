@@ -281,6 +281,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     return NextResponse.json(
       {
+        guildName: dataset.guild.name,
         simulation: { delta: simulation.delta },
         advisory,
         autoPlan,

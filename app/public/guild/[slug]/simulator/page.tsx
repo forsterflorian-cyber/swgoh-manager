@@ -92,6 +92,7 @@ type AutoZonePlan = {
 };
 
 type SimulatorApiResponse = {
+  guildName: string;
   simulation: PlatoonSimulatorResponse;
   advisory: SequentialFullPlatoonPlan;
   autoPlan: AutoZonePlan | null;
@@ -705,6 +706,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   const bonusZoneOptions = data?.bonusZoneOptions ?? [];
   const autoTargetOptions = data?.autoTargetOptions ?? [];
   const fullNewAssignments = data?.fullNewAssignments ?? [];
+  const guildName = data?.guildName ?? slug;
 
   const newlyFullLabels = useMemo(() => {
     if (!summary?.becameFullPlatoonIds?.length) return [];
@@ -791,7 +793,9 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-sm text-[var(--color-text-muted)]">Public guild simulator</p>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight">Next Full Platoon Simulator</h1>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight">
+                Platoon Simulator · {guildName}
+              </h1>
               <p className="mt-3 max-w-3xl text-[var(--color-text-secondary)]">
                 Manual mode für konkrete Entscheidungen je Slot. Auto mode baut automatisch einen umsetzbaren Plan für die ausgewählte unvollständige Zone.
               </p>

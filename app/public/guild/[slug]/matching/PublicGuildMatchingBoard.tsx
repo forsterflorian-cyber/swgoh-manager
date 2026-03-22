@@ -325,21 +325,27 @@ export default function PublicGuildMatchingBoard({
       <div className="mx-auto max-w-7xl px-6 py-8">
         {/* Header */}
         <header className="mb-8 animate-fade-in">
-          <p className="text-sm text-[var(--color-text-muted)]">Public guild matching board</p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight">{guildName}</h1>
-          <p className="mt-2 text-[var(--color-text-secondary)]">
-            Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
-            {matching.totalAssigned}/{matching.totalRequired} assigned
-          </p>
-          <div className="mt-4">
-            <Link href={`/public/guild/${slug}/simulator`}>
-              <button className="btn btn-secondary">
-                <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Next Full Platoon Simulator
-              </button>
-            </Link>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm text-[var(--color-text-muted)]">Public guild matching board</p>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight">
+                Platoon Matching · {guildName}
+              </h1>
+              <p className="mt-2 text-[var(--color-text-secondary)]">
+                Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
+                {matching.totalAssigned}/{matching.totalRequired} assigned
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link href={`/public/guild/${slug}/simulator`}>
+                <button className="btn btn-secondary">
+                  <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Next Full Platoon Simulator
+                </button>
+              </Link>
+            </div>
           </div>
         </header>
 
