@@ -1930,7 +1930,7 @@ async function detectShipUnitIds(unitBaseIds: string[]): Promise<ReadonlySet<str
   return new Set(result.rows.map((r) => r.unit_base_id));
 }
 
-async function getIgnoredMemberIds(guildId: string): Promise<ReadonlySet<string>> {
+export async function getIgnoredMemberIds(guildId: string): Promise<ReadonlySet<string>> {
   const result = await sql<{ id: string }>`
     SELECT id
     FROM guild_members

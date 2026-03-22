@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { NextResponse } from 'next/server';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+import { getIgnoredMemberIds } from '@/lib/services/platoon-readiness';
 import type { NextRequest } from 'next/server';
 
 export const revalidate = 300;
@@ -131,8 +132,12 @@ export async function GET(
       gapsByUnit.set(gap.unitBaseId, existing);
     }
 
+    // Filter out ignored members
+    const ignoredMemberIds = dataset.guild?.id ? await getIgnoredMemberIds(dataset.guild.id) : new Set();
+    const activeMembers = dataset.members.filter(m => !ignoredMemberIds.has(m.memberId));
+
     // Erstelle Member-Empfehlungen
-    const memberRecommendations: MemberRecommendation[] = dataset.members.map(member => {
+    const memberRecommendations: MemberRecommendation[] = activeMembers.map(member => {
       const memberRoster = dataset.roster.filter(r => r.memberId === member.memberId);
       const recommendations: UpgradeRecommendation[] = [];
       const memberContributions = matching.assignments.filter(
