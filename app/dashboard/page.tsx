@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Navbar } from '@/components/layout/Navbar';
-
-type ApiEnvelope<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+import { formatDateTime } from '@/lib/utils/format-date';
+import { Card } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import type { ApiEnvelope } from '@/lib/types/api';
 
 type DashboardGuild = {
   id: string;
@@ -70,20 +71,6 @@ type RosterState = {
   tone: 'good' | 'warn' | 'bad';
   detail: string;
 };
-
-function formatDateTime(value: string | null): string {
-  if (!value) return 'Never';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
-}
 
 function getRosterState(
   memberCount: number,
@@ -467,7 +454,7 @@ export default function DashboardPage() {
 
         {noGuildConnected ? (
           <>
-            <section className="rounded-3xl border border-slate-800 bg-slate-950/70 p-8 shadow-[0_0_0_1px_rgba(15,23,42,0.25)]">
+            <Card className="shadow-[0_0_0_1px_rgba(15,23,42,0.25)]">
               <p className="text-sm text-slate-400">Guild setup</p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
                 No guild connected
@@ -478,36 +465,36 @@ export default function DashboardPage() {
               </p>
 
               <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                <Link href="/settings/guild" className={actionButtonClasses(true)}>
-                  Connect guild
+                <Link href="/settings/guild">
+                  <Button variant="primary">Connect guild</Button>
                 </Link>
               </div>
-            </section>
+            </Card>
 
             <section className="grid gap-6 lg:grid-cols-3">
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+              <Card>
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Step 1</div>
                 <div className="mt-3 text-xl font-semibold text-white">Connect guild</div>
                 <p className="mt-2 text-sm text-slate-400">
                   Add your SWGOH guild identifier and choose the public slug used by matching and simulator.
                 </p>
-              </div>
+              </Card>
 
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+              <Card>
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Step 2</div>
                 <div className="mt-3 text-xl font-semibold text-white">Sync roster</div>
                 <p className="mt-2 text-sm text-slate-400">
                   Import guild members and roster data so planning surfaces work with current data.
                 </p>
-              </div>
+              </Card>
 
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
+              <Card>
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Step 3</div>
                 <div className="mt-3 text-xl font-semibold text-white">Plan and manage</div>
                 <p className="mt-2 text-sm text-slate-400">
                   Use public matching for visibility and the simulator for officer planning and exports.
                 </p>
-              </div>
+              </Card>
             </section>
           </>
         ) : (
@@ -520,32 +507,26 @@ export default function DashboardPage() {
                     {guild.name}
                   </h1>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-                    <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
-                      Slug: {guild.slug ?? 'not set'}
-                    </span>
-                    <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
-                      Manage access: {canManageGuild ? 'Yes' : 'No'}
-                    </span>
+                    <Badge>Slug: {guild.slug ?? 'not set'}</Badge>
+                    <Badge>Manage access: {canManageGuild ? 'Yes' : 'No'}</Badge>
                     {activeTb ? (
-                      <span className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
-                        Active TB: {activeTb.name}
-                      </span>
+                      <Badge>Active TB: {activeTb.name}</Badge>
                     ) : null}
                   </div>
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
                     onClick={handleSync}
                     disabled={!canManageGuild || !guild.id || syncing}
-                    className={actionButtonClasses(true)}
+                    isLoading={syncing}
                   >
                     {syncing ? 'Sync running…' : 'Sync roster'}
-                  </button>
+                  </Button>
 
-                  <Link href="/settings/guild" className={actionButtonClasses()}>
-                    Open guild settings
+                  <Link href="/settings/guild">
+                    <Button variant="secondary">Open guild settings</Button>
                   </Link>
                 </div>
               </div>

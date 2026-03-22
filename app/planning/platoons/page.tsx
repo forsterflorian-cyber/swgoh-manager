@@ -5,6 +5,8 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
+import { formatDateTime } from '@/lib/utils/format-date';
+import type { ApiEnvelope } from '@/lib/types/api';
 import type {
   GapActionType,
   PlanetCategory,
@@ -20,10 +22,6 @@ import type {
   StrategicUnitImpact,
   StrategicZoneReadiness,
 } from '@/lib/types/platoon-readiness';
-
-type ApiEnvelope<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
 
 type Notice = {
   tone: 'success' | 'error';
@@ -2240,18 +2238,6 @@ function formatAssignmentCapacity(assignment: StrategicTargetAssignment) {
   return uncategorized > 0
     ? `Capacity category pending (${uncategorized} uncategorized)`
     : 'Capacity category pending';
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'unknown';
-  }
-
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
 }
 
 function HeaderPill({

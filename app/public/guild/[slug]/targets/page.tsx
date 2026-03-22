@@ -6,6 +6,10 @@ import {
   getPublicStrategicTargetsBoard,
   type PublicStrategicTarget,
 } from '@/lib/services/public-strategic-targets';
+import { formatDateTime } from '@/lib/utils/format-date';
+import { Card } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 
 export const revalidate = 60;
 
@@ -60,16 +64,13 @@ export default async function PublicStrategicTargetsPage({
             </div>
 
             <div className="flex flex-wrap gap-2 text-sm">
-              <StatusPill label={`Slug: ${board.guild.slug}`} />
-              <StatusPill
-                label={
-                  board.lastUpdatedAt
-                    ? `Updated ${formatDateTime(board.lastUpdatedAt)}`
-                    : 'No strategic targets yet'
-                }
-                tone={board.lastUpdatedAt ? 'info' : 'neutral'}
-              />
-              {board.isFixture && <StatusPill label="Fixture mode" tone="warning" />}
+              <Badge>Slug: {board.guild.slug}</Badge>
+              <Badge variant={board.lastUpdatedAt ? 'info' : 'neutral'}>
+                {board.lastUpdatedAt
+                  ? `Updated ${formatDateTime(board.lastUpdatedAt)}`
+                  : 'No strategic targets yet'}
+              </Badge>
+              {board.isFixture && <Badge variant="warning">Fixture mode</Badge>}
             </div>
           </div>
         </div>
@@ -77,7 +78,7 @@ export default async function PublicStrategicTargetsPage({
 
       <main className="mx-auto max-w-6xl px-4 py-8">
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+          <Card>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
               Copy for Discord
             </p>
@@ -89,9 +90,9 @@ export default async function PublicStrategicTargetsPage({
               value={discordCopy}
               className="mt-4 min-h-48 w-full rounded-2xl border border-gray-800 bg-gray-950/80 p-4 text-sm text-gray-100 outline-none"
             />
-          </div>
+          </Card>
 
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+          <Card>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
               Access
             </p>
@@ -100,13 +101,10 @@ export default async function PublicStrategicTargetsPage({
               Members can open this page without logging in. Guild leadership still manages targets
               in the protected planner.
             </p>
-            <Link
-              href="/login"
-              className="mt-5 inline-flex rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-            >
-              Log in to manage
+            <Link href="/login" className="mt-5 inline-block">
+              <Button variant="primary">Log in to manage</Button>
             </Link>
-          </div>
+          </Card>
         </section>
 
         <section className="mt-8 grid gap-4 xl:grid-cols-2">
@@ -183,34 +181,6 @@ function buildDiscordCopy(
   return lines.join('\n').trim();
 }
 
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'unknown';
-  }
-
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
-}
-
-function StatusPill({
-  label,
-  tone = 'neutral',
-}: {
-  label: string;
-  tone?: 'neutral' | 'warning' | 'info';
-}) {
-  const toneClasses = {
-    neutral: 'border-gray-800 bg-gray-900/80 text-gray-300',
-    warning: 'border-amber-900 bg-amber-950/50 text-amber-200',
-    info: 'border-blue-900 bg-blue-950/50 text-blue-200',
-  };
-
-  return <span className={`rounded-full border px-3 py-1 ${toneClasses[tone]}`}>{label}</span>;
-}
-
 function BoardSection({
   eyebrow,
   title,
@@ -223,14 +193,14 @@ function BoardSection({
   groups: Array<[string, PublicStrategicTarget[]]>;
 }) {
   return (
-    <section className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+    <Card>
       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">{eyebrow}</p>
       <h2 className="mt-2 text-2xl font-semibold text-white">{title}</h2>
 
       {groups.length > 0 ? (
         <div className="mt-5 space-y-4">
           {groups.map(([label, targets]) => (
-            <div key={label} className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+            <Card key={label} variant="highlight">
               <h3 className="text-lg font-semibold text-white">{label}</h3>
               <ul className="mt-3 space-y-2 text-sm text-gray-200">
                 {targets.map((target, index) => (
@@ -240,21 +210,21 @@ function BoardSection({
                   >
                     <span>- {title === 'By Member' ? target.unitName : target.memberName}</span>
                     {target.planetCategory && (
-                      <span className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-xs text-gray-300">
+                      <Badge variant="neutral" size="sm">
                         {target.planetCategory}
-                      </span>
+                      </Badge>
                     )}
                   </li>
                 ))}
               </ul>
-            </div>
+            </Card>
           ))}
         </div>
       ) : (
-        <div className="mt-5 rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-300">
-          {emptyMessage}
-        </div>
+        <Card variant="highlight">
+          <p className="text-sm text-gray-300">{emptyMessage}</p>
+        </Card>
       )}
-    </section>
+    </Card>
   );
 }
