@@ -214,13 +214,18 @@ export async function GET(
       // Sortiere nach Impact
       recommendations.sort((a, b) => b.impactScore - a.impactScore);
 
-      const potentialGain = recommendations.reduce((sum, r) => sum + r.slotsUnlocked, 0);
+      // Filtere nach unvollständigen Phasen
+      const filteredRecommendations = recommendations.filter(rec => {
+        return rec.affectedPhases.some(phase => phase.currentCoverage < 100);
+      });
+
+      const potentialGain = filteredRecommendations.reduce((sum, r) => sum + r.slotsUnlocked, 0);
 
       return {
         memberId: member.memberId,
         playerName: member.playerName,
         allyCode: member.allyCode,
-        recommendations: recommendations.slice(0, 5), // Top 5
+        recommendations: filteredRecommendations.slice(0, 10), // Top 10 (statt 5)
         currentContributions: memberContributions,
         potentialGain,
       };
