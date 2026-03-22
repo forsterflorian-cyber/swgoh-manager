@@ -58,19 +58,19 @@ const PRIORITY_CONFIG = {
     label: 'Top Empfehlung',
     icon: '🔥',
     variant: 'success' as const,
-    description: 'Viele Slots für wenig Kosten',
+    description: 'Hohe Effizienz, viele Slots, Zonen-Komplettierung',
   },
   good: {
     label: 'Guter Trade-off',
     icon: '💡',
     variant: 'info' as const,
-    description: 'Moderate Kosten für guten Nutzen',
+    description: 'Moderate Effizienz mit gutem Nutzen',
   },
   longterm: {
     label: 'Langfristig',
     icon: '📝',
     variant: 'neutral' as const,
-    description: 'Investition für die Zukunft',
+    description: 'Geringe Effizienz, teure Upgrades',
   },
 };
 
@@ -128,11 +128,14 @@ function UpgradeCard({
               <span className="ml-2 text-white">~{recommendation.estimatedCost} Relic-Mat</span>
             </div>
             <div>
-              <span className="text-gray-400">Impact:</span>
-              <span className="ml-2 text-white">
-                {recommendation.slotsUnlocked} Slots für {recommendation.recommendedRelic - recommendation.currentRelic} Relic
+              <span className="text-gray-400">Upgrade Score:</span>
+              <span className="ml-2 text-white font-semibold">
+                {recommendation.impactScore.toFixed(1)}
               </span>
             </div>
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            {recommendation.slotsUnlocked} Slots für {recommendation.recommendedRelic - recommendation.currentRelic} Relic
           </div>
         </div>
       </div>

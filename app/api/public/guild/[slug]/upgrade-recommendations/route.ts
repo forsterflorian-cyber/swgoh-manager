@@ -107,6 +107,78 @@ function calculateUpgradeImpact(
   return { maxRelic, slotsByPhase };
 }
 
+/**
+ * Berechnet eine verbesserte Upgrade-Kennzahl basierend auf:
+ * 1. Slots pro Relic (Grundnutzen)
+ * 2. Zone Completion Bonus (Vollständige Zonen sind wertvoller)
+ * 3. Coverage Gain (Prozentuale Verbesserung)
+ * 4. Effizienz (Günstigster Fortschritt)
+ * 
+ * Formel: upgradeScore = (baseValue + completionBonus + coverageGain) / normalizedCost
+ */
+function calculateUpgradeScore(
+  slotsUnlocked: number,
+  fromRelic: number,
+  toRelic: number,
+  affectedPhases: Array<{
+    phase: number;
+    category: string;
+    currentCoverage: number;
+    newCoverage: number;
+    slotsAdded: number;
+  }>,
+): number {
+  const cost = calculateRelicCost(fromRelic, toRelic);
+  if (cost <= 0) return 0;
+
+  // Basiswert: Jeder Slot hat einen Grundwert
+  const baseValue = slotsUnlocked * 10;
+
+  // Zone Completion Bonus: Wenn eine Zone auf 100% kommt, ist das besonders wertvoll
+  let completionBonus = 0;
+  let zonesCompletedTo100 = 0;
+  
+  for (const phase of affectedPhases) {
+    // Prüfe ob die Zone durch dieses Upgrade auf 100% kommt
+    if (phase.newCoverage === 100 && phase.currentCoverage < 100) {
+      zonesCompletedTo100++;
+      // Bonus basierend auf wie viele Slots nötig waren um die Zone zu vervollständigen
+      completionBonus += 50 + (phase.slotsAdded * 5);
+    }
+  }
+
+  // Coverage Gain: Prozentuale Verbesserung (gewichtet)
+  let coverageGain = 0;
+  for (const phase of affectedPhases) {
+    const coverageImprovement = phase.newCoverage - phase.currentCoverage;
+    // Gewichtung: Höherer Bonus wenn Coverage niedrig war (schwerer zu verbessern)
+    const weight = phase.currentCoverage < 50 ? 3 : phase.currentCoverage < 80 ? 2 : 1;
+    coverageGain += coverageImprovement * weight;
+  }
+
+  // Normalisierte Kosten: Log-Skalierung für bessere Vergleichbarkeit
+  // (ein Upgrade von R1→R2 ist günstiger als R7→R8, aber nicht linear)
+  const normalizedCost = Math.log2(cost + 1);
+
+  // Finale Kennzahl
+  const upgradeScore = (baseValue + completionBonus + coverageGain) / normalizedCost;
+
+  return Math.round(upgradeScore * 100) / 100; // Auf 2 Dezimalstellen runden
+}
+
+/**
+ * Bestimmt die Priorität basierend auf der neuen Upgrade-Kennzahl
+ */
+function determinePriority(upgradeScore: number): 'top' | 'good' | 'longterm' {
+  // Schwellenwerte basierend auf typischen Score-Bereichen:
+  // - Top: Score >= 30 (hohe Effizienz, viele Slots, Zonen-Komplettierung)
+  // - Good: Score >= 15 (moderate Effizienz)
+  // - Longterm: Score < 15 (geringe Effizienz, teure Upgrades)
+  if (upgradeScore >= 30) return 'top';
+  if (upgradeScore >= 15) return 'good';
+  return 'longterm';
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
@@ -185,7 +257,6 @@ export async function GET(
 
         const slotsUnlocked = Array.from(slotsByPhase.values()).reduce((a, b) => a + b, 0);
         const cost = calculateRelicCost(unit.relicTier, maxRelic);
-        const impactScore = cost > 0 ? slotsUnlocked / cost : 0;
 
         const affectedPhases = Array.from(slotsByPhase.entries()).map(([key, count]) => {
           const [phase, category] = key.split(':');
@@ -205,10 +276,14 @@ export async function GET(
           };
         });
 
-        let priority: 'top' | 'good' | 'longterm';
-        if (impactScore >= 0.015) priority = 'top';
-        else if (impactScore >= 0.008) priority = 'good';
-        else priority = 'longterm';
+        // Verwende die neue Upgrade-Kennzahl
+        const impactScore = calculateUpgradeScore(
+          slotsUnlocked,
+          unit.relicTier,
+          maxRelic,
+          affectedPhases
+        );
+        const priority = determinePriority(impactScore);
 
         recommendations.push({
           unitBaseId: unit.unitBaseId,
@@ -263,7 +338,6 @@ export async function GET(
         if (slotsUnlocked === 0) continue;
 
         const cost = calculateRelicCost(0, maxRelic);
-        const impactScore = cost > 0 ? slotsUnlocked / cost : 0;
 
         const affectedPhases = Array.from(slotsByPhase.entries()).map(([key, count]) => {
           const [phase, category] = key.split(':');
@@ -283,10 +357,14 @@ export async function GET(
           };
         });
 
-        let priority: 'top' | 'good' | 'longterm';
-        if (impactScore >= 0.015) priority = 'top';
-        else if (impactScore >= 0.008) priority = 'good';
-        else priority = 'longterm';
+        // Verwende die neue Upgrade-Kennzahl
+        const impactScore = calculateUpgradeScore(
+          slotsUnlocked,
+          0,
+          maxRelic,
+          affectedPhases
+        );
+        const priority = determinePriority(impactScore);
 
         recommendations.push({
           unitBaseId,
