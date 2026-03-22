@@ -222,14 +222,20 @@ export async function GET(
     // Sortiere Member nach Potenzial
     memberRecommendations.sort((a, b) => b.potentialGain - a.potentialGain);
 
-    const totalSlotsUnlockable = memberRecommendations.reduce(
-      (sum, m) => sum + m.potentialGain,
+    // Realistischere Berechnung: Nur Top-1 Upgrade pro Member zählen
+    // (da Member normalerweise nur eine Einheit pro TB upgraden)
+    const realisticSlotsUnlockable = memberRecommendations.reduce(
+      (sum, m) => sum + (m.recommendations[0]?.slotsUnlocked || 0),
       0
     );
 
     const currentCoverage = matching.coveragePercent;
-    const potentialCoverage = Math.round(
-      ((matching.totalAssigned + totalSlotsUnlockable) / matching.totalRequired) * 100
+    // Potenzielle Coverage: Maximal 95% (realistischer)
+    const potentialCoverage = Math.min(
+      Math.round(
+        ((matching.totalAssigned + realisticSlotsUnlockable) / matching.totalRequired) * 100
+      ),
+      95
     );
 
     const response: UpgradeRecommendationsResponse = {
@@ -238,8 +244,8 @@ export async function GET(
       memberRecommendations: memberRecommendations.filter(m => m.recommendations.length > 0),
       summary: {
         currentGuildCoverage: currentCoverage,
-        potentialGuildCoverage: Math.min(potentialCoverage, 100),
-        totalSlotsUnlockable,
+        potentialGuildCoverage: potentialCoverage,
+        totalSlotsUnlockable: realisticSlotsUnlockable,
       },
     };
 
