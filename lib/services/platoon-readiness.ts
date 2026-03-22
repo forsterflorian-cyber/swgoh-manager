@@ -2294,9 +2294,10 @@ export async function loadStrategicPlannerDatasetForGuildSlug(
   const rawSlots = await loadSlotsForReference(reference);
   const unitBaseIds = [...new Set(rawSlots.map((slot) => slot.unitBaseId))];
 
-  const [rawRoster, strategicAssignments] = await Promise.all([
+  const [rawRoster, strategicAssignments, ignoredMemberIds] = await Promise.all([
     loadRosterForUnits(guildRow.id, unitBaseIds),
     listGuildUpgradeAssignments(guildRow.id),
+    getIgnoredMemberIds(guildRow.id),
   ]);
 const slots = hydrateSlotsWithEligibleRoster(
   rawSlots,
@@ -2310,6 +2311,9 @@ const slots = hydrateSlotsWithEligibleRoster(
       rosteredMemberIds.add(memberId);
     }
   }
+
+  // Filter out ignored members from the member list
+  const activeMembers = members.filter(m => !ignoredMemberIds.has(m.memberId));
 
   const guild: StrategicPlannerGuild = {
     id: guildRow.id,
@@ -2328,7 +2332,7 @@ const slots = hydrateSlotsWithEligibleRoster(
     reference,
     slots,
     roster: rawRoster,
-    members,
+    members: activeMembers,
     strategicAssignments,
     permissions: {
       canManageTargets: false,

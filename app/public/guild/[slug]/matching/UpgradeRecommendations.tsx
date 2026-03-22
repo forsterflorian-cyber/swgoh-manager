@@ -208,7 +208,7 @@ export default function UpgradeRecommendations({ slug }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
-  const [phaseFilter, setPhaseFilter] = useState<number | 'all'>('all');
+  const [phaseCategoryFilter, setPhaseCategoryFilter] = useState<string>('all');
   const [exported, setExported] = useState(false);
 
   const handleExportReport = async () => {
@@ -257,7 +257,18 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
     async function loadData() {
       try {
         setLoading(true);
-        const res = await fetch(`/api/public/guild/${slug}/upgrade-recommendations`);
+        // Baue Query-Parameter basierend auf Filter
+        const params = new URLSearchParams();
+        if (phaseCategoryFilter !== 'all') {
+          const [phase, category] = phaseCategoryFilter.split('-');
+          params.set('phase', phase);
+          params.set('category', category);
+        }
+        
+        const queryString = params.toString();
+        const url = `/api/public/guild/${slug}/upgrade-recommendations${queryString ? `?${queryString}` : ''}`;
+        
+        const res = await fetch(url);
         if (!res.ok) throw new Error('Failed to load recommendations');
         const json = await res.json();
         setData(json);
@@ -268,7 +279,7 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
       }
     }
     loadData();
-  }, [slug]);
+  }, [slug, phaseCategoryFilter]);
 
   const filteredMembers = useMemo(() => {
     if (!data) return [];
@@ -279,19 +290,11 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
       members = members.filter(m => m.memberId === selectedMember);
     }
     
-    if (phaseFilter !== 'all') {
-      members = members
-        .map(m => ({
-          ...m,
-          recommendations: m.recommendations.filter(r =>
-            r.affectedPhases.some(p => p.phase === phaseFilter)
-          ),
-        }))
-        .filter(m => m.recommendations.length > 0);
-    }
+    // Filterung erfolgt bereits serverseitig über Query-Parameter
+    // Hier nur noch clientseitiger Filter für den ausgewählten Member
     
     return members;
-  }, [data, selectedMember, phaseFilter]);
+  }, [data, selectedMember]);
 
   if (loading) {
     return (
@@ -370,15 +373,15 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
           </div>
           
           <div>
-            <label className="text-sm text-gray-400 block mb-1">Phase</label>
+            <label className="text-sm text-gray-400 block mb-1">Phase & Kategorie</label>
             <select
-              value={phaseFilter}
-              onChange={(e) => setPhaseFilter(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+              value={phaseCategoryFilter}
+              onChange={(e) => setPhaseCategoryFilter(e.target.value)}
               className="rounded-xl border border-gray-800 bg-gray-950 px-3 py-2 text-sm text-white outline-none"
             >
               <option value="all">Alle unvollständigen</option>
               {data.incompletePhases.map(p => (
-                <option key={`${p.phase}-${p.category}`} value={p.phase}>
+                <option key={`${p.phase}-${p.category}`} value={`${p.phase}-${p.category}`}>
                   P{p.phase} {p.category} ({p.currentCoverage}%)
                 </option>
               ))}

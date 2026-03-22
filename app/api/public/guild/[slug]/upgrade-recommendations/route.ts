@@ -2,7 +2,6 @@ import { notFound } from 'next/navigation';
 import { NextResponse } from 'next/server';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
-import { getIgnoredMemberIds } from '@/lib/services/platoon-readiness';
 import type { NextRequest } from 'next/server';
 
 export const revalidate = 300;
@@ -114,6 +113,10 @@ export async function GET(
 ) {
   try {
     const { slug } = await params;
+    const { searchParams } = new URL(request.url);
+    const phaseFilter = searchParams.get('phase');
+    const categoryFilter = searchParams.get('category');
+    
     const dataset = await loadStrategicPlannerDatasetForGuildSlug(slug);
 
     if (!dataset.guild || !dataset.reference) {
@@ -141,9 +144,9 @@ export async function GET(
       gapsByUnit.set(gap.unitBaseId, existing);
     }
 
-    // Filter out ignored members
-    const ignoredMemberIds = dataset.guild?.id ? await getIgnoredMemberIds(dataset.guild.id) : new Set();
-    const activeMembers = dataset.members.filter(m => !ignoredMemberIds.has(m.memberId));
+    // dataset.members contains only active (non-ignored) members
+    // as loadStrategicPlannerDatasetForGuildSlug filters them out
+    const activeMembers = dataset.members;
 
     // Erstelle Member-Empfehlungen
     const memberRecommendations: MemberRecommendation[] = activeMembers.map(member => {
@@ -302,9 +305,32 @@ export async function GET(
       recommendations.sort((a, b) => b.impactScore - a.impactScore);
 
       // Filtere nach unvollständigen Phasen
-      const filteredRecommendations = recommendations.filter(rec => {
+      let filteredRecommendations = recommendations.filter(rec => {
         return rec.affectedPhases.some(phase => phase.currentCoverage < 100);
       });
+
+      // Filtere nach spezifischer Phase/Category wenn Query-Parameter gesetzt sind
+      if (phaseFilter && categoryFilter) {
+        const phaseNum = parseInt(phaseFilter);
+        filteredRecommendations = filteredRecommendations
+          .map(rec => {
+            // Filtere affectedPhases auf die ausgewählte Phase/Category
+            const matchingPhases = rec.affectedPhases.filter(
+              p => p.phase === phaseNum && p.category === categoryFilter
+            );
+            if (matchingPhases.length === 0) return null;
+            
+            // Berechne slotsUnlocked nur für die gefilterte Phase
+            const slotsUnlockedForFilter = matchingPhases.reduce((sum, p) => sum + p.slotsAdded, 0);
+            
+            return {
+              ...rec,
+              slotsUnlocked: slotsUnlockedForFilter,
+              affectedPhases: matchingPhases,
+            };
+          })
+          .filter((rec): rec is NonNullable<typeof rec> => rec !== null);
+      }
 
       const potentialGain = filteredRecommendations.reduce((sum, r) => sum + r.slotsUnlocked, 0);
 
@@ -328,23 +354,50 @@ export async function GET(
       0
     );
 
-    const currentCoverage = matching.coveragePercent;
-    // Potenzielle Coverage: Maximal 95% (realistischer)
-    const potentialCoverage = Math.min(
-      Math.round(
-        ((matching.totalAssigned + realisticSlotsUnlockable) / matching.totalRequired) * 100
-      ),
-      95
-    );
+    // Berechne Coverage basierend auf Filter oder Gesamt
+    let currentCoverage: number;
+    let potentialCoverage: number;
+    let totalSlotsUnlockable: number;
+
+    if (phaseFilter && categoryFilter) {
+      // Gefilterte Ansicht: nur spezifische Phase/Category
+      const phaseNum = parseInt(phaseFilter);
+      const filteredCoverage = matching.coverage.find(
+        c => c.phase === phaseNum && c.category === categoryFilter
+      );
+      
+      currentCoverage = filteredCoverage?.coveragePercent ?? 0;
+      totalSlotsUnlockable = realisticSlotsUnlockable;
+      potentialCoverage = filteredCoverage
+        ? Math.min(
+            Math.round(
+              ((filteredCoverage.assignedCount + realisticSlotsUnlockable) / filteredCoverage.requirementCount) * 100
+            ),
+            95
+          )
+        : 0;
+    } else {
+      // Gesamtansicht
+      currentCoverage = matching.coveragePercent;
+      totalSlotsUnlockable = realisticSlotsUnlockable;
+      potentialCoverage = Math.min(
+        Math.round(
+          ((matching.totalAssigned + realisticSlotsUnlockable) / matching.totalRequired) * 100
+        ),
+        95
+      );
+    }
 
     const response: UpgradeRecommendationsResponse = {
       guildName: dataset.guild.name || slug,
-      incompletePhases,
+      incompletePhases: phaseFilter && categoryFilter
+        ? incompletePhases.filter(p => p.phase === parseInt(phaseFilter) && p.category === categoryFilter)
+        : incompletePhases,
       memberRecommendations: memberRecommendations.filter(m => m.recommendations.length > 0),
       summary: {
         currentGuildCoverage: currentCoverage,
         potentialGuildCoverage: potentialCoverage,
-        totalSlotsUnlockable: realisticSlotsUnlockable,
+        totalSlotsUnlockable,
       },
     };
 
