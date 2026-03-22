@@ -206,7 +206,7 @@ function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): stri
   }
 }
 
-function buildExportPlanText(params: {
+function  (params: {
   mode: PlannerMode;
   includedBonusZoneKeys: string[];
   bonusZoneOptions: BonusZoneOption[];
@@ -405,10 +405,10 @@ function CandidateCard({ title, candidate, onApplyOne, onApplyAll, onReplaceOne,
 }) {
   if (!candidate) {
     return (
-      <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-        <div className="text-sm text-slate-400">{title}</div>
-        <h2 className="mt-1 text-2xl font-semibold text-white">No candidate</h2>
-        <p className="mt-3 text-sm text-slate-400">Kein vollständig machbarer nächster Platoon-Pfad gefunden.</p>
+      <section className="card animate-fade-in">
+        <div className="metric-label">{title}</div>
+        <h2 className="mt-2 text-2xl font-bold">No candidate</h2>
+        <p className="mt-3 text-[var(--color-text-muted)]">Kein vollständig machbarer nächster Platoon-Pfad gefunden.</p>
       </section>
     );
   }
@@ -418,47 +418,82 @@ function CandidateCard({ title, candidate, onApplyOne, onApplyAll, onReplaceOne,
     : null;
 
   return (
-    <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+    <section className="card animate-fade-in">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <div className="text-sm text-slate-400">{title}</div>
-          <h2 className="mt-1 text-2xl font-semibold text-white">{getPlatoonLabel(candidate.targetPlatoonId, lookups?.platoonLabels)}</h2>
+          <div className="metric-label">{title}</div>
+          <h2 className="mt-2 text-2xl font-bold">{getPlatoonLabel(candidate.targetPlatoonId, lookups?.platoonLabels)}</h2>
         </div>
-        <button type="button" onClick={() => onApplyAll(candidate.actions)} disabled={!canApply || candidate.actions.length === 0} className="rounded-2xl border border-indigo-700/70 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-200 transition hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50">Apply all</button>
+        <button 
+          type="button" 
+          onClick={() => onApplyAll(candidate.actions)} 
+          disabled={!canApply || candidate.actions.length === 0} 
+          className="btn btn-primary"
+        >
+          Apply all
+        </button>
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <StatCard label="Suggested actions" value={candidate.actions.length} />
-        <StatCard label="Delta full platoons" value={candidate.deltaFullPlatoons} />
-        <StatCard label="Delta covered slots" value={candidate.deltaCoveredSlots} />
-        <StatCard label="Changed assignments" value={changedAssignmentCount ?? '—'} />
+        <div className="stat-card">
+          <div className="stat-label">Suggested actions</div>
+          <div className="stat-value">{candidate.actions.length}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Delta full platoons</div>
+          <div className="stat-value">{candidate.deltaFullPlatoons}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Delta covered slots</div>
+          <div className="stat-value">{candidate.deltaCoveredSlots}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Changed assignments</div>
+          <div className="stat-value">{changedAssignmentCount ?? '—'}</div>
+        </div>
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <StatCard label="Target covered" value={`${candidate.targetCoveredSlotsBefore} → ${candidate.targetCoveredSlotsAfter}`} big={false} />
-        <StatCard label="Target missing" value={`${candidate.targetMissingSlotsBefore} → ${candidate.targetMissingSlotsAfter}`} big={false} />
-        <StatCard label="Target becomes full" value={candidate.targetBecomesFull ? 'Yes' : 'No'} big={false} />
+        <div className="stat-card">
+          <div className="stat-label">Target covered</div>
+          <div className="stat-value text-lg">{candidate.targetCoveredSlotsBefore} → {candidate.targetCoveredSlotsAfter}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Target missing</div>
+          <div className="stat-value text-lg">{candidate.targetMissingSlotsBefore} → {candidate.targetMissingSlotsAfter}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Target becomes full</div>
+          <div className="stat-value text-lg">{candidate.targetBecomesFull ? 'Yes' : 'No'}</div>
+        </div>
       </div>
 
       <div className="mt-6">
-        <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Suggested real actions</div>
+        <div className="mb-3 text-sm font-semibold text-[var(--color-text-muted)]">Suggested real actions</div>
         {candidate.actions.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-black/20 p-4 text-sm text-slate-400">Keine Aktionen vorgeschlagen.</div>
+          <div className="card text-center text-[var(--color-text-muted)]">Keine Aktionen vorgeschlagen.</div>
         ) : (
           <div className="space-y-3">
             {candidate.actions.map((action) => (
-              <div key={getActionKey(action)} className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-black/20 p-4">
+              <div key={getActionKey(action)} className="stat-card">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-slate-100">{describeAction(action, lookups)}</div>
-                    <div className="mt-1 text-xs text-slate-500">{getActionTypeLabel(action)}</div>
+                    <div className="truncate font-medium">{describeAction(action, lookups)}</div>
+                    <div className="mt-1 text-sm text-[var(--color-text-muted)]">{getActionTypeLabel(action)}</div>
                   </div>
-                  <button type="button" onClick={() => onApplyOne(action)} disabled={!canApply} className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">Apply</button>
+                  <button 
+                    type="button" 
+                    onClick={() => onApplyOne(action)} 
+                    disabled={!canApply} 
+                    className="btn btn-secondary"
+                  >
+                    Apply
+                  </button>
                 </div>
 
                 {'alternatives' in action && action.alternatives && action.alternatives.length > 0 ? (
-                  <div className="mt-2 space-y-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Alternatives</div>
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs font-semibold text-[var(--color-text-muted)]">Alternatives</div>
                     {action.alternatives.map((alt, index) => {
                       const replacement: PlatoonSimulatorAction = action.type === 'USE_UNUSED_OWNER'
                         ? { ...action, id: `${action.id}::alt::${alt.memberId}::${index}`, memberId: alt.memberId, playerName: alt.playerName, unitBaseId: alt.unitBaseId, unitName: alt.unitName, missingRelicTiers: 0, missingRarity: 0 }
@@ -467,9 +502,16 @@ function CandidateCard({ title, candidate, onApplyOne, onApplyAll, onReplaceOne,
                           : action;
 
                       return (
-                        <div key={`${action.id}::alt::${alt.memberId}::${index}`} className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
-                          <div className="text-xs text-slate-300">{alt.playerName} → {alt.unitName} ({formatAlternativeCost(alt.missingRelicTiers, alt.missingRarity)})</div>
-                          <button type="button" onClick={() => onReplaceOne(action, replacement)} disabled={!canApply} className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">Use this instead</button>
+                        <div key={`${action.id}::alt::${alt.memberId}::${index}`} className="flex flex-col gap-2 rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="text-xs text-[var(--color-text-secondary)]">{alt.playerName} → {alt.unitName} ({formatAlternativeCost(alt.missingRelicTiers, alt.missingRarity)})</div>
+                          <button 
+                            type="button" 
+                            onClick={() => onReplaceOne(action, replacement)} 
+                            disabled={!canApply} 
+                            className="btn btn-ghost text-xs"
+                          >
+                            Use this instead
+                          </button>
                         </div>
                       );
                     })}
@@ -486,9 +528,9 @@ function CandidateCard({ title, candidate, onApplyOne, onApplyAll, onReplaceOne,
 
 function StatCard({ label, value, big = true }: { label: string; value: string | number; big?: boolean }) {
   return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4">
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className={`mt-2 font-semibold text-white ${big ? 'text-3xl' : 'text-2xl'}`}>{value}</div>
+    <div className="stat-card">
+      <div className="stat-label">{label}</div>
+      <div className={`stat-value ${big ? 'text-3xl' : 'text-xl'}`}>{value}</div>
     </div>
   );
 }
@@ -496,49 +538,72 @@ function StatCard({ label, value, big = true }: { label: string; value: string |
 function AutoPlanCard({ plan, lookups, canApply, onApplyAll }: { plan: AutoZonePlan | null; lookups?: Lookups; canApply: boolean; onApplyAll: (actions: PlatoonSimulatorAction[]) => void }) {
   if (!plan) {
     return (
-      <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
-        <div className="text-sm text-slate-400">Auto plan</div>
-        <h2 className="mt-1 text-2xl font-semibold text-white">No plan</h2>
-        <p className="mt-3 text-sm text-slate-400">Kein vollständiger Auto-Plan für die gewählte Zone gefunden.</p>
+      <section className="card animate-fade-in">
+        <div className="metric-label">Auto plan</div>
+        <h2 className="mt-2 text-2xl font-bold">No plan</h2>
+        <p className="mt-3 text-[var(--color-text-muted)]">Kein vollständiger Auto-Plan für die gewählte Zone gefunden.</p>
       </section>
     );
   }
 
   return (
-    <section className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+    <section className="card card-glow-blue animate-fade-in">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <div className="text-sm text-slate-400">Auto plan</div>
-          <h2 className="mt-1 text-2xl font-semibold text-white">Phase {plan.target.phase} · {plan.target.category}</h2>
-          <div className="mt-2 text-sm text-slate-400">Coverage {plan.currentCoveredSlots}/{plan.currentRequiredSlots} ({plan.currentCoveragePercent}%) → {plan.projectedCoveredSlots}/{plan.projectedRequiredSlots} ({plan.projectedCoveragePercent}%)</div>
-          <div className="mt-1 text-sm text-slate-400">Full platoons {plan.currentFullPlatoons}/{plan.totalPlatoons} → {plan.projectedFullPlatoons}/{plan.totalPlatoons}</div>
+          <div className="metric-label">Auto plan</div>
+          <h2 className="mt-2 text-2xl font-bold">Phase {plan.target.phase} · {plan.target.category}</h2>
+          <div className="mt-2 text-[var(--color-text-secondary)]">
+            Coverage {plan.currentCoveredSlots}/{plan.currentRequiredSlots} ({plan.currentCoveragePercent}%) → {plan.projectedCoveredSlots}/{plan.projectedRequiredSlots} ({plan.projectedCoveragePercent}%)
+          </div>
+          <div className="mt-1 text-[var(--color-text-secondary)]">
+            Full platoons {plan.currentFullPlatoons}/{plan.totalPlatoons} → {plan.projectedFullPlatoons}/{plan.totalPlatoons}
+          </div>
         </div>
-        <button type="button" onClick={() => onApplyAll(plan.combinedActions)} disabled={!canApply || plan.combinedActions.length === 0} className="rounded-2xl border border-indigo-700/70 bg-indigo-500/10 px-4 py-2 text-sm font-medium text-indigo-200 transition hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50">Apply full auto plan</button>
+        <button 
+          type="button" 
+          onClick={() => onApplyAll(plan.combinedActions)} 
+          disabled={!canApply || plan.combinedActions.length === 0} 
+          className="btn btn-primary"
+        >
+          Apply full auto plan
+        </button>
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <StatCard label="Planned steps" value={plan.steps.length} />
-        <StatCard label="Projected covered slots" value={plan.projectedCoveredSlots - plan.currentCoveredSlots} />
-        <StatCard label="Projected full platoons" value={plan.projectedFullPlatoons - plan.currentFullPlatoons} />
-        <StatCard label="Zone complete" value={plan.zoneComplete ? 'Yes' : 'No'} />
+        <div className="stat-card">
+          <div className="stat-label">Planned steps</div>
+          <div className="stat-value">{plan.steps.length}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Projected covered slots</div>
+          <div className="stat-value">+{plan.projectedCoveredSlots - plan.currentCoveredSlots}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Projected full platoons</div>
+          <div className="stat-value">+{plan.projectedFullPlatoons - plan.currentFullPlatoons}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Zone complete</div>
+          <div className="stat-value text-lg">{plan.zoneComplete ? 'Yes' : 'No'}</div>
+        </div>
       </div>
 
       <div className="mt-6 space-y-4">
         {plan.steps.map((step) => (
-          <div key={`${step.stepNumber}-${step.targetPlatoonId}`} className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Step {step.stepNumber}</div>
-            <div className="mt-1 text-lg font-semibold text-white">{getPlatoonLabel(step.targetPlatoonId, lookups?.platoonLabels)}</div>
-            <div className="mt-2 grid gap-3 md:grid-cols-4">
-              <div className="text-sm text-slate-300">Target: {step.targetCoveredSlotsBefore} → {step.targetCoveredSlotsAfter}</div>
-              <div className="text-sm text-slate-300">Zone coverage: {step.zoneCoveredSlotsBefore}/{step.zoneRequiredSlots} → {step.zoneCoveredSlotsAfter}/{step.zoneRequiredSlots}</div>
-              <div className="text-sm text-slate-300">Zone platoons: {step.zoneFullPlatoonsBefore} → {step.zoneFullPlatoonsAfter}</div>
-              <div className="text-sm text-slate-300">Displaced: {step.displacedAssignmentCount}</div>
+          <div key={`${step.stepNumber}-${step.targetPlatoonId}`} className="stat-card">
+            <div className="text-xs font-semibold text-[var(--color-text-muted)]">Step {step.stepNumber}</div>
+            <div className="mt-1 text-lg font-semibold">{getPlatoonLabel(step.targetPlatoonId, lookups?.platoonLabels)}</div>
+            <div className="mt-3 grid gap-3 md:grid-cols-4 text-sm">
+              <div>Target: {step.targetCoveredSlotsBefore} → {step.targetCoveredSlotsAfter}</div>
+              <div>Zone coverage: {step.zoneCoveredSlotsBefore}/{step.zoneRequiredSlots} → {step.zoneCoveredSlotsAfter}/{step.zoneRequiredSlots}</div>
+              <div>Zone platoons: {step.zoneFullPlatoonsBefore} → {step.zoneFullPlatoonsAfter}</div>
+              <div>Displaced: {step.displacedAssignmentCount}</div>
             </div>
             <div className="mt-4 space-y-2">
               {step.actions.map((action) => (
-                <div key={getActionKey(action)} className="rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-100">
+                <div key={getActionKey(action)} className="rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm">
                   {describeAction(action, lookups)}
-                  <div className="mt-1 text-xs text-slate-500">{getActionTypeLabel(action)}</div>
+                  <div className="mt-1 text-xs text-[var(--color-text-muted)]">{getActionTypeLabel(action)}</div>
                 </div>
               ))}
             </div>
@@ -682,18 +747,19 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   }
 
   async function exportPlan() {
-  const text = buildExportPlanText({
-  mode,
-  includedBonusZoneKeys,
-  bonusZoneOptions,
-  autoTarget,
-  autoTargetOptions,
-  lookups,
-  activeActions: actions,
-  firstCandidate,
-  secondCandidate,
-  autoPlan,
-}); try {
+    const text = buildExportPlanText({
+      mode,
+      includedBonusZoneKeys,
+      bonusZoneOptions,
+      autoTarget,
+      autoTargetOptions,
+      lookups,
+      activeActions: actions,
+      firstCandidate,
+      secondCandidate,
+      autoPlan,
+    });
+    try {
       await copyOrDownloadText(text, 'swgoh-tb-plan.txt');
       setExportPlanState('copied');
     } catch {
@@ -718,111 +784,224 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   const selectedAutoTargetValue = autoTarget && autoTarget.kind === 'phase-category' ? `${autoTarget.phase}::${autoTarget.category}` : '';
 
   return (
-    <main className="min-h-screen bg-gray-950 text-slate-100">
+    <div className="min-h-screen">
       <div className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="text-sm text-slate-400">Public guild simulator</div>
-            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-white">Next Full Platoon Simulator</h1>
-            <p className="mt-3 max-w-3xl text-sm text-slate-400">Manual mode für konkrete Entscheidungen je Slot. Auto mode baut automatisch einen umsetzbaren Plan für die ausgewählte unvollständige Zone.</p>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-            <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-[#020817] p-1">
-              <button type="button" onClick={() => handleModeChange('manual')} className={`rounded-xl px-4 py-2 text-sm transition ${mode === 'manual' ? 'bg-indigo-500/20 text-indigo-200' : 'text-slate-300 hover:bg-slate-800'}`}>Manual mode</button>
-              <button type="button" onClick={() => handleModeChange('auto')} className={`rounded-xl px-4 py-2 text-sm transition ${mode === 'auto' ? 'bg-indigo-500/20 text-indigo-200' : 'text-slate-300 hover:bg-slate-800'}`}>Auto mode</button>
+        {/* Header */}
+        <header className="mb-8 animate-fade-in">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm text-[var(--color-text-muted)]">Public guild simulator</p>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight">Next Full Platoon Simulator</h1>
+              <p className="mt-3 max-w-3xl text-[var(--color-text-secondary)]">
+                Manual mode für konkrete Entscheidungen je Slot. Auto mode baut automatisch einen umsetzbaren Plan für die ausgewählte unvollständige Zone.
+              </p>
             </div>
 
-            <button type="button" onClick={exportPlan} className="rounded-2xl border border-emerald-700/70 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20">{exportPlanState === 'copied' ? 'Plan exported' : exportPlanState === 'failed' ? 'Plan export failed' : 'Export Plan'}</button>
-            <button type="button" onClick={exportFullNewAssignment} className="rounded-2xl border border-cyan-700/70 bg-cyan-500/10 px-5 py-3 text-sm text-cyan-200 transition hover:bg-cyan-500/20">{exportFullState === 'copied' ? 'Assignment exported' : exportFullState === 'failed' ? 'Assignment export failed' : 'Export Full New Assignment'}</button>
-            <button type="button" onClick={resetScenario} disabled={actions.length === 0} className="rounded-2xl border border-slate-700 bg-slate-900/70 px-5 py-3 text-sm text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">Reset scenario</button>
-          </div>
-        </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+              {/* Mode Toggle */}
+              <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border-primary)] p-1">
+                <button 
+                  type="button" 
+                  onClick={() => handleModeChange('manual')} 
+                  className={`btn ${mode === 'manual' ? 'btn-primary' : 'btn-ghost'}`}
+                >
+                  Manual mode
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => handleModeChange('auto')} 
+                  className={`btn ${mode === 'auto' ? 'btn-primary' : 'btn-ghost'}`}
+                >
+                  Auto mode
+                </button>
+              </div>
 
-        <div className="mb-8 rounded-3xl border border-gray-800 bg-gray-950/70 p-6">
+              {/* Export Buttons */}
+              <button 
+                type="button" 
+                onClick={exportPlan} 
+                className="btn btn-secondary"
+              >
+                {exportPlanState === 'copied' ? '✓ Plan exported' : exportPlanState === 'failed' ? '✗ Export failed' : 'Export Plan'}
+              </button>
+              <button 
+                type="button" 
+                onClick={exportFullNewAssignment} 
+                className="btn btn-secondary"
+              >
+                {exportFullState === 'copied' ? '✓ Exported' : exportFullState === 'failed' ? '✗ Failed' : 'Export Full Assignment'}
+              </button>
+              <button 
+                type="button" 
+                onClick={resetScenario} 
+                disabled={actions.length === 0} 
+                className="btn btn-danger"
+              >
+                Reset scenario
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Settings Card */}
+        <section className="card mb-8 animate-fade-in">
           <div className="grid gap-6 lg:grid-cols-2">
+            {/* Bonus Zones */}
             <div>
-              <div className="text-sm text-slate-400">Bonus zones</div>
+              <div className="metric-label">Bonus zones</div>
               <div className="mt-4 flex flex-wrap gap-3">
-                {bonusZoneOptions.length === 0 ? <div className="text-sm text-slate-500">No bonus zones available.</div> : bonusZoneOptions.map((zone) => {
-                  const checked = includedBonusZoneKeys.includes(zone.zoneKey);
-                  return (
-                    <label key={zone.zoneKey} className="flex items-center gap-3 rounded-2xl border border-gray-800 bg-black/20 px-4 py-3 text-sm text-slate-200">
-                      <input type="checkbox" checked={checked} onChange={() => toggleBonusZone(zone.zoneKey)} className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500" />
-                      <span>{zone.label}</span>
-                    </label>
-                  );
-                })}
+                {bonusZoneOptions.length === 0 ? (
+                  <div className="text-sm text-[var(--color-text-muted)]">No bonus zones available.</div>
+                ) : (
+                  bonusZoneOptions.map((zone) => {
+                    const checked = includedBonusZoneKeys.includes(zone.zoneKey);
+                    return (
+                      <label key={zone.zoneKey} className="flex items-center gap-3 rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-4 py-3 text-sm cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={checked} 
+                          onChange={() => toggleBonusZone(zone.zoneKey)} 
+                          className="h-4 w-4 rounded border-[var(--color-border-secondary)] bg-[var(--color-bg-tertiary)] text-[var(--color-accent-blue)] focus:ring-[var(--color-accent-blue)]"
+                        />
+                        <span>{zone.label}</span>
+                      </label>
+                    );
+                  })
+                )}
               </div>
             </div>
 
+            {/* Auto Target */}
             <div>
-              <div className="text-sm text-slate-400">Auto target</div>
+              <div className="metric-label">Auto target</div>
               <div className="mt-4">
-                <select value={selectedAutoTargetValue} onChange={(e) => handleAutoTargetChange(e.target.value)} disabled={mode !== 'auto'} className="w-full rounded-2xl border border-slate-800 bg-[#0f172a] px-4 py-3 text-sm text-slate-100 outline-none transition disabled:cursor-not-allowed disabled:opacity-50">
-                  <option value="" className="bg-[#0f172a] text-slate-400">Select target zone</option>
+                <select 
+                  value={selectedAutoTargetValue} 
+                  onChange={(e) => handleAutoTargetChange(e.target.value)} 
+                  disabled={mode !== 'auto'} 
+                  className="select"
+                >
+                  <option value="">Select target zone</option>
                   {autoTargetOptions.map((option) => (
-                    <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`} className="bg-[#0f172a] text-slate-100">{option.label}</option>
+                    <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`}>
+                      {option.label}
+                    </option>
                   ))}
                 </select>
-                <div className="mt-2 text-xs text-slate-500">Im Auto mode sind nur unvollständige Zonen auswählbar.</div>
+                <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+                  Im Auto mode sind nur unvollständige Zonen auswählbar.
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        {error ? <div className="mb-8 rounded-3xl border border-rose-900/60 bg-rose-950/30 p-5 text-sm text-rose-200">Simulator API failed: {error}</div> : null}
-
-        <div className="mb-8 grid gap-4 md:grid-cols-5">
-          <StatCard label="Covered slots" value={summary ? summary.simulatedCoveredSlots : '—'} />
-          <StatCard label="Full platoons" value={summary ? summary.simulatedFullPlatoons : '—'} />
-          <StatCard label="Full zones" value={summary ? summary.simulatedFullZones : '—'} />
-          <StatCard label="Changed assignments" value={summary ? summary.changedAssignmentCount : '—'} />
-          <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4">
-            <div className="text-xs text-slate-400">Newly full</div>
-            <div className="mt-2 text-3xl font-semibold text-white">{newlyFullLabels.length ? newlyFullLabels.length : '0'}</div>
-            <div className="mt-2 break-words text-sm text-slate-500">{newlyFullLabels.length ? newlyFullLabels.join(', ') : 'No newly completed platoons'}</div>
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-8 card card-glow-rose animate-fade-in">
+            <div className="flex items-center gap-3">
+              <svg className="h-5 w-5 text-[var(--color-accent-rose)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>Simulator API failed: {error}</span>
+            </div>
           </div>
-        </div>
+        )}
 
+        {/* Stats */}
+        <section className="mb-8 grid gap-4 md:grid-cols-5 animate-fade-in">
+          <div className="metric-card">
+            <div className="metric-label">Covered slots</div>
+            <div className="metric-value">{summary ? summary.simulatedCoveredSlots : '—'}</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-label">Full platoons</div>
+            <div className="metric-value">{summary ? summary.simulatedFullPlatoons : '—'}</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-label">Full zones</div>
+            <div className="metric-value">{summary ? summary.simulatedFullZones : '—'}</div>
+          </div>
+          <div className="metric-card">
+            <div className="metric-label">Changed assignments</div>
+            <div className="metric-value">{summary ? summary.changedAssignmentCount : '—'}</div>
+          </div>
+          <div className={`metric-card ${newlyFullLabels.length > 0 ? 'card-glow-emerald' : ''}`}>
+            <div className="metric-label">Newly full</div>
+            <div className="metric-value">{newlyFullLabels.length || '0'}</div>
+            <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+              {newlyFullLabels.length ? newlyFullLabels.join(', ') : 'No newly completed platoons'}
+            </div>
+          </div>
+        </section>
+
+        {/* Main Content */}
         <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="rounded-3xl border border-gray-800 bg-gray-950/70 p-6">
+          {/* Active Scenario Sidebar */}
+          <aside className="card animate-fade-in">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold text-white">Active scenario</h2>
-                <div className="mt-1 text-sm text-slate-400">Actions currently applied</div>
+                <h2 className="text-xl font-semibold">Active scenario</h2>
+                <div className="mt-1 text-sm text-[var(--color-text-muted)]">Actions currently applied</div>
               </div>
-              <div className={`text-xs font-medium ${loading ? 'animate-pulse text-rose-400' : 'text-slate-500'}`}>{loading ? 'Recalculating…' : 'Auto-updated'}</div>
+              <div className={`text-xs font-medium ${loading ? 'animate-pulse text-[var(--color-accent-blue)]' : 'text-[var(--color-text-muted)]'}`}>
+                {loading ? 'Recalculating…' : 'Auto-updated'}
+              </div>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-slate-800 bg-black/20 p-4">
-              <div className="text-sm text-slate-400">Applied actions</div>
-              <div className="mt-2 text-4xl font-semibold text-white">{actions.length}</div>
+            <div className="mt-5 stat-card">
+              <div className="stat-label">Applied actions</div>
+              <div className="stat-value text-4xl">{actions.length}</div>
             </div>
 
             <div className="mt-5 space-y-3">
               {actions.length === 0 ? (
-                <div className="rounded-2xl border border-slate-800 bg-black/20 p-4 text-sm text-slate-400">Noch keine Aktionen aktiv.</div>
-              ) : actions.map((action) => (
-                <div key={getActionKey(action)} className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                  <div className="text-sm font-medium text-slate-100">{describeAction(action, lookups)}</div>
-                  <div className="mt-1 text-xs text-slate-500">{getActionTypeLabel(action)}</div>
-                  <button type="button" onClick={() => removeAction(action)} className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-200 transition hover:bg-slate-800">Remove</button>
+                <div className="stat-card text-center text-[var(--color-text-muted)]">
+                  Noch keine Aktionen aktiv.
                 </div>
-              ))}
+              ) : (
+                actions.map((action) => (
+                  <div key={getActionKey(action)} className="stat-card">
+                    <div className="font-medium">{describeAction(action, lookups)}</div>
+                    <div className="mt-1 text-sm text-[var(--color-text-muted)]">{getActionTypeLabel(action)}</div>
+                    <button 
+                      type="button" 
+                      onClick={() => removeAction(action)} 
+                      className="mt-3 btn btn-danger text-xs"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
 
-            <div className="mt-5 rounded-2xl border border-slate-800 bg-black/20 p-4">
-              <div className="text-sm text-slate-400">Scenario effect</div>
-              <div className="mt-4 space-y-3 text-sm text-slate-300">
-                <div className="flex items-center justify-between gap-3"><span>Delta covered slots</span><span>{data?.simulation.delta.deltaCoveredSlots ?? '—'}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Delta full platoons</span><span>{data?.simulation.delta.deltaFullPlatoons ?? '—'}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Delta full zones</span><span>{data?.simulation.delta.deltaFullZones ?? '—'}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Displaced assignments</span><span>{data?.simulation.delta.displacedAssignmentCount ?? '—'}</span></div>
+            {data && (
+              <div className="mt-5 stat-card">
+                <div className="stat-label">Scenario effect</div>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span>Delta covered slots</span>
+                    <span className="font-semibold">{data.simulation.delta.deltaCoveredSlots ?? '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Delta full platoons</span>
+                    <span className="font-semibold">{data.simulation.delta.deltaFullPlatoons ?? '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Delta full zones</span>
+                    <span className="font-semibold">{data.simulation.delta.deltaFullZones ?? '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Displaced assignments</span>
+                    <span className="font-semibold">{data.simulation.delta.displacedAssignmentCount ?? '—'}</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </aside>
 
+          {/* Main Planning Area */}
           <section className="space-y-6">
             {mode === 'auto' ? (
               <AutoPlanCard plan={autoPlan} lookups={lookups} canApply={!loading} onApplyAll={applyAll} />
@@ -835,6 +1014,6 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
           </section>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

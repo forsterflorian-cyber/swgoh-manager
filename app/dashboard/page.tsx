@@ -1,4 +1,3 @@
-
 'use client';
 
 import Link from 'next/link';
@@ -6,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Navbar } from '@/components/layout/Navbar';
 import { formatDateTime } from '@/lib/utils/format-date';
-import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { ApiEnvelope } from '@/lib/types/api';
@@ -129,23 +127,11 @@ async function fetchDashboard(): Promise<DashboardData> {
   return payload.data;
 }
 
-function cardToneClasses(tone: RosterState['tone']) {
-  switch (tone) {
-    case 'good':
-      return 'border-emerald-900/70 bg-emerald-950/20 text-emerald-200';
-    case 'warn':
-      return 'border-amber-900/70 bg-amber-950/20 text-amber-200';
-    case 'bad':
-      return 'border-rose-900/70 bg-rose-950/20 text-rose-200';
-    default:
-      return 'border-slate-800 bg-slate-950 text-slate-200';
-  }
-}
-
-function actionButtonClasses(primary = false) {
-  return primary
-    ? 'inline-flex items-center justify-center rounded-2xl border border-indigo-700/70 bg-indigo-500/10 px-4 py-3 text-sm font-medium text-indigo-200 transition hover:bg-indigo-500/20'
-    : 'inline-flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-800';
+function getProgressColor(percent: number): string {
+  if (percent >= 95) return 'progress-fill-emerald';
+  if (percent >= 70) return 'progress-fill-blue';
+  if (percent >= 40) return 'progress-fill-amber';
+  return 'progress-fill-rose';
 }
 
 export default function DashboardPage() {
@@ -395,11 +381,20 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 text-white">
+      <div className="min-h-screen">
         {navbar}
-        <div className="mx-auto max-w-6xl px-4 py-10">
-          <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-8 text-sm text-slate-400">
-            Loading dashboard…
+        <div className="mx-auto max-w-7xl px-6 py-12">
+          <div className="card animate-pulse">
+            <div className="h-8 w-48 rounded-lg bg-[var(--color-bg-tertiary)]" />
+            <div className="mt-4 h-4 w-96 rounded bg-[var(--color-bg-tertiary)]" />
+            <div className="mt-8 grid gap-6 md:grid-cols-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="metric-card">
+                  <div className="h-4 w-24 rounded bg-[var(--color-bg-tertiary)]" />
+                  <div className="mt-4 h-10 w-20 rounded bg-[var(--color-bg-tertiary)]" />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -408,16 +403,25 @@ export default function DashboardPage() {
 
   if (error === 'Unauthorized') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white">
+      <div className="min-h-screen">
         {navbar}
-        <main className="mx-auto max-w-4xl px-4 py-10">
-          <section className="rounded-3xl border border-rose-900/60 bg-rose-950/30 p-8">
-            <p className="text-sm text-rose-200">Your session is no longer valid.</p>
-            <p className="mt-3 text-sm text-rose-100/80">
-              Log in again to continue.
-            </p>
+        <main className="mx-auto max-w-4xl px-6 py-16">
+          <section className="card card-glow-rose animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent-rose)]">
+                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold">Session expired</h2>
+                <p className="mt-1 text-[var(--color-text-secondary)]">
+                  Your session is no longer valid. Please log in again.
+                </p>
+              </div>
+            </div>
             <div className="mt-6">
-              <Link href="/login" className={actionButtonClasses(true)}>
+              <Link href="/login" className="btn btn-primary">
                 Log in again
               </Link>
             </div>
@@ -428,204 +432,283 @@ export default function DashboardPage() {
   }
 
   const noGuildConnected = !guild;
+  const rosterCoveragePercent = strategicReadiness?.dataState
+    ? Math.round(strategicReadiness.dataState.rosterCoverageRatio * 100)
+    : 0;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen">
       {navbar}
 
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
-        {error ? (
-          <section className="rounded-3xl border border-rose-900/60 bg-rose-950/30 p-5 text-sm text-rose-200">
-            {error}
+      <main className="mx-auto max-w-7xl px-6 py-8">
+        {/* Notifications */}
+        {error && (
+          <section className="mb-6 card card-glow-rose animate-fade-in">
+            <div className="flex items-center gap-3">
+              <svg className="h-5 w-5 text-[var(--color-accent-rose)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm">{error}</span>
+            </div>
           </section>
-        ) : null}
+        )}
 
-        {notice ? (
+        {notice && (
           <section
-            className={`rounded-3xl border p-5 text-sm ${
-              notice.tone === 'success'
-                ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-200'
-                : 'border-rose-900/60 bg-rose-950/30 text-rose-200'
+            className={`mb-6 card animate-fade-in ${
+              notice.tone === 'success' ? 'card-glow-emerald' : 'card-glow-rose'
             }`}
           >
-            {notice.message}
+            <div className="flex items-center gap-3">
+              {notice.tone === 'success' ? (
+                <svg className="h-5 w-5 text-[var(--color-accent-emerald)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5 text-[var(--color-accent-rose)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
+              <span className="text-sm">{notice.message}</span>
+            </div>
           </section>
-        ) : null}
+        )}
 
         {noGuildConnected ? (
           <>
-            <Card className="shadow-[0_0_0_1px_rgba(15,23,42,0.25)]">
-              <p className="text-sm text-slate-400">Guild setup</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-                No guild connected
-              </h1>
-              <p className="mt-3 max-w-3xl text-sm text-slate-400">
-                Connect a guild first. After that you can sync members and roster data, then use
-                public matching and the simulator.
-              </p>
-
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                <Link href="/settings/guild">
-                  <Button variant="primary">Connect guild</Button>
-                </Link>
+            {/* Welcome Section */}
+            <section className="card card-glow-blue mb-8 animate-fade-in">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-blue)]">
+                  <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-[var(--color-text-muted)]">Guild setup</p>
+                  <h1 className="mt-2 text-3xl font-bold tracking-tight">
+                    No guild connected
+                  </h1>
+                  <p className="mt-3 max-w-2xl text-[var(--color-text-secondary)]">
+                    Connect your SWGOH guild to start planning Territory Battles. 
+                    Sync members, analyze roster data, and optimize platoon assignments.
+                  </p>
+                  <div className="mt-6">
+                    <Link href="/settings/guild">
+                      <button className="btn btn-primary">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        Connect guild
+                      </button>
+                    </Link>
+                  </div>
+                </div>
               </div>
-            </Card>
+            </section>
 
-            <section className="grid gap-6 lg:grid-cols-3">
-              <Card>
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Step 1</div>
-                <div className="mt-3 text-xl font-semibold text-white">Connect guild</div>
-                <p className="mt-2 text-sm text-slate-400">
-                  Add your SWGOH guild identifier and choose the public slug used by matching and simulator.
-                </p>
-              </Card>
-
-              <Card>
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Step 2</div>
-                <div className="mt-3 text-xl font-semibold text-white">Sync roster</div>
-                <p className="mt-2 text-sm text-slate-400">
-                  Import guild members and roster data so planning surfaces work with current data.
-                </p>
-              </Card>
-
-              <Card>
-                <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Step 3</div>
-                <div className="mt-3 text-xl font-semibold text-white">Plan and manage</div>
-                <p className="mt-2 text-sm text-slate-400">
-                  Use public matching for visibility and the simulator for officer planning and exports.
-                </p>
-              </Card>
+            {/* Steps */}
+            <section className="grid gap-6 md:grid-cols-3">
+              {[
+                { step: 1, title: 'Connect guild', desc: 'Add your SWGOH guild identifier and choose the public slug.', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+                { step: 2, title: 'Sync roster', desc: 'Import guild members and roster data for planning.', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+                { step: 3, title: 'Plan & manage', desc: 'Use matching and simulator for optimal platoon planning.', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
+              ].map((item) => (
+                <div key={item.step} className="card animate-fade-in">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-blue)] text-lg font-bold">
+                      {item.step}
+                    </div>
+                    <h3 className="text-lg font-semibold">{item.title}</h3>
+                  </div>
+                  <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+                    {item.desc}
+                  </p>
+                </div>
+              ))}
             </section>
           </>
         ) : (
           <>
-            <section className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.25)]">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            {/* Guild Header */}
+            <section className="card card-glow-blue mb-8 animate-fade-in">
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <div className="text-sm text-slate-400">Guild configuration</div>
-                  <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-                    {guild.name}
-                  </h1>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-                    <Badge>Slug: {guild.slug ?? 'not set'}</Badge>
-                    <Badge>Manage access: {canManageGuild ? 'Yes' : 'No'}</Badge>
-                    {activeTb ? (
-                      <Badge>Active TB: {activeTb.name}</Badge>
-                    ) : null}
+                  <p className="text-sm text-[var(--color-text-muted)]">Guild configuration</p>
+                  <h1 className="mt-2 text-3xl font-bold tracking-tight">{guild.name}</h1>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <Badge variant="neutral">
+                      <svg className="mr-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      {guild.slug ?? 'no slug'}
+                    </Badge>
+                    <Badge variant={canManageGuild ? 'success' : 'neutral'}>
+                      {canManageGuild ? '✓ Manage access' : '○ Read only'}
+                    </Badge>
+                    {activeTb && (
+                      <Badge variant="info">
+                        <svg className="mr-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {activeTb.name}
+                      </Badge>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <Button
-                    variant="primary"
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
                     onClick={handleSync}
                     disabled={!canManageGuild || !guild.id || syncing}
-                    isLoading={syncing}
+                    className="btn btn-primary"
                   >
-                    {syncing ? 'Sync running…' : 'Sync roster'}
-                  </Button>
+                    {syncing ? (
+                      <>
+                        <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Sync roster
+                      </>
+                    )}
+                  </button>
 
                   <Link href="/settings/guild">
-                    <Button variant="secondary">Open guild settings</Button>
+                    <button className="btn btn-secondary">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Settings
+                    </button>
                   </Link>
                 </div>
               </div>
             </section>
 
-            <section className="grid gap-4 lg:grid-cols-3">
-              <Card>
-                <div className="text-sm text-gray-400">Guild members</div>
-                <div className="mt-3 text-4xl font-semibold text-white">
-                  {guild.memberCount}
+            {/* Metric Cards */}
+            <section className="mb-8 grid gap-6 md:grid-cols-3">
+              <div className="metric-card animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="metric-label">Guild members</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-blue)]">
+                    <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
                 </div>
-                <div className="mt-2 text-sm text-gray-500">
-                  Imported guild members
-                </div>
-              </Card>
+                <div className="metric-value">{guild.memberCount}</div>
+                <div className="metric-detail">Imported guild members</div>
+              </div>
 
-              <Card>
-                <div className="text-sm text-gray-400">Rostered members</div>
-                <div className="mt-3 text-4xl font-semibold text-white">
-                  {guild.rosteredMembers}
+              <div className="metric-card animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="metric-label">Rostered members</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-emerald)]">
+                    <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                 </div>
-                <div className="mt-2 text-sm text-gray-500">
-                  Members with synced roster data
-                </div>
-              </Card>
+                <div className="metric-value">{guild.rosteredMembers}</div>
+                <div className="metric-detail">Members with synced roster data</div>
+              </div>
 
-              <Card variant={rosterState.tone === 'good' ? 'success' : rosterState.tone === 'warn' ? 'warning' : 'danger'}>
-                <div className="text-sm opacity-80">Roster status</div>
-                <div className="mt-3 text-2xl font-semibold">{rosterState.label}</div>
-                <div className="mt-2 text-sm opacity-80">{rosterState.detail}</div>
-              </Card>
+              <div className={`metric-card animate-fade-in ${
+                rosterState.tone === 'good' ? 'card-glow-emerald' : 
+                rosterState.tone === 'warn' ? 'card-glow-amber' : 'card-glow-rose'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="metric-label">Roster status</div>
+                  <Badge variant={
+                    rosterState.tone === 'good' ? 'success' : 
+                    rosterState.tone === 'warn' ? 'warning' : 'danger'
+                  }>
+                    {rosterState.label}
+                  </Badge>
+                </div>
+                <div className="mt-4">
+                  <div className="progress-bar">
+                    <div
+                      className={`progress-fill ${getProgressColor(rosterCoveragePercent)}`}
+                      style={{ width: `${rosterCoveragePercent}%` }}
+                    />
+                  </div>
+                  <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+                    {rosterState.detail}
+                  </div>
+                </div>
+              </div>
             </section>
 
-            <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold text-white">Data status</h2>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Keep guild membership and roster data up to date.
-                    </p>
-                  </div>
-                </div>
+            {/* Data Status & Public Surfaces */}
+            <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+              {/* Data Status */}
+              <div className="card animate-fade-in">
+                <h2 className="text-xl font-semibold">Data status</h2>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  Keep guild membership and roster data up to date.
+                </p>
 
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Last roster sync
-                    </div>
-                    <div className="mt-2 text-lg font-medium text-slate-100">
-                      {formatDateTime(lastRosterSync)}
-                    </div>
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  <div className="stat-card">
+                    <div className="stat-label">Last roster sync</div>
+                    <div className="stat-value text-lg">{formatDateTime(lastRosterSync)}</div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Reference dataset
-                    </div>
-                    <div className="mt-2 text-lg font-medium text-slate-100">
+                  <div className="stat-card">
+                    <div className="stat-label">Reference dataset</div>
+                    <div className="stat-value text-lg">
                       {strategicReadiness?.reference?.name ?? 'Not available'}
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      SWGOH.GG ID
-                    </div>
-                    <div className="mt-2 text-lg font-medium text-slate-100">
+                  <div className="stat-card">
+                    <div className="stat-label">SWGOH.GG ID</div>
+                    <div className="stat-value text-lg font-mono">
                       {guild.swgoh_gg_id ?? 'Not connected'}
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Roster coverage ratio
+                  <div className="stat-card">
+                    <div className="stat-label">Roster coverage</div>
+                    <div className="stat-value text-lg">
+                      {rosterCoveragePercent}%
                     </div>
-                    <div className="mt-2 text-lg font-medium text-slate-100">
-                      {strategicReadiness?.dataState
-                        ? `${Math.round(strategicReadiness.dataState.rosterCoverageRatio * 100)}%`
-                        : '—'}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">
-                      Share of guild members with synced roster data
+                    <div className="progress-bar mt-2">
+                      <div
+                        className={`progress-fill ${getProgressColor(rosterCoveragePercent)}`}
+                        style={{ width: `${rosterCoveragePercent}%` }}
+                      />
                     </div>
                   </div>
                 </div>
 
-                {syncStatus ? (
-                  <div className="mt-5 rounded-2xl border border-indigo-900/60 bg-indigo-950/20 p-4">
-                    <div className="text-sm font-medium text-indigo-200">{syncStatus.msg}</div>
-                    <div className="mt-2 text-sm text-indigo-300/80">
-                      {syncStatus.total > 0
-                        ? `${syncStatus.current}/${syncStatus.total}`
-                        : 'Preparing…'}
+                {/* Sync Progress */}
+                {syncStatus && (
+                  <div className="mt-6 rounded-xl border border-[var(--color-accent-blue)] bg-[rgb(59_130_246_/_0.1)] p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-[var(--color-accent-blue)]">
+                        {syncStatus.msg}
+                      </span>
+                      <span className="text-sm text-[var(--color-text-muted)]">
+                        {syncStatus.total > 0
+                          ? `${syncStatus.current}/${syncStatus.total}`
+                          : 'Preparing…'}
+                      </span>
                     </div>
-                    {syncStatus.total > 0 ? (
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-900">
+                    {syncStatus.total > 0 && (
+                      <div className="mt-3 progress-bar">
                         <div
-                          className="h-full rounded-full bg-indigo-500 transition-all"
+                          className="progress-fill progress-fill-blue"
                           style={{
                             width: `${Math.min(
                               100,
@@ -634,115 +717,125 @@ export default function DashboardPage() {
                           }}
                         />
                       </div>
-                    ) : null}
+                    )}
                   </div>
-                ) : null}
+                )}
               </div>
 
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
-                <h2 className="text-xl font-semibold text-white">Public surfaces</h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  Matching is the shared status board. Simulator is the officer planning tool.
+              {/* Public Surfaces */}
+              <div className="card animate-fade-in">
+                <h2 className="text-xl font-semibold">Public surfaces</h2>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  Share planning tools with your guild.
                 </p>
 
-                <div className="mt-5 space-y-4">
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-sm font-medium text-slate-100">Public matching</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      Read-only current state with filters
+                <div className="mt-6 space-y-4">
+                  <div className="rounded-xl border border-[var(--color-border-primary)] p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-blue)]">
+                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium">Public matching</div>
+                        <div className="text-xs text-[var(--color-text-muted)]">Read-only status board</div>
+                      </div>
                     </div>
                     <div className="mt-4">
                       {publicMatchingHref ? (
-                        <Link
-                          href={publicMatchingHref}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={actionButtonClasses()}
-                        >
-                          Open matching
+                        <Link href={publicMatchingHref} target="_blank" rel="noreferrer">
+                          <button className="btn btn-secondary w-full">Open matching</button>
                         </Link>
                       ) : (
-                        <div className="text-sm text-slate-500">Set a slug first.</div>
+                        <div className="text-sm text-[var(--color-text-muted)]">Set a slug first.</div>
                       )}
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-sm font-medium text-slate-100">Public simulator</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      Manual and auto planning with export
+                  <div className="rounded-xl border border-[var(--color-border-primary)] p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-purple)]">
+                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium">Public simulator</div>
+                        <div className="text-xs text-[var(--color-text-muted)]">Officer planning tool</div>
+                      </div>
                     </div>
                     <div className="mt-4">
                       {publicSimulatorHref ? (
-                        <Link
-                          href={publicSimulatorHref}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={actionButtonClasses()}
-                        >
-                          Open simulator
+                        <Link href={publicSimulatorHref} target="_blank" rel="noreferrer">
+                          <button className="btn btn-secondary w-full">Open simulator</button>
                         </Link>
                       ) : (
-                        <div className="text-sm text-slate-500">Set a slug first.</div>
+                        <div className="text-sm text-[var(--color-text-muted)]">Set a slug first.</div>
                       )}
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
-                    <div className="text-sm font-medium text-slate-100">Live planner</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      Operational TB planner for active events
-                    </div>
-                    <div className="mt-4">
-                      {activeTb ? (
-                        <Link href={`/tb/${activeTb.id}/phase/1`} className={actionButtonClasses()}>
-                          Open live planner
+                  {activeTb && (
+                    <div className="rounded-xl border border-[var(--color-accent-emerald)] p-4 card-glow-emerald">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-emerald)]">
+                          <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium">Live planner</div>
+                          <div className="text-xs text-[var(--color-text-muted)]">Active: {activeTb.name}</div>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <Link href={`/tb/${activeTb.id}/phase/1`}>
+                          <button className="btn btn-primary w-full">Open live planner</button>
                         </Link>
-                      ) : (
-                        <div className="text-sm text-slate-500">No active TB linked.</div>
-                      )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </section>
           </>
         )}
 
-        <section className="rounded-3xl border border-rose-900/70 bg-rose-950/20 p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-200">
-            Danger Zone
-          </p>
-          <h2 className="mt-3 text-xl font-semibold tracking-tight text-white">
-            Delete account
-          </h2>
-          <p className="mt-3 max-w-3xl text-sm text-rose-100/90">
-            Permanently delete your account. In V1 this is only allowed when no guild is connected.
-          </p>
-
-          {noGuildConnected ? (
-            <form action="/api/account/delete" method="post" className="mt-6">
-              <button
-                type="submit"
-                className="inline-flex rounded-xl border border-rose-700 bg-rose-950/50 px-4 py-3 text-sm font-medium text-rose-100 transition-colors hover:bg-rose-900/50"
-              >
-                Delete account
-              </button>
-            </form>
-          ) : (
-            <div className="mt-6">
-              <button
-                type="button"
-                disabled
-                className="inline-flex cursor-not-allowed rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm font-medium text-slate-500"
-              >
-                Delete account
-              </button>
-              <p className="mt-3 text-sm text-rose-100/80">
-                Delete guild first before deleting your account.
+        {/* Danger Zone */}
+        <section className="mt-8 card card-glow-rose animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent-rose)]">
+              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold">Danger Zone</h2>
+              <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                Irreversible actions. Proceed with caution.
               </p>
             </div>
-          )}
+          </div>
+
+          <div className="mt-6">
+            {noGuildConnected ? (
+              <form action="/api/account/delete" method="post">
+                <button type="submit" className="btn btn-danger">
+                  Delete account
+                </button>
+              </form>
+            ) : (
+              <div>
+                <button disabled className="btn btn-danger opacity-50 cursor-not-allowed">
+                  Delete account
+                </button>
+                <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+                  Delete guild first before deleting your account.
+                </p>
+              </div>
+            )}
+          </div>
         </section>
       </main>
     </div>

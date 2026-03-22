@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import UpgradeRecommendations from './UpgradeRecommendations';
@@ -22,29 +21,25 @@ type CoverageStatusFilter = 'all' | 'full' | 'partial' | 'empty';
 
 const GAP_ACTION_META: Record<
   PlatoonMatchingGap['recommendedAction'],
-  { label: string; className: string }
+  { label: string; variant: 'success' | 'warning' | 'danger' | 'info' }
 > = {
   use_unused: {
     label: 'Use unused unit',
-    className: 'border-emerald-800 bg-emerald-950/40 text-emerald-300',
+    variant: 'success',
   },
   upgrade: {
     label: 'Upgrade existing unit',
-    className: 'border-amber-800 bg-amber-950/40 text-amber-300',
+    variant: 'warning',
   },
   acquire: {
     label: 'Acquire or unlock unit',
-    className: 'border-rose-800 bg-rose-950/40 text-rose-300',
+    variant: 'danger',
   },
   reassign: {
     label: 'Reassignment needed',
-    className: 'border-sky-800 bg-sky-950/40 text-sky-300',
+    variant: 'info',
   },
 };
-
-function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(' ');
-}
 
 function normalizeCategory(
   category: string | null | undefined,
@@ -55,7 +50,6 @@ function normalizeCategory(
   return 'all';
 }
 
-
 function CoverageCard({
   phase,
   category,
@@ -64,28 +58,38 @@ function CoverageCard({
   coveragePercent,
   isBonus,
 }: PlatoonMatchingResult['coverage'][number]) {
+  const getProgressColor = (pct: number) => {
+    if (pct >= 100) return 'progress-fill-emerald';
+    if (pct >= 75) return 'progress-fill-blue';
+    if (pct >= 40) return 'progress-fill-amber';
+    return 'progress-fill-rose';
+  };
+
   return (
-    <Card variant={coveragePercent === 100 ? 'success' : coveragePercent >= 50 ? 'default' : 'danger'}>
-      <div className="flex items-center justify-between gap-3">
+    <div className={`metric-card animate-fade-in ${
+      coveragePercent === 100 ? 'card-glow-emerald' : 
+      coveragePercent >= 50 ? '' : 'card-glow-rose'
+    }`}>
+      <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-medium text-white">
+          <div className="metric-label">
             P{phase} · {isBonus ? 'Bonus' : category}
           </div>
-          <div className="mt-1 text-xs text-gray-500">
+          <div className="mt-1 text-sm text-[var(--color-text-muted)]">
             {assignedCount} / {requirementCount} assigned
           </div>
         </div>
         <div className="text-right">
-          <div className="text-lg font-semibold text-white">{coveragePercent}%</div>
+          <div className="text-2xl font-bold">{coveragePercent}%</div>
         </div>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-900">
+      <div className="mt-4 progress-bar">
         <div
-          className="h-full rounded-full bg-indigo-500"
+          className={`progress-fill ${getProgressColor(coveragePercent)}`}
           style={{ width: `${coveragePercent}%` }}
         />
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -95,43 +99,33 @@ function AssignmentCard({
   assignment: PlatoonMatchingResult['assignments'][number];
 }) {
   return (
-    <Card>
+    <div className="stat-card animate-fade-in">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-white">
-              {assignment.unitName ?? assignment.unitBaseId}
-            </span>
+            <span className="font-medium">{assignment.unitName ?? assignment.unitBaseId}</span>
             <Badge variant="neutral" size="sm">
               P{assignment.phase} · {assignment.planetCategory ?? '?'}
             </Badge>
           </div>
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
             {assignment.playerName} · {assignment.platoonKey} · Slot {assignment.slotNumber}
           </p>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
 function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
   const meta = GAP_ACTION_META[gap.recommendedAction];
-  const variantMap = {
-    use_unused: 'success' as const,
-    upgrade: 'warning' as const,
-    acquire: 'danger' as const,
-    reassign: 'info' as const,
-  };
 
   return (
-    <Card variant={variantMap[gap.recommendedAction]}>
+    <div className="stat-card animate-fade-in">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-white">
-              {gap.unitName ?? gap.unitBaseId}
-            </span>
+            <span className="font-medium">{gap.unitName ?? gap.unitBaseId}</span>
             <Badge variant="neutral" size="sm">
               P{gap.phase} · {gap.isBonus ? 'Bonus' : gap.planetCategory ?? '?'}
             </Badge>
@@ -141,15 +135,13 @@ function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
               </Badge>
             )}
           </div>
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
             {(gap.zoneName ?? gap.zoneKey) + ' · '}Platoon {gap.platoonNumber ?? '?'} · Slot{' '}
             {gap.slotNumber}
           </p>
         </div>
 
-        <Badge variant={variantMap[gap.recommendedAction]}>
-          {meta.label}
-        </Badge>
+        <Badge variant={meta.variant}>{meta.label}</Badge>
       </div>
 
       {gap.possibleSources.length > 0 && (
@@ -167,7 +159,7 @@ function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
           ))}
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -181,11 +173,7 @@ function FilterSelect({
   children: React.ReactNode;
 }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-xl border border-gray-800 bg-gray-950/80 px-3 py-2 text-sm text-white outline-none ring-0"
-    >
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="select">
       {children}
     </select>
   );
@@ -333,99 +321,104 @@ export default function PublicGuildMatchingBoard({
     mode === 'member' && statusFilter === 'assigned_only' ? [] : sortedGaps;
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <header className="mb-8">
-          <p className="text-sm text-gray-500">Public guild matching board</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{guildName}</h1>
-          <p className="mt-2 text-sm text-gray-400">
+    <main className="min-h-screen">
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        {/* Header */}
+        <header className="mb-8 animate-fade-in">
+          <p className="text-sm text-[var(--color-text-muted)]">Public guild matching board</p>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight">{guildName}</h1>
+          <p className="mt-2 text-[var(--color-text-secondary)]">
             Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
             {matching.totalAssigned}/{matching.totalRequired} assigned
           </p>
-          <Link
-            href={`/public/guild/${slug}/simulator`}
-            className="mt-3 inline-block"
-          >
-            <Button variant="secondary">Next Full Platoon Simulator →</Button>
-          </Link>
+          <div className="mt-4">
+            <Link href={`/public/guild/${slug}/simulator`}>
+              <button className="btn btn-secondary">
+                <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Next Full Platoon Simulator
+              </button>
+            </Link>
+          </div>
         </header>
 
-        <section className="mb-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
-            <div className="text-sm text-gray-400">Total coverage</div>
-            <div className="mt-2 text-3xl font-semibold text-white">{matching.coveragePercent}%</div>
-            <div className="mt-1 text-xs text-gray-500">
-              {matching.totalAssigned} / {matching.totalRequired} slots filled
+        {/* Stats */}
+        <section className="mb-8 grid gap-6 md:grid-cols-3 animate-fade-in">
+          <div className="metric-card">
+            <div className="flex items-center justify-between">
+              <div className="metric-label">Total coverage</div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-blue)]">
+                <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+            </div>
+            <div className="metric-value">{matching.coveragePercent}%</div>
+            <div className="metric-detail">{matching.totalAssigned} / {matching.totalRequired} slots filled</div>
+            <div className="mt-4 progress-bar">
+              <div
+                className="progress-fill progress-fill-blue"
+                style={{ width: `${matching.coveragePercent}%` }}
+              />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
-            <div className="text-sm text-gray-400">Assignments</div>
-            <div className="mt-2 text-3xl font-semibold text-white">
-              {matching.assignments.length}
+          <div className="metric-card">
+            <div className="flex items-center justify-between">
+              <div className="metric-label">Assignments</div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-emerald)]">
+                <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
             </div>
-            <div className="mt-1 text-xs text-gray-500">Optimal committed placements</div>
+            <div className="metric-value">{matching.assignments.length}</div>
+            <div className="metric-detail">Optimal committed placements</div>
           </div>
 
-          <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
-            <div className="text-sm text-gray-400">Open gaps</div>
-            <div className="mt-2 text-3xl font-semibold text-white">{matching.gaps.length}</div>
-            <div className="mt-1 text-xs text-gray-500">Unmatched required slots</div>
+          <div className="metric-card">
+            <div className="flex items-center justify-between">
+              <div className="metric-label">Open gaps</div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-rose)]">
+                <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+            </div>
+            <div className="metric-value">{matching.gaps.length}</div>
+            <div className="metric-detail">Unmatched required slots</div>
           </div>
         </section>
 
-        <section className="mb-8 rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
-          <div className="mb-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('officer');
-                setStatusFilter('gaps_only');
-                setMemberFilter('all');
-              }}
-              className={cn(
-                'rounded-xl border px-3 py-2 text-sm',
-                mode === 'officer'
-                  ? 'border-indigo-700 bg-indigo-950/60 text-indigo-200'
-                  : 'border-gray-800 bg-gray-900 text-gray-300',
-              )}
-            >
-              Officer view
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setMode('member');
-                setStatusFilter('assigned_only');
-              }}
-              className={cn(
-                'rounded-xl border px-3 py-2 text-sm',
-                mode === 'member'
-                  ? 'border-indigo-700 bg-indigo-950/60 text-indigo-200'
-                  : 'border-gray-800 bg-gray-900 text-gray-300',
-              )}
-            >
-              Member view
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setMode('upgrades');
-              }}
-              className={cn(
-                'rounded-xl border px-3 py-2 text-sm',
-                mode === 'upgrades'
-                  ? 'border-emerald-700 bg-emerald-950/60 text-emerald-200'
-                  : 'border-gray-800 bg-gray-900 text-gray-300',
-              )}
-            >
-              🎯 Upgrade-Empfehlungen
-            </button>
+        {/* View Modes & Filters */}
+        <section className="mb-8 card animate-fade-in">
+          {/* View Mode Tabs */}
+          <div className="mb-6 flex flex-wrap gap-3">
+            {[
+              { key: 'officer', label: 'Officer view', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+              { key: 'member', label: 'Member view', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+              { key: 'upgrades', label: '🎯 Upgrade-Empfehlungen', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+            ].map((view) => (
+              <button
+                key={view.key}
+                onClick={() => setMode(view.key as ViewMode)}
+                className={`btn ${
+                  mode === view.key
+                    ? 'btn-primary'
+                    : 'btn-ghost'
+                }`}
+              >
+                <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={view.icon} />
+                </svg>
+                {view.label}
+              </button>
+            ))}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          {/* Filters */}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <FilterSelect value={phaseFilter} onChange={setPhaseFilter}>
               <option value="all">All phases</option>
               <option value="1">P1</option>
@@ -436,7 +429,7 @@ export default function PublicGuildMatchingBoard({
               <option value="6">P6</option>
             </FilterSelect>
 
-            <FilterSelect
+              <FilterSelect
               value={categoryFilter}
               onChange={(value) => setCategoryFilter(value as CategoryFilter)}
             >
@@ -481,23 +474,25 @@ export default function PublicGuildMatchingBoard({
               value={unitQuery}
               onChange={(e) => setUnitQuery(e.target.value)}
               placeholder="Search unit"
-              className="rounded-xl border border-gray-800 bg-gray-950/80 px-3 py-2 text-sm text-white outline-none placeholder:text-gray-500"
+              className="input"
             />
           </div>
         </section>
 
+        {/* Content based on mode */}
         {mode === 'upgrades' ? (
           <UpgradeRecommendations slug={slug} />
         ) : (
           <>
-            <section className="mb-10">
+            {/* Coverage Section */}
+            <section className="mb-10 animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">Coverage by phase and category</h2>
-                <span className="text-xs text-gray-500">{sortedCoverage.length} visible</span>
+                <h2 className="text-xl font-semibold">Coverage by phase and category</h2>
+                <Badge variant="neutral">{sortedCoverage.length} visible</Badge>
               </div>
 
               {sortedCoverage.length === 0 ? (
-                <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                <div className="card text-center text-[var(--color-text-muted)]">
                   No coverage entries match the current filters.
                 </div>
               ) : (
@@ -512,16 +507,17 @@ export default function PublicGuildMatchingBoard({
               )}
             </section>
 
-            <section className="mb-10">
+            {/* Assignments Section */}
+            <section className="mb-10 animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">
+                <h2 className="text-xl font-semibold">
                   {mode === 'member' ? 'Assignments for selected member' : 'Assignments'}
                 </h2>
-                <span className="text-xs text-gray-500">{visibleAssignments.length} visible</span>
+                <Badge variant="neutral">{visibleAssignments.length} visible</Badge>
               </div>
 
               {visibleAssignments.length === 0 ? (
-                <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                <div className="card text-center text-[var(--color-text-muted)]">
                   No assignments match the current filters.
                 </div>
               ) : (
@@ -536,16 +532,17 @@ export default function PublicGuildMatchingBoard({
               )}
             </section>
 
-            <section>
+            {/* Gaps Section */}
+            <section className="animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">
+                <h2 className="text-xl font-semibold">
                   {mode === 'member' ? 'Possible placements / open gaps' : 'Gaps'}
                 </h2>
-                <span className="text-xs text-gray-500">{visibleGaps.length} visible</span>
+                <Badge variant="neutral">{visibleGaps.length} visible</Badge>
               </div>
 
               {visibleGaps.length === 0 ? (
-                <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                <div className="card text-center text-[var(--color-text-muted)]">
                   No gaps match the current filters.
                 </div>
               ) : (
