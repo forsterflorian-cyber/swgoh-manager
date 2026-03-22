@@ -146,9 +146,11 @@ export async function GET(
         a => a.memberId === member.memberId
       ).length;
 
+      // Sammle ALLE Units mit Gaps (auch die, die der Member nicht hat)
+      const allUnitsWithGaps = new Set(gapsByUnit.keys());
+
+      // Empfehlungen für Units, die der Member bereits hat
       for (const unit of memberRoster) {
-        // Berücksichtige ALLE Gaps für diese Unit (nicht nur die ohne eligible owners)
-        // Denn: Auch wenn ein anderer Member eligible ist, ist der Slot vielleicht nicht zugewiesen
         const gaps = gapsByUnit.get(unit.unitBaseId) || [];
         if (gaps.length === 0) continue;
 
@@ -211,6 +213,84 @@ export async function GET(
         });
       }
 
+      // Empfehlungen für Units, die der Member NICHT hat (acquire)
+      for (const unitBaseId of allUnitsWithGaps) {
+        // Überspringe Units, die der Member bereits hat
+        if (memberRoster.some(u => u.unitBaseId === unitBaseId)) continue;
+
+        const gaps = gapsByUnit.get(unitBaseId) || [];
+        if (gaps.length === 0) continue;
+
+        // Finde die Unit-Informationen aus den Gaps
+        const firstGap = gaps[0];
+        const unitName = firstGap.unitName || unitBaseId;
+
+        const openSlotsForUnit = gaps
+          .map(g => ({
+            phase: g.phase,
+            category: g.planetCategory || 'MIX',
+            requiredRelic: g.minRelic,
+            requiredRarity: g.minRarity,
+            hasEligibleOwner: g.possibleSources.some(s => s.kind === 'eligible'),
+          }));
+
+        if (openSlotsForUnit.length === 0) continue;
+
+        // Finde das höchste benötigte Relic
+        const maxRelic = Math.max(...openSlotsForUnit.map(s => s.requiredRelic));
+        const maxRarity = Math.max(...openSlotsForUnit.map(s => s.requiredRarity));
+
+        // Berechne die Anzahl der Slots, die freigeschaltet würden
+        const slotsByPhase = new Map<string, number>();
+        for (const slot of openSlotsForUnit) {
+          if (maxRarity >= slot.requiredRarity && maxRelic >= slot.requiredRelic) {
+            const key = `${slot.phase}:${slot.category}`;
+            slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
+          }
+        }
+
+        const slotsUnlocked = Array.from(slotsByPhase.values()).reduce((a, b) => a + b, 0);
+        if (slotsUnlocked === 0) continue;
+
+        const cost = calculateRelicCost(0, maxRelic);
+        const impactScore = cost > 0 ? slotsUnlocked / cost : 0;
+
+        const affectedPhases = Array.from(slotsByPhase.entries()).map(([key, count]) => {
+          const [phase, category] = key.split(':');
+          const coverage = matching.coverage.find(
+            c => c.phase === parseInt(phase) && c.category === category
+          );
+          return {
+            phase: parseInt(phase),
+            category,
+            currentCoverage: coverage?.coveragePercent || 0,
+            newCoverage: coverage
+              ? Math.round(
+                  ((coverage.assignedCount + count) / coverage.requirementCount) * 100
+                )
+              : 0,
+            slotsAdded: count,
+          };
+        });
+
+        let priority: 'top' | 'good' | 'longterm';
+        if (impactScore >= 0.015) priority = 'top';
+        else if (impactScore >= 0.008) priority = 'good';
+        else priority = 'longterm';
+
+        recommendations.push({
+          unitBaseId,
+          unitName,
+          currentRelic: 0,
+          recommendedRelic: maxRelic,
+          slotsUnlocked,
+          affectedPhases,
+          estimatedCost: cost,
+          impactScore,
+          priority,
+        });
+      }
+
       // Sortiere nach Impact
       recommendations.sort((a, b) => b.impactScore - a.impactScore);
 
@@ -225,7 +305,7 @@ export async function GET(
         memberId: member.memberId,
         playerName: member.playerName,
         allyCode: member.allyCode,
-        recommendations: filteredRecommendations.slice(0, 10), // Top 10 (statt 5)
+        recommendations: filteredRecommendations.slice(0, 10), // Top 10
         currentContributions: memberContributions,
         potentialGain,
       };
