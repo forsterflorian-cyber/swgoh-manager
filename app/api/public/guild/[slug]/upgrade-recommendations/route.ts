@@ -85,7 +85,7 @@ function calculateUpgradeImpact(
   let maxRelic = memberRelic;
 
   for (const slot of openSlots) {
-    if (slot.hasEligibleOwner) continue;
+    // Nur Rarity prüfen - hasEligibleOwner ignorieren
     if (memberRarity < slot.requiredRarity) continue;
     
     if (memberRelic < slot.requiredRelic && slot.requiredRelic <= 8) {
@@ -144,8 +144,8 @@ export async function GET(
         if (gaps.length === 0) continue;
 
         // Prüfe, welche Slots durch Upgrade freigeschaltet werden könnten
+        // Vereinfachte Filterung: Alle Gaps für diese Unit
         const openSlotsForUnit = gaps
-          .filter(g => !g.possibleSources.some(s => s.memberId === member.memberId))
           .map(g => ({
             phase: g.phase,
             category: g.planetCategory || 'MIX',
