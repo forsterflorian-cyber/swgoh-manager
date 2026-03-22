@@ -209,6 +209,49 @@ export default function UpgradeRecommendations({ slug }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [phaseFilter, setPhaseFilter] = useState<number | 'all'>('all');
+  const [exported, setExported] = useState(false);
+
+  const handleExportReport = async () => {
+    if (!data) return;
+
+    const completedPhases = data.incompletePhases.filter(p => p.currentCoverage === 100);
+    const partiallyCompletePhases = data.incompletePhases.filter(p => p.currentCoverage >= 80);
+
+    const memberList = data.memberRecommendations
+      .slice(0, 10)
+      .map(m => {
+        const topRec = m.recommendations[0];
+        if (!topRec) return null;
+        return `**${m.playerName}**: ${topRec.unitName} R${topRec.currentRelic}→R${topRec.recommendedRelic} (+${topRec.slotsUnlocked} Slots)`;
+      })
+      .filter(Boolean)
+      .join('\n');
+
+    const phaseList = data.incompletePhases
+      .filter(p => p.currentCoverage < 100)
+      .map(p => {
+        const emoji = p.currentCoverage >= 80 ? '🟢' : p.currentCoverage >= 50 ? '🟡' : '🔴';
+        return `${emoji} P${p.phase} ${p.category}: ${p.currentCoverage}% (${p.openSlots} offen)`;
+      })
+      .join('\n');
+
+    const text = `📊 **${data.guildName} - TB Upgrade Report**
+
+🎯 **Guild Progress**
+• Aktuelle Coverage: **${data.summary.currentGuildCoverage}%**
+• Potentielle Coverage: **${data.summary.potentialGuildCoverage}%**
+• Mögliche Slots: **+${data.summary.totalSlotsUnlockable}**
+
+${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.map(p => `P${p.phase} ${p.category}`).join(', ')}\n\n` : ''}${phaseList ? `📋 **Offene Phasen:**\n${phaseList}\n\n` : ''}${memberList ? `👥 **Top Empfehlungen:**\n${memberList}\n\n` : ''}_Generiert von SWGOH Manager_`;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setExported(true);
+      setTimeout(() => setExported(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -297,6 +340,9 @@ export default function UpgradeRecommendations({ slug }: Props) {
               </div>
               <div className="text-xs text-gray-400">Slots möglich</div>
             </div>
+            <Button variant="secondary" onClick={handleExportReport}>
+              {exported ? '✓ Kopiert!' : '📋 Report für Discord'}
+            </Button>
           </div>
         </div>
       </Card>
