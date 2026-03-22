@@ -3,6 +3,7 @@ import { sql } from '@vercel/postgres';
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import { jsonError, jsonOk } from '@/lib/api/responses';
 import { PlatoonReadinessService } from '@/lib/services/platoon-readiness';
+import { getPrimaryGuildSettingsForUser } from '@/lib/services/guild-settings';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +14,10 @@ export async function GET() {
       return jsonError('Unauthorized', 401);
     }
 
-    const planning = await PlatoonReadinessService.analyzeForUser(user.id);
+    const [planning, guildSettings] = await Promise.all([
+      PlatoonReadinessService.analyzeForUser(user.id),
+      getPrimaryGuildSettingsForUser(user.id),
+    ]);
     const guild = planning.guild;
 
     if (!guild) {
@@ -57,7 +61,7 @@ export async function GET() {
         id: guild.id,
         name: guild.name,
         slug: guild.slug,
-        swgoh_gg_id: null,
+        swgoh_gg_id: guildSettings?.guildId ?? null,
         memberCount: guild.memberCount,
         rosteredMembers: guild.rosteredMembers,
       },

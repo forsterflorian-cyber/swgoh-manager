@@ -2,7 +2,7 @@ import { type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils/cn';
 
-type CardVariant = 'default' | 'highlight' | 'success' | 'warning' | 'danger';
+type CardVariant = 'default' | 'highlight' | 'success' | 'warning' | 'danger' | 'info';
 
 interface CardProps {
   variant?: CardVariant;
@@ -16,6 +16,7 @@ const variantClasses: Record<CardVariant, string> = {
   success: 'border-emerald-800 bg-emerald-950/30',
   warning: 'border-amber-800 bg-amber-950/30',
   danger: 'border-rose-800 bg-rose-950/30',
+  info: 'border-sky-800 bg-sky-950/30',
 };
 
 export function Card({ variant = 'default', className, children }: CardProps) {

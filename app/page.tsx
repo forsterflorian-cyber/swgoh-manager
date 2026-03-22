@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 
 export default function HomePage() {
   return (
@@ -20,22 +22,13 @@ export default function HomePage() {
             </p>
 
             <div className="mt-8 flex flex-wrap gap-4">
-              <Link
-                href="/dashboard"
-                className="rounded-xl border border-blue-500 bg-blue-600 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
-              >
-                Open dashboard
-              </Link>
-              <Link
-                href="/planning/platoons?fixture=demo"
-                className="rounded-xl border border-gray-700 bg-gray-900 px-6 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800"
-              >
-                View demo planner
+              <Link href="/dashboard">
+                <Button variant="primary" size="lg">Open dashboard</Button>
               </Link>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-gray-800 bg-gray-900/70 p-6">
+          <Card>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
               What the app answers
             </p>
@@ -54,7 +47,7 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </div>

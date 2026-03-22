@@ -533,31 +533,31 @@ export default function DashboardPage() {
             </section>
 
             <section className="grid gap-4 lg:grid-cols-3">
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
-                <div className="text-sm text-slate-400">Guild members</div>
+              <Card>
+                <div className="text-sm text-gray-400">Guild members</div>
                 <div className="mt-3 text-4xl font-semibold text-white">
                   {guild.memberCount}
                 </div>
-                <div className="mt-2 text-sm text-slate-500">
+                <div className="mt-2 text-sm text-gray-500">
                   Imported guild members
                 </div>
-              </div>
+              </Card>
 
-              <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6">
-                <div className="text-sm text-slate-400">Rostered members</div>
+              <Card>
+                <div className="text-sm text-gray-400">Rostered members</div>
                 <div className="mt-3 text-4xl font-semibold text-white">
                   {guild.rosteredMembers}
                 </div>
-                <div className="mt-2 text-sm text-slate-500">
+                <div className="mt-2 text-sm text-gray-500">
                   Members with synced roster data
                 </div>
-              </div>
+              </Card>
 
-              <div className={`rounded-3xl border p-6 ${cardToneClasses(rosterState.tone)}`}>
+              <Card variant={rosterState.tone === 'good' ? 'success' : rosterState.tone === 'warn' ? 'warning' : 'danger'}>
                 <div className="text-sm opacity-80">Roster status</div>
                 <div className="mt-3 text-2xl font-semibold">{rosterState.label}</div>
                 <div className="mt-2 text-sm opacity-80">{rosterState.detail}</div>
-              </div>
+              </Card>
             </section>
 
             <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
@@ -607,6 +607,9 @@ export default function DashboardPage() {
                       {strategicReadiness?.dataState
                         ? `${Math.round(strategicReadiness.dataState.rosterCoverageRatio * 100)}%`
                         : '—'}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">
+                      Share of guild members with synced roster data
                     </div>
                   </div>
                 </div>

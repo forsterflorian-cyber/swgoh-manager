@@ -759,10 +759,10 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
             <div>
               <div className="text-sm text-slate-400">Auto target</div>
               <div className="mt-4">
-                <select value={selectedAutoTargetValue} onChange={(e) => handleAutoTargetChange(e.target.value)} disabled={mode !== 'auto'} className="w-full rounded-2xl border border-slate-800 bg-black/20 px-4 py-3 text-sm text-slate-100 outline-none transition disabled:cursor-not-allowed disabled:opacity-50">
-                  <option value="">Select target zone</option>
+                <select value={selectedAutoTargetValue} onChange={(e) => handleAutoTargetChange(e.target.value)} disabled={mode !== 'auto'} className="w-full rounded-2xl border border-slate-800 bg-[#0f172a] px-4 py-3 text-sm text-slate-100 outline-none transition disabled:cursor-not-allowed disabled:opacity-50">
+                  <option value="" className="bg-[#0f172a] text-slate-400">Select target zone</option>
                   {autoTargetOptions.map((option) => (
-                    <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`}>{option.label}</option>
+                    <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`} className="bg-[#0f172a] text-slate-100">{option.label}</option>
                   ))}
                 </select>
                 <div className="mt-2 text-xs text-slate-500">Im Auto mode sind nur unvollständige Zonen auswählbar.</div>

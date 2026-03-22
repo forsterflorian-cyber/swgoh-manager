@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { Card } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import type { PlatoonMatchingGap, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
 
 type Props = {
@@ -61,7 +64,7 @@ function CoverageCard({
   isBonus,
 }: PlatoonMatchingResult['coverage'][number]) {
   return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+    <Card variant={coveragePercent === 100 ? 'success' : coveragePercent >= 50 ? 'default' : 'danger'}>
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-medium text-white">
@@ -81,7 +84,7 @@ function CoverageCard({
           style={{ width: `${coveragePercent}%` }}
         />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -91,44 +94,50 @@ function AssignmentCard({
   assignment: PlatoonMatchingResult['assignments'][number];
 }) {
   return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3">
+    <Card>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-white">
               {assignment.unitName ?? assignment.unitBaseId}
             </span>
-            <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+            <Badge variant="neutral" size="sm">
               P{assignment.phase} · {assignment.planetCategory ?? '?'}
-            </span>
+            </Badge>
           </div>
           <p className="mt-1 text-xs text-gray-500">
             {assignment.playerName} · {assignment.platoonKey} · Slot {assignment.slotNumber}
           </p>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
 function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
   const meta = GAP_ACTION_META[gap.recommendedAction];
+  const variantMap = {
+    use_unused: 'success' as const,
+    upgrade: 'warning' as const,
+    acquire: 'danger' as const,
+    reassign: 'info' as const,
+  };
 
   return (
-    <div className="rounded-2xl border border-gray-800 bg-gray-950/60 px-4 py-3">
+    <Card variant={variantMap[gap.recommendedAction]}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-white">
               {gap.unitName ?? gap.unitBaseId}
             </span>
-            <span className="rounded-full border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+            <Badge variant="neutral" size="sm">
               P{gap.phase} · {gap.isBonus ? 'Bonus' : gap.planetCategory ?? '?'}
-            </span>
+            </Badge>
             {gap.minRelic > 0 && (
-              <span className="rounded-full border border-gray-800 bg-gray-900 px-2 py-0.5 text-xs text-gray-400">
+              <Badge variant="neutral" size="sm">
                 R{gap.minRelic}
-              </span>
+              </Badge>
             )}
           </div>
           <p className="mt-1 text-xs text-gray-500">
@@ -137,26 +146,27 @@ function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
           </p>
         </div>
 
-        <span className={cn('rounded-full border px-2 py-0.5 text-xs font-medium', meta.className)}>
+        <Badge variant={variantMap[gap.recommendedAction]}>
           {meta.label}
-        </span>
+        </Badge>
       </div>
 
       {gap.possibleSources.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {gap.possibleSources.slice(0, 6).map((source) => (
-            <span
+            <Badge
               key={`${gap.requirementId}:${source.memberId}:${source.kind}`}
-              className="rounded-full border border-gray-800 bg-gray-900 px-2 py-1 text-xs text-gray-400"
+              variant="neutral"
+              size="sm"
             >
               {source.playerName}
               {source.kind === 'near_miss' &&
                 ` · -${source.missingRelicTiers ?? 0} relic / -${source.missingRarity ?? 0}★`}
-            </span>
+            </Badge>
           ))}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
