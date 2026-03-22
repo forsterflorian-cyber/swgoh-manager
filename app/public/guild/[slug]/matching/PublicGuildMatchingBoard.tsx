@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import UpgradeRecommendations from './UpgradeRecommendations';
 import type { PlatoonMatchingGap, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
 
 type Props = {
@@ -14,7 +15,7 @@ type Props = {
   matching: PlatoonMatchingResult;
 };
 
-type ViewMode = 'officer' | 'member';
+type ViewMode = 'officer' | 'member' | 'upgrades';
 type StatusFilter = 'all' | 'gaps_only' | 'assigned_only' | 'placeable_only' | 'unresolved_only';
 type CategoryFilter = 'all' | 'DS' | 'LS' | 'MIX' | 'BONUS';
 type CoverageStatusFilter = 'all' | 'full' | 'partial' | 'empty';
@@ -407,6 +408,21 @@ export default function PublicGuildMatchingBoard({
             >
               Member view
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode('upgrades');
+              }}
+              className={cn(
+                'rounded-xl border px-3 py-2 text-sm',
+                mode === 'upgrades'
+                  ? 'border-emerald-700 bg-emerald-950/60 text-emerald-200'
+                  : 'border-gray-800 bg-gray-900 text-gray-300',
+              )}
+            >
+              🎯 Upgrade-Empfehlungen
+            </button>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
@@ -470,72 +486,78 @@ export default function PublicGuildMatchingBoard({
           </div>
         </section>
 
-        <section className="mb-10">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">Coverage by phase and category</h2>
-            <span className="text-xs text-gray-500">{sortedCoverage.length} visible</span>
-          </div>
+        {mode === 'upgrades' ? (
+          <UpgradeRecommendations slug={slug} />
+        ) : (
+          <>
+            <section className="mb-10">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">Coverage by phase and category</h2>
+                <span className="text-xs text-gray-500">{sortedCoverage.length} visible</span>
+              </div>
 
-          {sortedCoverage.length === 0 ? (
-            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
-              No coverage entries match the current filters.
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {sortedCoverage.map((entry) => (
-                <CoverageCard
-                  key={`${entry.phase}-${entry.category}-${entry.isBonus ? 'bonus' : 'main'}`}
-                  {...entry}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+              {sortedCoverage.length === 0 ? (
+                <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                  No coverage entries match the current filters.
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {sortedCoverage.map((entry) => (
+                    <CoverageCard
+                      key={`${entry.phase}-${entry.category}-${entry.isBonus ? 'bonus' : 'main'}`}
+                      {...entry}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
 
-        <section className="mb-10">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">
-              {mode === 'member' ? 'Assignments for selected member' : 'Assignments'}
-            </h2>
-            <span className="text-xs text-gray-500">{visibleAssignments.length} visible</span>
-          </div>
+            <section className="mb-10">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">
+                  {mode === 'member' ? 'Assignments for selected member' : 'Assignments'}
+                </h2>
+                <span className="text-xs text-gray-500">{visibleAssignments.length} visible</span>
+              </div>
 
-          {visibleAssignments.length === 0 ? (
-            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
-              No assignments match the current filters.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {visibleAssignments.map((assignment) => (
-                <AssignmentCard
-                  key={`${assignment.requirementId}:${assignment.memberId}`}
-                  assignment={assignment}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+              {visibleAssignments.length === 0 ? (
+                <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                  No assignments match the current filters.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {visibleAssignments.map((assignment) => (
+                    <AssignmentCard
+                      key={`${assignment.requirementId}:${assignment.memberId}`}
+                      assignment={assignment}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
 
-        <section>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">
-              {mode === 'member' ? 'Possible placements / open gaps' : 'Gaps'}
-            </h2>
-            <span className="text-xs text-gray-500">{visibleGaps.length} visible</span>
-          </div>
+            <section>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">
+                  {mode === 'member' ? 'Possible placements / open gaps' : 'Gaps'}
+                </h2>
+                <span className="text-xs text-gray-500">{visibleGaps.length} visible</span>
+              </div>
 
-          {visibleGaps.length === 0 ? (
-            <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
-              No gaps match the current filters.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {visibleGaps.map((gap) => (
-                <GapCard key={gap.requirementId} gap={gap} />
-              ))}
-            </div>
-          )}
-        </section>
+              {visibleGaps.length === 0 ? (
+                <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 text-sm text-gray-400">
+                  No gaps match the current filters.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {visibleGaps.map((gap) => (
+                    <GapCard key={gap.requirementId} gap={gap} />
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
     </main>
   );
