@@ -89,6 +89,13 @@ function calculateUpgradeImpact(
     // Nur Rarity prüfen
     if (memberRarity < slot.requiredRarity) continue;
     
+    // Zähle Slots die der Member bereits füllen kann
+    // (auch wenn ein anderer Member eligible ist, ist der Slot vielleicht nicht zugewiesen)
+    if (memberRelic >= slot.requiredRelic) {
+      const key = `${slot.phase}:${slot.category}`;
+      slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
+    }
+    
     // Upgrade empfehlen wenn Member Relic niedriger ist als benötigt
     // Auch wenn bereits ein eligible Owner existiert (da dieser vielleicht nicht zugewiesen ist)
     if (memberRelic < slot.requiredRelic && slot.requiredRelic <= 8) {
