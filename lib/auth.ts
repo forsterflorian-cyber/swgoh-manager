@@ -31,21 +31,33 @@ export const authOptions: NextAuthOptions = {
         return false;
       }
 
-      try {
-        await sql`
-          INSERT INTO users (name, email, image, updated_at)
-          VALUES (${user.name}, ${user.email}, ${user.image}, NOW())
-          ON CONFLICT (email)
-          DO UPDATE SET
-            name = EXCLUDED.name,
-            image = EXCLUDED.image,
-            updated_at = NOW()
-        `;
-        return true;
-      } catch (error) {
-        console.error('Database error during signIn:', error);
-        return true;
+      const MAX_RETRIES = 2;
+      let lastError: unknown = null;
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          await sql`
+            INSERT INTO users (name, email, image, updated_at)
+            VALUES (${user.name}, ${user.email}, ${user.image}, NOW())
+            ON CONFLICT (email)
+            DO UPDATE SET
+              name = EXCLUDED.name,
+              image = EXCLUDED.image,
+              updated_at = NOW()
+          `;
+          return true;
+        } catch (error) {
+          lastError = error;
+          console.error(`Database error during signIn (attempt ${attempt + 1}/${MAX_RETRIES}):`, error);
+          
+          if (attempt < MAX_RETRIES - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+          }
+        }
       }
+
+      console.error('All signIn attempts failed:', lastError);
+      return '/login?error=database_error';
     },
     async session({ session, token }) {
       if (session.user && token.sub) {

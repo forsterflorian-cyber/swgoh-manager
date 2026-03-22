@@ -318,26 +318,64 @@ export default function DashboardPage() {
         msg: 'Starting roster sync...',
       });
 
+      const BATCH_SIZE = 5;
       let count = 0;
+      const errors: string[] = [];
 
-      for (const member of members) {
-        count += 1;
-        setSyncStatus({
-          current: count,
-          total: members.length,
-          msg: `Syncing ${member.player_name}...`,
-        });
+      for (let i = 0; i < members.length; i += BATCH_SIZE) {
+        const batch = members.slice(i, i + BATCH_SIZE);
+        
+        const results = await Promise.allSettled(
+          batch.map(async (member) => {
+            const response = await fetch(
+              `/api/guild/${guild.id}/sync?allyCode=${member.ally_code}`,
+              { method: 'POST' }
+            );
+            const payload = (await response.json()) as ApiEnvelope<{ syncedUnits: number }>;
 
-        const response = await fetch(`/api/guild/${guild.id}/sync?allyCode=${member.ally_code}`, {
-          method: 'POST',
-        });
-        const payload = (await response.json()) as ApiEnvelope<{ syncedUnits: number }>;
+            if (!response.ok || !payload.ok) {
+              throw new Error(
+                payload.ok
+                  ? `Roster sync failed for ${member.player_name}.`
+                  : payload.error,
+              );
+            }
 
-        if (!response.ok || !payload.ok) {
-          throw new Error(
-            payload.ok ? `Roster sync failed for ${member.player_name}.` : payload.error,
-          );
+            return member.player_name;
+          })
+        );
+
+        for (const result of results) {
+          count += 1;
+          if (result.status === 'fulfilled') {
+            setSyncStatus({
+              current: count,
+              total: members.length,
+              msg: `Synced ${result.value} (${count}/${members.length})`,
+            });
+          } else {
+            const errorMsg =
+              result.reason instanceof Error
+                ? result.reason.message
+                : 'Unknown error';
+            errors.push(errorMsg);
+            setSyncStatus({
+              current: count,
+              total: members.length,
+              msg: `Error: ${errorMsg}`,
+            });
+          }
         }
+
+        if (errors.length > 0 && count < members.length) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+
+      if (errors.length > 0) {
+        throw new Error(
+          `Roster sync completed with ${errors.length} error(s): ${errors[0]}`,
+        );
       }
 
       setSyncStatus({
