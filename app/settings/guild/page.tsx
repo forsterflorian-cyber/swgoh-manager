@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { Navbar } from '@/components/layout/Navbar';
 import { GuildSettingsForm } from '@/components/guild/guild-settings-form';
 import { CopyDiscordButton } from '@/components/guild/copy-discord-button';
+import { IgnoreMemberButton } from '@/components/guild/ignore-member-button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -301,34 +302,58 @@ export default async function GuildSettingsPage() {
                   <tr>
                     <th>Name</th>
                     <th>Ally Code</th>
+                    <th>Status</th>
                     <th>Profile</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {members.map((m, i) => (
-                    <tr key={i}>
-                      <td className="font-medium">{m.playerName}</td>
-                      <td className="font-mono text-[var(--color-text-muted)]">
-                        {m.allyCode ?? '—'}
-                      </td>
-                      <td>
-                        {m.allyCode ? (
-                          <a
-                            href={`https://swgoh.gg/p/${m.allyCode.replace(/-/g, '')}/`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-[var(--color-accent-blue)] hover:underline"
-                          >
-                            <span>View profile</span>
-                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                            </svg>
-                          </a>
-                        ) : (
-                          <span className="text-[var(--color-text-muted)]">—</span>
-                        )}
-                      </td>
-                    </tr>
+                        <tr key={i} className={m.ignoredAt ? 'opacity-50' : ''}>
+                          <td className="font-medium">
+                            {m.playerName}
+                            {m.ignoredAt && (
+                              <Badge variant="warning" size="sm" className="ml-2">
+                                Ignored
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="font-mono text-[var(--color-text-muted)]">
+                            {m.allyCode ?? '—'}
+                          </td>
+                          <td>
+                            {m.ignoredAt ? (
+                              <Badge variant="warning">Ignored</Badge>
+                            ) : (
+                              <Badge variant="success">Active</Badge>
+                            )}
+                          </td>
+                          <td>
+                            {m.allyCode ? (
+                              <a
+                                href={`https://swgoh.gg/p/${m.allyCode.replace(/-/g, '')}/`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-[var(--color-accent-blue)] hover:underline"
+                              >
+                                <span>View profile</span>
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            ) : (
+                              <span className="text-[var(--color-text-muted)]">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <IgnoreMemberButton
+                              guildId={guild.id}
+                              memberId={m.id}
+                              memberName={m.playerName}
+                              isIgnored={!!m.ignoredAt}
+                            />
+                          </td>
+                        </tr>
                   ))}
                 </tbody>
               </table>

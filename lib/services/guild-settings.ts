@@ -67,29 +67,37 @@ export async function getPrimaryGuildSettingsForUser(
 }
 
 export type GuildMemberRow = {
+  id: string;
   playerName: string;
   allyCode: string | null;
   galacticPower: number;
+  ignoredAt: string | null;
 };
 
 type GuildMemberDbRow = {
+  id: string;
   player_name: string;
   ally_code: string | null;
   galactic_power: number;
+  ignored_at: string | null;
 };
 
 export async function getGuildMemberList(guildDbId: string): Promise<GuildMemberRow[]> {
   const result = await sql<GuildMemberDbRow>`
-    SELECT player_name, ally_code, galactic_power
+    SELECT id, player_name, ally_code, galactic_power, ignored_at::text
     FROM guild_members
     WHERE guild_id = ${guildDbId}
-    ORDER BY galactic_power DESC
+    ORDER BY 
+      CASE WHEN ignored_at IS NULL THEN 0 ELSE 1 END,
+      galactic_power DESC
   `;
 
   return result.rows.map((row) => ({
+    id: row.id,
     playerName: row.player_name,
     allyCode: row.ally_code,
     galacticPower: row.galactic_power,
+    ignoredAt: row.ignored_at,
   }));
 }
 

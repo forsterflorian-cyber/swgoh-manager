@@ -1930,6 +1930,16 @@ async function detectShipUnitIds(unitBaseIds: string[]): Promise<ReadonlySet<str
   return new Set(result.rows.map((r) => r.unit_base_id));
 }
 
+async function getIgnoredMemberIds(guildId: string): Promise<ReadonlySet<string>> {
+  const result = await sql<{ id: string }>`
+    SELECT id
+    FROM guild_members
+    WHERE guild_id = ${guildId}
+      AND ignored_at IS NOT NULL
+  `;
+  return new Set(result.rows.map((r) => r.id));
+}
+
 async function loadRosterForUnits(
   guildId: string,
   unitBaseIds: string[]
@@ -1940,16 +1950,18 @@ async function loadRosterForUnits(
 
   // Primary source: player_roster (Comlink-synced via /api/guild/roster-sync).
   // Falls back to roster_cache (swgoh.gg-synced) if player_roster is empty for this guild.
-  // Primary source: player_roster (Comlink-synced via /api/guild/roster-sync).
-  // Falls back to roster_cache (swgoh.gg-synced) if player_roster is empty for this guild.
   // Ship detection is no longer done here — it is stamped onto slot.unitCategory at slot-load
   // time via detectShipUnitIds(), so gearLevel in roster rows is not used for classification.
   const fromPlayerRoster = await loadRosterFromPlayerRoster(guildId, unitBaseIds);
   const rosterSource = fromPlayerRoster.length > 0 ? 'player_roster' : 'roster_cache';
-  const roster =
+  const rawRoster =
     fromPlayerRoster.length > 0
       ? fromPlayerRoster
       : await loadRosterFromRosterCache(guildId, unitBaseIds);
+
+  // Filter out ignored members
+  const ignoredMembers = await getIgnoredMemberIds(guildId);
+  const roster = rawRoster.filter((entry) => !ignoredMembers.has(entry.memberId));
 
   // ---- Part D diagnostics -----------------------------------------------
   const distinctUnitsRequired = unitBaseIds.length;
@@ -1964,7 +1976,8 @@ async function loadRosterForUnits(
     `roster_rows=${roster.length} ` +
     `distinct_members=${distinctMembersInRoster} ` +
     `units_with_owner=${unitsWithAtLeastOneOwner} ` +
-    `units_no_owner=${missingUnitsInRoster}`
+    `units_no_owner=${missingUnitsInRoster} ` +
+    `ignored_members=${ignoredMembers.size}`
   );
   // -----------------------------------------------------------------------
 
