@@ -486,7 +486,7 @@ function CandidateCard({ title, candidate, onApplyOne, onApplyAll, onReplaceOne,
 
 function StatCard({ label, value, big = true }: { label: string; value: string | number; big?: boolean }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-black/20 p-4">
+    <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4">
       <div className="text-xs text-slate-400">{label}</div>
       <div className={`mt-2 font-semibold text-white ${big ? 'text-3xl' : 'text-2xl'}`}>{value}</div>
     </div>
@@ -718,7 +718,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   const selectedAutoTargetValue = autoTarget && autoTarget.kind === 'phase-category' ? `${autoTarget.phase}::${autoTarget.category}` : '';
 
   return (
-    <main className="min-h-screen bg-black text-slate-100">
+    <main className="min-h-screen bg-gray-950 text-slate-100">
       <div className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -739,7 +739,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
           </div>
         </div>
 
-        <div className="mb-8 rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+        <div className="mb-8 rounded-3xl border border-gray-800 bg-gray-950/70 p-6">
           <div className="grid gap-6 lg:grid-cols-2">
             <div>
               <div className="text-sm text-slate-400">Bonus zones</div>
@@ -747,7 +747,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
                 {bonusZoneOptions.length === 0 ? <div className="text-sm text-slate-500">No bonus zones available.</div> : bonusZoneOptions.map((zone) => {
                   const checked = includedBonusZoneKeys.includes(zone.zoneKey);
                   return (
-                    <label key={zone.zoneKey} className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-black/20 px-4 py-3 text-sm text-slate-200">
+                    <label key={zone.zoneKey} className="flex items-center gap-3 rounded-2xl border border-gray-800 bg-black/20 px-4 py-3 text-sm text-slate-200">
                       <input type="checkbox" checked={checked} onChange={() => toggleBonusZone(zone.zoneKey)} className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500" />
                       <span>{zone.label}</span>
                     </label>
@@ -778,7 +778,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
           <StatCard label="Full platoons" value={summary ? summary.simulatedFullPlatoons : '—'} />
           <StatCard label="Full zones" value={summary ? summary.simulatedFullZones : '—'} />
           <StatCard label="Changed assignments" value={summary ? summary.changedAssignmentCount : '—'} />
-          <div className="rounded-2xl border border-slate-800 bg-[#020817] p-4">
+          <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4">
             <div className="text-xs text-slate-400">Newly full</div>
             <div className="mt-2 text-3xl font-semibold text-white">{newlyFullLabels.length ? newlyFullLabels.length : '0'}</div>
             <div className="mt-2 break-words text-sm text-slate-500">{newlyFullLabels.length ? newlyFullLabels.join(', ') : 'No newly completed platoons'}</div>
@@ -786,7 +786,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="rounded-3xl border border-slate-800 bg-[#020817] p-6 shadow-[0_0_0_1px_rgba(15,23,42,0.35)]">
+          <aside className="rounded-3xl border border-gray-800 bg-gray-950/70 p-6">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-white">Active scenario</h2>
