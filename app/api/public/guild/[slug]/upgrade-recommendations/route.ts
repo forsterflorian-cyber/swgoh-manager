@@ -416,7 +416,7 @@ export async function GET(
         memberId: member.memberId,
         playerName: member.playerName,
         allyCode: member.allyCode,
-        recommendations: filteredRecommendations.slice(0, 10), // Top 10
+        recommendations: filteredRecommendations.slice(0, 3), // Top 3 nächste Schritte
         currentContributions: memberContributions,
         potentialGain,
       };

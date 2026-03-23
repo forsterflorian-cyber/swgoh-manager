@@ -118,6 +118,9 @@ function UpgradeCard({
                 <span className="text-gray-500">
                   ({phase.currentCoverage}% → {phase.newCoverage}%)
                 </span>
+                {phase.newCoverage === 100 && phase.currentCoverage < 100 && (
+                  <Badge variant="success">🎉 Planet vollständig!</Badge>
+                )}
               </div>
             ))}
           </div>
@@ -327,7 +330,7 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
               🎯 Upgrade-Empfehlungen
             </h2>
             <p className="mt-2 text-gray-300">
-              Die Gilde schafft aktuell{' '}
+              Die 3 nächsten besten Schritte für jedes Mitglied. Gilde schafft aktuell{' '}
               <span className="font-semibold text-white">
                 {data.summary.currentGuildCoverage}%
               </span>
