@@ -143,7 +143,12 @@ function calculateUpgradeScore(
     if (phase.newCoverage === 100 && phase.currentCoverage < 100) {
       zonesCompletedTo100++;
       // Bonus basierend auf wie viele Slots nötig waren um die Zone zu vervollständigen
-      completionBonus += 50 + (phase.slotsAdded * 5);
+      completionBonus += 80 + (phase.slotsAdded * 8);
+      
+      // Extra Bonus für "Finishing Touch" (95%+ → 100%)
+      if (phase.currentCoverage >= 95) {
+        completionBonus += 30;
+      }
     }
   }
 
@@ -171,11 +176,11 @@ function calculateUpgradeScore(
  */
 function determinePriority(upgradeScore: number): 'top' | 'good' | 'longterm' {
   // Schwellenwerte basierend auf typischen Score-Bereichen:
-  // - Top: Score >= 30 (hohe Effizienz, viele Slots, Zonen-Komplettierung)
-  // - Good: Score >= 15 (moderate Effizienz)
-  // - Longterm: Score < 15 (geringe Effizienz, teure Upgrades)
-  if (upgradeScore >= 30) return 'top';
-  if (upgradeScore >= 15) return 'good';
+  // - Top: Score >= 25 (hohe Effizienz, viele Slots, Zonen-Komplettierung)
+  // - Good: Score >= 12 (moderate Effizienz)
+  // - Longterm: Score < 12 (geringe Effizienz, teure Upgrades)
+  if (upgradeScore >= 25) return 'top';
+  if (upgradeScore >= 12) return 'good';
   return 'longterm';
 }
 
