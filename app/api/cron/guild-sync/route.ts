@@ -5,6 +5,14 @@ import { syncGuildRosters } from '@/lib/services/guild-roster-sync';
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max
 
+
+export async function GET(request: NextRequest) {
+  return handleCron(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleCron(request);
+}
 /**
  * POST /api/cron/guild-sync
  *
@@ -13,7 +21,7 @@ export const maxDuration = 300; // 5 minutes max
  *
  * Runs daily at 06:00 UTC to sync all guild rosters.
  */
-export async function POST(request: NextRequest) {
+async function handleCron(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
 
