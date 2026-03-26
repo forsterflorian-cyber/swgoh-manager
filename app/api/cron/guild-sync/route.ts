@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     // Get all guilds with active slugs
     const guildsResult = await sql<{ id: string; name: string; slug: string }>`
       SELECT id, name, slug
-      FROM guild_settings
+      FROM guilds
       WHERE slug IS NOT NULL AND slug != ''
     `;
 
