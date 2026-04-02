@@ -315,6 +315,8 @@ export interface PlatoonMatchingCoverage {
   phase: number;
   category: PlanetCategory;
   isBonus: boolean;
+  fullPlatoons: number;
+  totalPlatoons: number;
   assignedCount: number;
   requirementCount: number;
   coveragePercent: number;

@@ -53,6 +53,8 @@ function normalizeCategory(
 function CoverageCard({
   phase,
   category,
+  fullPlatoons,
+  totalPlatoons,
   assignedCount,
   requirementCount,
   coveragePercent,
@@ -77,6 +79,9 @@ function CoverageCard({
           </div>
           <div className="mt-1 text-sm text-[var(--color-text-muted)]">
             {assignedCount} / {requirementCount} assigned
+          </div>
+          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+            Full Platoons {fullPlatoons}/{totalPlatoons}
           </div>
         </div>
         <div className="text-right">

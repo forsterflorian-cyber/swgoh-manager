@@ -668,11 +668,28 @@ for (const phase of phases) {
 
     const assignedCount = categorySlots.filter((s) => matchResult.assignments.has(s.slotKey)).length;
     const requirementCount = categorySlots.length;
+    const platoonCoverage = new Map<string, { totalSlots: number; assignedSlots: number }>();
+
+    for (const slot of categorySlots) {
+      const existing = platoonCoverage.get(slot.platoonKey) ?? { totalSlots: 0, assignedSlots: 0 };
+      existing.totalSlots += 1;
+      if (matchResult.assignments.has(slot.slotKey)) {
+        existing.assignedSlots += 1;
+      }
+      platoonCoverage.set(slot.platoonKey, existing);
+    }
+
+    const totalPlatoons = platoonCoverage.size;
+    const fullPlatoons = [...platoonCoverage.values()].filter(
+      (platoon) => platoon.totalSlots > 0 && platoon.assignedSlots === platoon.totalSlots,
+    ).length;
 
     allCoverage.push({
       phase,
       category,
       isBonus: category === 'SPECIAL',
+      fullPlatoons,
+      totalPlatoons,
       assignedCount,
       requirementCount,
       coveragePercent:
