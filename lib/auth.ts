@@ -26,10 +26,13 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn({ user }) {
+    async signIn({ user, account }) {
       if (!user.email) {
         return false;
       }
+
+      const discordUserId =
+        account?.provider === 'discord' ? (account.providerAccountId ?? null) : null;
 
       const MAX_RETRIES = 2;
       let lastError: unknown = null;
@@ -37,12 +40,13 @@ export const authOptions: NextAuthOptions = {
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
           await sql`
-            INSERT INTO users (name, email, image, updated_at)
-            VALUES (${user.name}, ${user.email}, ${user.image}, NOW())
+            INSERT INTO users (name, email, image, discord_user_id, updated_at)
+            VALUES (${user.name}, ${user.email}, ${user.image}, ${discordUserId}, NOW())
             ON CONFLICT (email)
             DO UPDATE SET
               name = EXCLUDED.name,
               image = EXCLUDED.image,
+              discord_user_id = COALESCE(EXCLUDED.discord_user_id, users.discord_user_id),
               updated_at = NOW()
           `;
           return true;

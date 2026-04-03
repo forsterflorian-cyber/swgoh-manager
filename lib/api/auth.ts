@@ -73,15 +73,14 @@ export async function userCanManageGuild(userId: string, guildId: string): Promi
 }
 
 export async function getDiscordUserIdForUser(userId: string): Promise<string | null> {
-  const result = await sql<{ provider_account_id: string }>`
-    SELECT provider_account_id
-    FROM accounts
-    WHERE user_id = ${userId}
-      AND provider = 'discord'
+  const result = await sql<{ discord_user_id: string }>`
+    SELECT discord_user_id
+    FROM users
+    WHERE id = ${userId}
     LIMIT 1
   `;
 
-  return result.rows[0]?.provider_account_id ?? null;
+  return result.rows[0]?.discord_user_id ?? null;
 }
 
 export async function userCanAccessTbInstance(
