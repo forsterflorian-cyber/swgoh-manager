@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
+import { WorkingOverlay } from '@/components/ui/WorkingOverlay';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import { formatDateTime } from '@/lib/utils/format-date';
 import {
@@ -14,6 +15,7 @@ import {
   isIgnoredMatchingScope,
   normalizeIgnoredMatchingScopes,
 } from '@/lib/utils/matching-scopes';
+import { useWorkingOverlay } from '@/lib/utils/use-working-overlay';
 import type { ApiEnvelope } from '@/lib/types/api';
 import type {
   GapActionType,
@@ -159,6 +161,7 @@ function PlatoonReadinessContent() {
   const plannerView = isPlannerViewKey(requestedView) ? requestedView : 'overview';
   const [data, setData] = useState<StrategicPlannerData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloading, setReloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
@@ -174,6 +177,8 @@ function PlatoonReadinessContent() {
     async (showLoadingState = true) => {
       if (showLoadingState) {
         setLoading(true);
+      } else {
+        setReloading(true);
       }
 
       try {
@@ -197,6 +202,8 @@ function PlatoonReadinessContent() {
       } finally {
         if (showLoadingState) {
           setLoading(false);
+        } else {
+          setReloading(false);
         }
       }
     },
@@ -386,7 +393,12 @@ function PlatoonReadinessContent() {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {navbar}
-      <div className="mx-auto max-w-7xl px-4 py-10">
+      <div className="relative mx-auto max-w-7xl px-4 py-10">
+        <WorkingOverlay
+          active={reloading}
+          title="Refreshing planner"
+          description="Updating readiness data and recalculating the planner view."
+        />
         <section className="rounded-3xl border border-gray-800 bg-gradient-to-br from-blue-950/50 via-gray-900 to-gray-950 p-6 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
@@ -1828,6 +1840,8 @@ function MatchingView({
   const [gapFilter, setGapFilter] = useState<GapActionType | 'all'>('all');
   const [selectedPlatoonKey, setSelectedPlatoonKey] = useState<string | 'all'>('all');
   const [ignoredScopes, setIgnoredScopes] = useState<IgnoredMatchingScope[]>([]);
+  const { isWorking: isScenarioUpdating, runWithOverlay: runScenarioOverlay } =
+    useWorkingOverlay();
   const baselineMatching = matching ?? EMPTY_MATCHING_RESULT;
 
   const availableScopeKeys = useMemo(
@@ -2029,28 +2043,36 @@ function MatchingView({
   };
 
   const handleToggleIgnoreScope = (scope: IgnoredMatchingScope) => {
-    setSelectedPlatoonKey('all');
-    setGapFilter('all');
-    if (
-      activeSelectedCoverageCell &&
-      getIgnoredMatchingScopeKey(activeSelectedCoverageCell) === getIgnoredMatchingScopeKey(scope)
-    ) {
-      onSelectCoverageCell(null);
-    }
-    setIgnoredScopes((previous) => {
-      const next = isIgnoredMatchingScope(previous, scope)
-        ? previous.filter(
-            (entry) =>
-              getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
-          )
-        : [...previous, scope];
+    runScenarioOverlay(() => {
+      setSelectedPlatoonKey('all');
+      setGapFilter('all');
+      if (
+        activeSelectedCoverageCell &&
+        getIgnoredMatchingScopeKey(activeSelectedCoverageCell) === getIgnoredMatchingScopeKey(scope)
+      ) {
+        onSelectCoverageCell(null);
+      }
+      setIgnoredScopes((previous) => {
+        const next = isIgnoredMatchingScope(previous, scope)
+          ? previous.filter(
+              (entry) =>
+                getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
+            )
+          : [...previous, scope];
 
-      return normalizeIgnoredMatchingScopes(next);
+        return normalizeIgnoredMatchingScopes(next);
+      });
     });
   };
 
   return (
-    <section className="mt-6 space-y-8">
+    <section className="relative mt-6 space-y-8">
+      <WorkingOverlay
+        active={isScenarioUpdating}
+        title="Updating matching"
+        description="Recomputing the best assignment plan for the current scenario."
+        className="rounded-3xl"
+      />
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -2099,11 +2121,13 @@ function MatchingView({
             {sanitizedIgnoredScopes.length > 0 && (
               <button
                 type="button"
-                onClick={() => {
-                  setGapFilter('all');
-                  setSelectedPlatoonKey('all');
-                  setIgnoredScopes([]);
-                }}
+                onClick={() =>
+                  runScenarioOverlay(() => {
+                    setGapFilter('all');
+                    setSelectedPlatoonKey('all');
+                    setIgnoredScopes([]);
+                  })
+                }
                 className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-200 hover:border-gray-600 hover:bg-gray-800"
               >
                 Clear all

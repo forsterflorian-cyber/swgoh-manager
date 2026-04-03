@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { WorkingOverlay } from '@/components/ui/WorkingOverlay';
 import type {
   PlatoonSimulatorAction,
   PlatoonSimulatorResponse,
@@ -825,6 +826,19 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   const fullNewAssignments = data?.fullNewAssignments ?? [];
   const guildName = data?.guildName ?? slug;
   const visibleCoverage = data?.simulation?.baseline?.coverage ?? [];
+  const scenarioTargetLabel = useMemo(() => {
+    if (!autoTarget || autoTarget.kind !== 'phase-category') {
+      return null;
+    }
+
+    return (
+      autoTargetOptions.find(
+        (option) =>
+          option.phase === autoTarget.phase &&
+          option.category === autoTarget.category,
+      )?.label ?? `Phase ${autoTarget.phase} · ${autoTarget.category}`
+    );
+  }, [autoTarget, autoTargetOptions]);
   const availableDraftPhases = [...new Set(ignoreScopeOptions.map((option) => option.phase))].sort((a, b) => a - b);
   const availableDraftCategories = ignoreScopeOptions
     .filter((option) => (scopeDraftPhase ? option.phase === Number(scopeDraftPhase) : true))
@@ -906,9 +920,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
 
   function handleModeChange(nextMode: PlannerMode) {
     setMode(nextMode);
-    if (nextMode === 'manual') {
-      setAutoTarget(null);
-    } else if (!autoTarget && autoTargetOptions.length > 0) {
+    if (nextMode === 'auto' && !autoTarget && autoTargetOptions.length > 0) {
       const first = autoTargetOptions[0];
       setAutoTarget({ kind: 'phase-category', phase: first.phase, category: first.category });
     }
@@ -984,7 +996,12 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
 
   return (
     <div className="min-h-screen">
-      <div className="mx-auto max-w-7xl px-6 py-8">
+      <div className="relative mx-auto max-w-7xl px-6 py-8">
+        <WorkingOverlay
+          active={loading}
+          title="Recalculating scenario"
+          description="Refreshing the simulator output for the current focus zone and ignore settings."
+        />
         {/* Header */}
         <header className="mb-8 animate-fade-in">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1052,18 +1069,17 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
         </header>
 
         <section className="card mb-8 animate-fade-in">
-          <div className="metric-label">Pick zone</div>
+          <div className="metric-label">Focus zone</div>
           <div className="mt-3 text-sm text-[var(--color-text-muted)]">
-            Choose the phase/category target for auto mode first.
+            Choose the phase/category focus for this scenario. The selection stays available when you switch between manual and auto mode.
           </div>
           <div className="mt-4">
             <select
               value={selectedAutoTargetValue}
               onChange={(e) => handleAutoTargetChange(e.target.value)}
-              disabled={mode !== 'auto'}
               className="select"
             >
-              <option value="">Select target zone</option>
+              <option value="">Select focus zone</option>
               {autoTargetOptions.map((option) => (
                 <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`}>
                   {option.label}
@@ -1071,7 +1087,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
               ))}
             </select>
             <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-              Im Auto mode sind nur unvollständige Zonen auswählbar.
+              Only incomplete zones are selectable here.
             </div>
           </div>
         </section>
@@ -1272,8 +1288,24 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
               <AutoPlanCard plan={autoPlan} lookups={lookups} canApply={!loading} onApplyAll={applyAll} />
             ) : (
               <>
-                <CandidateCard title="Current next full platoon" candidate={firstCandidate} onApplyOne={applyOne} onApplyAll={applyAll} onReplaceOne={replaceAction} canApply={!loading} lookups={lookups} />
-                <CandidateCard title="Second next full platoon" candidate={secondCandidate} onApplyOne={applyOne} onApplyAll={applyAll} onReplaceOne={replaceAction} canApply={!loading} lookups={lookups} />
+                <CandidateCard
+                  title={scenarioTargetLabel ? `Current next full platoon in ${scenarioTargetLabel}` : 'Current next full platoon'}
+                  candidate={firstCandidate}
+                  onApplyOne={applyOne}
+                  onApplyAll={applyAll}
+                  onReplaceOne={replaceAction}
+                  canApply={!loading}
+                  lookups={lookups}
+                />
+                <CandidateCard
+                  title={scenarioTargetLabel ? `Second next full platoon in ${scenarioTargetLabel}` : 'Second next full platoon'}
+                  candidate={secondCandidate}
+                  onApplyOne={applyOne}
+                  onApplyAll={applyAll}
+                  onReplaceOne={replaceAction}
+                  canApply={!loading}
+                  lookups={lookups}
+                />
               </>
             )}
           </section>

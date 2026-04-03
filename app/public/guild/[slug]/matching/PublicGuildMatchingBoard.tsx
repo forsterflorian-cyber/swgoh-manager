@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
+import { WorkingOverlay } from '@/components/ui/WorkingOverlay';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import {
   formatIgnoredMatchingScopeLabel,
@@ -11,6 +12,7 @@ import {
   isIgnoredMatchingScope,
   normalizeIgnoredMatchingScopes,
 } from '@/lib/utils/matching-scopes';
+import { useWorkingOverlay } from '@/lib/utils/use-working-overlay';
 import UpgradeRecommendations from './UpgradeRecommendations';
 import type {
   IgnoredMatchingScope,
@@ -474,6 +476,8 @@ export default function PublicGuildMatchingBoard({
   const [platoonsOpen, setPlatoonsOpen] = useState(true);
   const [assignmentsOpen, setAssignmentsOpen] = useState(false);
   const [gapsOpen, setGapsOpen] = useState(false);
+  const { isWorking: isScenarioUpdating, runWithOverlay: runScenarioOverlay } =
+    useWorkingOverlay();
 
   const activeMatching = useMemo(() => {
     if (ignoredScopes.length === 0) {
@@ -506,17 +510,19 @@ export default function PublicGuildMatchingBoard({
   }, [activeMatching.assignments]);
 
   function toggleIgnoredScope(scope: IgnoredMatchingScope) {
-    setIgnoredScopes((previous) => {
-      const next = isIgnoredMatchingScope(previous, scope)
-        ? previous.filter(
-            (entry) =>
-              getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
-          )
-        : [...previous, scope];
+    runScenarioOverlay(() => {
+      setIgnoredScopes((previous) => {
+        const next = isIgnoredMatchingScope(previous, scope)
+          ? previous.filter(
+              (entry) =>
+                getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
+            )
+          : [...previous, scope];
 
-      return normalizeIgnoredMatchingScopes(next);
+        return normalizeIgnoredMatchingScopes(next);
+      });
+      setPlatoonFilter('all');
     });
-    setPlatoonFilter('all');
   }
 
   function markCopied(key: string) {
@@ -734,7 +740,12 @@ export default function PublicGuildMatchingBoard({
 
   return (
     <main className="min-h-screen">
-      <div className="mx-auto max-w-7xl px-6 py-8">
+      <div className="relative mx-auto max-w-7xl px-6 py-8">
+        <WorkingOverlay
+          active={isScenarioUpdating}
+          title="Updating matching scenario"
+          description="Recomputing the best fill for the remaining scopes."
+        />
         {/* Header */}
         <header className="mb-8 animate-fade-in">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -935,7 +946,12 @@ export default function PublicGuildMatchingBoard({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setIgnoredScopes([])}
+                      onClick={() =>
+                        runScenarioOverlay(() => {
+                          setIgnoredScopes([]);
+                          setPlatoonFilter('all');
+                        })
+                      }
                       className="btn btn-secondary"
                     >
                       Clear ignored scopes
