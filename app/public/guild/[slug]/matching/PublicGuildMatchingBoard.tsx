@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import UpgradeRecommendations from './UpgradeRecommendations';
 import type { PlatoonMatchingGap, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
 
@@ -18,6 +17,31 @@ type ViewMode = 'officer' | 'member' | 'upgrades';
 type StatusFilter = 'all' | 'gaps_only' | 'assigned_only' | 'placeable_only' | 'unresolved_only';
 type CategoryFilter = 'all' | 'DS' | 'LS' | 'MIX' | 'BONUS';
 type CoverageStatusFilter = 'all' | 'full' | 'partial' | 'empty';
+type MatchingPlatoonRow =
+  | {
+      kind: 'assigned';
+      requirementId: string;
+      slotNumber: number;
+      unitName: string;
+      playerName: string;
+    }
+  | {
+      kind: 'open';
+      requirementId: string;
+      slotNumber: number;
+      unitName: string;
+      action: string;
+    };
+
+type MatchingPlatoonSection = {
+  platoonKey: string;
+  platoonNumber: number;
+  zoneName: string;
+  rows: MatchingPlatoonRow[];
+  assignedCount: number;
+  openCount: number;
+  totalCount: number;
+};
 
 const GAP_ACTION_META: Record<
   PlatoonMatchingGap['recommendedAction'],
@@ -48,6 +72,122 @@ function normalizeCategory(
   if (isBonus) return 'BONUS';
   if (category === 'DS' || category === 'LS' || category === 'MIX') return category;
   return 'all';
+}
+
+function formatPlatoonTitle(input: {
+  platoonNumber?: number | null;
+  platoonKey?: string | null;
+  fallbackIndex?: number;
+}) {
+  if (typeof input.platoonNumber === 'number' && input.platoonNumber > 0) {
+    return `Platoon ${input.platoonNumber}`;
+  }
+
+  const match = input.platoonKey?.match(/(?:platoon|pl)-?(\d+)/i);
+  if (match) {
+    return `Platoon ${match[1]}`;
+  }
+
+  return `Platoon ${(input.fallbackIndex ?? 0) + 1}`;
+}
+
+function formatBestNextAction(gap: PlatoonMatchingGap) {
+  const source = gap.possibleSources[0];
+
+  if (gap.recommendedAction === 'use_unused' && source) {
+    return `Assign ${source.playerName}`;
+  }
+
+  if (gap.recommendedAction === 'upgrade' && source) {
+    const parts: string[] = [];
+
+    if (source.missingRelicTiers > 0) parts.push(`+${source.missingRelicTiers} relic`);
+    if (source.missingRarity > 0) parts.push(`+${source.missingRarity} star`);
+
+    return `Upgrade ${source.playerName}${parts.length > 0 ? ` (${parts.join(', ')})` : ''}`;
+  }
+
+  if (gap.recommendedAction === 'reassign' && source) {
+    return `Reassign ${source.playerName}`;
+  }
+
+  return 'Acquire or unlock unit';
+}
+
+function buildMatchingPlatoonSections(
+  assignments: PlatoonMatchingResult['assignments'],
+  gaps: PlatoonMatchingResult['gaps'],
+): MatchingPlatoonSection[] {
+  const sections = new Map<string, MatchingPlatoonSection>();
+
+  for (const assignment of assignments) {
+    const existing = sections.get(assignment.platoonKey);
+    const row: MatchingPlatoonRow = {
+      kind: 'assigned',
+      requirementId: assignment.requirementId,
+      slotNumber: assignment.slotNumber,
+      unitName: assignment.unitName ?? assignment.unitBaseId,
+      playerName: assignment.playerName,
+    };
+
+    if (existing) {
+      existing.rows.push(row);
+      existing.assignedCount += 1;
+      existing.totalCount += 1;
+      continue;
+    }
+
+    sections.set(assignment.platoonKey, {
+      platoonKey: assignment.platoonKey,
+      platoonNumber: assignment.platoonNumber,
+      zoneName: assignment.zoneName,
+      rows: [row],
+      assignedCount: 1,
+      openCount: 0,
+      totalCount: 1,
+    });
+  }
+
+  for (const gap of gaps) {
+    const existing = sections.get(gap.platoonKey);
+    const row: MatchingPlatoonRow = {
+      kind: 'open',
+      requirementId: gap.requirementId,
+      slotNumber: gap.slotNumber,
+      unitName: gap.unitName ?? gap.unitBaseId,
+      action: formatBestNextAction(gap),
+    };
+
+    if (existing) {
+      existing.rows.push(row);
+      existing.openCount += 1;
+      existing.totalCount += 1;
+      continue;
+    }
+
+    sections.set(gap.platoonKey, {
+      platoonKey: gap.platoonKey,
+      platoonNumber: gap.platoonNumber,
+      zoneName: gap.zoneName,
+      rows: [row],
+      assignedCount: 0,
+      openCount: 1,
+      totalCount: 1,
+    });
+  }
+
+  return [...sections.values()]
+    .map((section) => ({
+      ...section,
+      rows: section.rows.toSorted((left, right) => left.slotNumber - right.slotNumber),
+    }))
+    .toSorted((left, right) => {
+      if (left.platoonNumber !== right.platoonNumber) {
+        return left.platoonNumber - right.platoonNumber;
+      }
+
+      return left.platoonKey.localeCompare(right.platoonKey);
+    });
 }
 
 function CoverageCard({
@@ -114,7 +254,12 @@ function AssignmentCard({
             </Badge>
           </div>
           <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-            {assignment.playerName} · {assignment.platoonKey} · Slot {assignment.slotNumber}
+            {assignment.playerName} · {assignment.zoneName} ·{' '}
+            {formatPlatoonTitle({
+              platoonNumber: assignment.platoonNumber,
+              platoonKey: assignment.platoonKey,
+            })}{' '}
+            · Slot {assignment.slotNumber}
           </p>
         </div>
       </div>
@@ -196,6 +341,7 @@ export default function PublicGuildMatchingBoard({
   const [memberFilter, setMemberFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('gaps_only');
   const [coverageStatusFilter, setCoverageStatusFilter] = useState<CoverageStatusFilter>('all');
+  const [platoonFilter, setPlatoonFilter] = useState<string>('all');
   const [unitQuery, setUnitQuery] = useState('');
 
   const uniqueMembers = useMemo(() => {
@@ -230,7 +376,7 @@ export default function PublicGuildMatchingBoard({
       });
   }, [matching.coverage, phaseFilter, categoryFilter, coverageStatusFilter, mode]);
 
-  const sortedAssignments = useMemo(() => {
+  const baseFilteredAssignments = useMemo(() => {
     return [...matching.assignments]
       .filter((assignment) => {
         if (phaseFilter !== 'all' && String(assignment.phase) !== phaseFilter) return false;
@@ -245,10 +391,62 @@ export default function PublicGuildMatchingBoard({
           const haystack = `${assignment.unitName ?? ''} ${assignment.unitBaseId ?? ''}`.toLowerCase();
           if (!haystack.includes(q)) return false;
         }
-
-        if (statusFilter === 'gaps_only') return false;
         return true;
-      })
+      });
+  }, [matching.assignments, phaseFilter, categoryFilter, memberFilter, unitQuery]);
+
+  const baseFilteredGaps = useMemo(() => {
+    return [...matching.gaps]
+      .filter((gap) => {
+        if (phaseFilter !== 'all' && String(gap.phase) !== phaseFilter) return false;
+
+        const gapCategory = normalizeCategory(gap.planetCategory, gap.isBonus);
+        if (categoryFilter !== 'all' && gapCategory !== categoryFilter) return false;
+
+        if (memberFilter !== 'all') {
+          const hasMatchingSource = gap.possibleSources.some((source) => source.playerName === memberFilter);
+          if (!hasMatchingSource) return false;
+        }
+
+        if (unitQuery.trim()) {
+          const q = unitQuery.trim().toLowerCase();
+          const haystack = `${gap.unitName ?? ''} ${gap.unitBaseId ?? ''}`.toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
+
+        return true;
+      });
+  }, [matching.gaps, phaseFilter, categoryFilter, memberFilter, unitQuery]);
+
+  const availablePlatoons = useMemo(
+    () => buildMatchingPlatoonSections(baseFilteredAssignments, baseFilteredGaps),
+    [baseFilteredAssignments, baseFilteredGaps],
+  );
+
+  const effectivePlatoonFilter =
+    platoonFilter !== 'all' && !availablePlatoons.some((platoon) => platoon.platoonKey === platoonFilter)
+      ? 'all'
+      : platoonFilter;
+
+  const filteredAssignments = useMemo(
+    () =>
+      effectivePlatoonFilter === 'all'
+        ? baseFilteredAssignments
+        : baseFilteredAssignments.filter((assignment) => assignment.platoonKey === effectivePlatoonFilter),
+    [baseFilteredAssignments, effectivePlatoonFilter],
+  );
+
+  const filteredGaps = useMemo(
+    () =>
+      effectivePlatoonFilter === 'all'
+        ? baseFilteredGaps
+        : baseFilteredGaps.filter((gap) => gap.platoonKey === effectivePlatoonFilter),
+    [baseFilteredGaps, effectivePlatoonFilter],
+  );
+
+  const sortedAssignments = useMemo(() => {
+    return [...filteredAssignments]
+      .filter(() => statusFilter !== 'gaps_only')
       .sort((a, b) => {
         if (mode === 'member') {
           const memberCompare = String(a.playerName ?? '').localeCompare(String(b.playerName ?? ''));
@@ -269,27 +467,11 @@ export default function PublicGuildMatchingBoard({
         const rightUnitName = b.unitName ?? b.unitBaseId;
         return leftUnitName.localeCompare(rightUnitName);
       });
-  }, [matching.assignments, phaseFilter, categoryFilter, memberFilter, unitQuery, statusFilter, mode]);
+  }, [filteredAssignments, statusFilter, mode]);
 
   const sortedGaps = useMemo(() => {
-    return [...matching.gaps]
+    return [...filteredGaps]
       .filter((gap) => {
-        if (phaseFilter !== 'all' && String(gap.phase) !== phaseFilter) return false;
-
-        const gapCategory = normalizeCategory(gap.planetCategory, gap.isBonus);
-        if (categoryFilter !== 'all' && gapCategory !== categoryFilter) return false;
-
-        if (memberFilter !== 'all') {
-          const hasMatchingSource = gap.possibleSources.some((source) => source.playerName === memberFilter);
-          if (!hasMatchingSource) return false;
-        }
-
-        if (unitQuery.trim()) {
-          const q = unitQuery.trim().toLowerCase();
-          const haystack = `${gap.unitName ?? ''} ${gap.unitBaseId ?? ''}`.toLowerCase();
-          if (!haystack.includes(q)) return false;
-        }
-
         if (statusFilter === 'assigned_only') return false;
         if (statusFilter === 'placeable_only' && gap.possibleSources.length === 0) return false;
         if (statusFilter === 'unresolved_only' && gap.possibleSources.length > 0) return false;
@@ -317,7 +499,12 @@ export default function PublicGuildMatchingBoard({
         const rightUnitName = b.unitName ?? b.unitBaseId;
         return leftUnitName.localeCompare(rightUnitName);
       });
-  }, [matching.gaps, phaseFilter, categoryFilter, memberFilter, unitQuery, statusFilter, mode]);
+  }, [filteredGaps, statusFilter, mode]);
+
+  const platoonDetailSections = useMemo(
+    () => buildMatchingPlatoonSections(filteredAssignments, filteredGaps),
+    [filteredAssignments, filteredGaps],
+  );
 
   const visibleAssignments =
     mode === 'officer' && statusFilter === 'gaps_only' ? [] : sortedAssignments;
@@ -436,7 +623,7 @@ export default function PublicGuildMatchingBoard({
           </div>
 
           {/* Filters */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
             <FilterSelect value={phaseFilter} onChange={setPhaseFilter}>
               <option value="all">All phases</option>
               <option value="1">P1</option>
@@ -463,6 +650,19 @@ export default function PublicGuildMatchingBoard({
               {uniqueMembers.map((member) => (
                 <option key={member} value={member}>
                   {member}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={effectivePlatoonFilter} onChange={setPlatoonFilter}>
+              <option value="all">All platoons</option>
+              {availablePlatoons.map((platoon, index) => (
+                <option key={platoon.platoonKey} value={platoon.platoonKey}>
+                  {formatPlatoonTitle({
+                    platoonNumber: platoon.platoonNumber,
+                    platoonKey: platoon.platoonKey,
+                    fallbackIndex: index,
+                  })}
                 </option>
               ))}
             </FilterSelect>
@@ -520,6 +720,80 @@ export default function PublicGuildMatchingBoard({
                       key={`${entry.phase}-${entry.category}-${entry.isBonus ? 'bonus' : 'main'}`}
                       {...entry}
                     />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="mb-10 animate-fade-in">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold">Platoon detail</h2>
+                <Badge variant="neutral">{platoonDetailSections.length} visible</Badge>
+              </div>
+
+              {platoonDetailSections.length === 0 ? (
+                <div className="card text-center text-[var(--color-text-muted)]">
+                  No platoons match the current filters.
+                </div>
+              ) : (
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {platoonDetailSections.map((platoon, index) => (
+                    <div key={platoon.platoonKey} className="stat-card animate-fade-in">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">
+                              {formatPlatoonTitle({
+                                platoonNumber: platoon.platoonNumber,
+                                platoonKey: platoon.platoonKey,
+                                fallbackIndex: index,
+                              })}
+                            </span>
+                            <Badge variant={platoon.openCount > 0 ? 'warning' : 'success'} size="sm">
+                              {platoon.openCount > 0
+                                ? `${platoon.assignedCount}/${platoon.totalCount} filled`
+                                : 'Complete'}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                            {platoon.zoneName} · {platoon.platoonKey}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3">
+                        {platoon.rows.map((row) =>
+                          row.kind === 'assigned' ? (
+                            <div
+                              key={row.requirementId}
+                              className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-secondary)] px-4 py-3"
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="text-sm">
+                                  {row.slotNumber}. {row.unitName}
+                                </div>
+                                <div className="text-sm text-[var(--color-text-muted)]">
+                                  {row.playerName}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              key={row.requirementId}
+                              className="rounded-2xl border border-amber-800/60 bg-amber-950/20 px-4 py-3"
+                            >
+                              <div className="text-sm">
+                                {row.slotNumber}. {row.unitName}
+                                {' -> OPEN'}
+                              </div>
+                              <div className="mt-1 text-xs text-amber-200">
+                                Best next action: {row.action}
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}

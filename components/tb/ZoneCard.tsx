@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { GapAnalysisUnit, ZoneGapSummary } from '@/lib/types/tb';
 import { UnitSlotRow } from './UnitSlotRow';
@@ -17,14 +17,39 @@ interface Props {
   onAssignmentChange: () => void;
 }
 
+type PlatoonGroup = {
+  platoonNumber: number;
+  units: GapAnalysisUnit[];
+  filledSlots: number;
+  totalSlots: number;
+  openSlots: number;
+  blockedSlots: number;
+  state: ZoneState;
+};
+
 export function ZoneCard({ zone, instanceId, onAssignmentChange }: Props) {
   const [expanded, setExpanded] = useState(true);
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [selectedPlatoon, setSelectedPlatoon] = useState<number | 'all'>('all');
 
   const zoneState = getZoneState(zone);
   const platoonSummary = getPlatoonSummary(zone.units);
+  const platoonGroups = buildPlatoonGroups(zone.units);
   const blockedSlots = zone.units.filter((unit) => unit.status === 'critical').length;
   const readyToFillSlots = Math.max(zone.readySlots - zone.filledSlots, 0);
+  const visiblePlatoons =
+    selectedPlatoon === 'all'
+      ? platoonGroups
+      : platoonGroups.filter((platoon) => platoon.platoonNumber === selectedPlatoon);
+
+  useEffect(() => {
+    if (
+      selectedPlatoon !== 'all' &&
+      !platoonGroups.some((platoon) => platoon.platoonNumber === selectedPlatoon)
+    ) {
+      setSelectedPlatoon('all');
+    }
+  }, [platoonGroups, selectedPlatoon]);
 
   const handleAutoAssign = async () => {
     if (
@@ -165,15 +190,89 @@ export function ZoneCard({ zone, instanceId, onAssignmentChange }: Props) {
           <div className="border-b border-gray-800/80 px-4 py-3 text-sm text-gray-400 sm:px-5">
             Review unresolved slots first, then confirm the remaining ready candidates.
           </div>
-          <div className="divide-y divide-gray-800/80">
-            {zone.units.map((unit) => (
-              <UnitSlotRow
-                key={unit.requirement.tbPlatoonSlotId}
-                unit={unit}
-                instanceId={instanceId}
-                onAssignmentChange={onAssignmentChange}
-              />
-            ))}
+          <div className="border-b border-gray-800/80 px-4 py-3 sm:px-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                Platoon
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedPlatoon('all')}
+                className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                  selectedPlatoon === 'all'
+                    ? 'border-blue-500 bg-blue-900/60 text-blue-200'
+                    : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-300'
+                }`}
+              >
+                All platoons
+              </button>
+              {platoonGroups.map((platoon) => (
+                <button
+                  key={platoon.platoonNumber}
+                  type="button"
+                  onClick={() => setSelectedPlatoon(platoon.platoonNumber)}
+                  className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                    selectedPlatoon === platoon.platoonNumber
+                      ? 'border-indigo-500 bg-indigo-900/60 text-indigo-200'
+                      : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-600 hover:text-gray-300'
+                  }`}
+                >
+                  Platoon {platoon.platoonNumber}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-5 p-4 sm:p-5">
+            {visiblePlatoons.map((platoon) => {
+              const platoonTone = getZoneTone(platoon.state);
+
+              return (
+                <section
+                  key={platoon.platoonNumber}
+                  className={`overflow-hidden rounded-2xl border ${platoonTone.border} ${platoonTone.bg}`}
+                >
+                  <div className="border-b border-gray-800/80 px-4 py-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge label={platoonTone.label} className={platoonTone.badge} />
+                          <StatusBadge
+                            label={`${platoon.filledSlots}/${platoon.totalSlots} filled`}
+                            className="border-gray-800 bg-gray-950/70 text-gray-300"
+                          />
+                          {platoon.openSlots > 0 && (
+                            <StatusBadge
+                              label={`${platoon.openSlots} open`}
+                              className="border-red-900 bg-red-950/70 text-red-200"
+                            />
+                          )}
+                          {platoon.blockedSlots > 0 && (
+                            <StatusBadge
+                              label={`${platoon.blockedSlots} blocked`}
+                              className="border-amber-900 bg-amber-950/70 text-amber-200"
+                            />
+                          )}
+                        </div>
+                        <h3 className="mt-3 text-lg font-semibold text-white">
+                          Platoon {platoon.platoonNumber}
+                        </h3>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-gray-800/80">
+                    {platoon.units.map((unit) => (
+                      <UnitSlotRow
+                        key={unit.requirement.tbPlatoonSlotId}
+                        unit={unit}
+                        instanceId={instanceId}
+                        onAssignmentChange={onAssignmentChange}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </div>
         </div>
       )}
@@ -225,6 +324,51 @@ function getPlatoonSummary(units: GapAnalysisUnit[]) {
   }
 
   return { total, complete };
+}
+
+function buildPlatoonGroups(units: GapAnalysisUnit[]): PlatoonGroup[] {
+  const grouped = new Map<number, GapAnalysisUnit[]>();
+
+  for (const unit of units) {
+    const platoonNumber = unit.requirement.platoonNumber;
+    const existing = grouped.get(platoonNumber);
+
+    if (existing) {
+      existing.push(unit);
+    } else {
+      grouped.set(platoonNumber, [unit]);
+    }
+  }
+
+  return [...grouped.entries()]
+    .map(([platoonNumber, platoonUnits]) => {
+      const sortedUnits = platoonUnits.toSorted(
+        (left, right) => left.requirement.slotNumber - right.requirement.slotNumber,
+      );
+      const totalSlots = sortedUnits.length;
+      const filledSlots = sortedUnits.filter((unit) => unit.gapCount === 0).length;
+      const openSlots = Math.max(totalSlots - filledSlots, 0);
+      const blockedSlots = sortedUnits.filter((unit) => unit.status === 'critical').length;
+      const state: ZoneState =
+        openSlots === 0
+          ? 'complete'
+          : blockedSlots > 0
+            ? 'critical'
+            : sortedUnits.some((unit) => unit.fulfilledCount > 0 || unit.qualifiedPlayers.length > 0)
+              ? 'partial'
+              : 'empty';
+
+      return {
+        platoonNumber,
+        units: sortedUnits,
+        filledSlots,
+        totalSlots,
+        openSlots,
+        blockedSlots,
+        state,
+      };
+    })
+    .toSorted((left, right) => left.platoonNumber - right.platoonNumber);
 }
 
 function getZoneTone(zoneState: ZoneState) {

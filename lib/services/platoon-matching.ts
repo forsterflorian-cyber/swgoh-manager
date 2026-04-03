@@ -190,7 +190,6 @@ function solveMinCostMaxFlow(net: MCMFNetwork): [number, number] {
   const prevNode = new Int32Array(n);
   const prevEdge = new Int32Array(n);
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     // SPFA to find shortest path from s to t.
     dist.fill(INF_COST);
@@ -710,7 +709,9 @@ for (const phase of phases) {
       requirementId: reqId,
       phase: slot.phase,
       zoneKey: slot.zoneKey,
+      zoneName: slot.zoneName,
       platoonKey: slot.platoonKey,
+      platoonNumber: slot.platoonNumber,
       slotNumber: slot.slotNumber,
       unitBaseId: slot.unitBaseId,
       unitName: slot.unitName,
