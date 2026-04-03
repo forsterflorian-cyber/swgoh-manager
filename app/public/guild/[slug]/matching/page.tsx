@@ -1,6 +1,7 @@
   import { notFound } from 'next/navigation';
   import { computePlatoonMatching } from '@/lib/services/platoon-matching';
   import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
+  import { Navbar } from '@/components/layout/Navbar';
   import PublicGuildMatchingBoard from './PublicGuildMatchingBoard';
 
   export const revalidate = 300;
@@ -21,6 +22,8 @@
     const matching = computePlatoonMatching(dataset);
 
     return (
+      <>
+      <Navbar />
       <PublicGuildMatchingBoard
         slug={slug}
         guildName={dataset.guild.name ?? slug}
@@ -32,5 +35,6 @@
         }}
         matching={matching}
       />
+      </>
     );
   }

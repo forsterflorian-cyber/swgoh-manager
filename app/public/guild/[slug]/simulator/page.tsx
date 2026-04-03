@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WorkingOverlay } from '@/components/ui/WorkingOverlay';
+import { Navbar } from '@/components/layout/Navbar';
 import type {
   PlatoonSimulatorAction,
   PlatoonSimulatorResponse,
@@ -996,6 +997,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
 
   return (
     <div className="min-h-screen">
+      <Navbar />
       <div className="relative mx-auto max-w-7xl px-6 py-8">
         <WorkingOverlay
           active={loading}

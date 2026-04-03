@@ -22,6 +22,11 @@ type MyAssignmentsData = {
   guildName: string;
   guildSlug: string;
   activeTbName: string | null;
+  debug?: {
+    tbInstanceId: string | null;
+    tbStatus: string | null;
+    guildMemberId: string;
+  };
 };
 
 type Props = {
@@ -137,6 +142,16 @@ export function MeineZuweisungenView({ guildId, guildName, guildSlug }: Props) {
         </p>
         <p className="mt-1 text-sm text-gray-400">{guildName}</p>
       </div>
+
+      {/* Debug panel — shown when no assignments to help diagnose */}
+      {data.debug && (data.assignments.length === 0) && (
+        <div className="rounded-xl border border-gray-700 bg-gray-900/50 px-4 py-3 font-mono text-xs text-gray-500">
+          <p className="mb-1 font-semibold text-gray-400">Debug info</p>
+          <p>TB instance: {data.debug.tbInstanceId ?? 'none found'}</p>
+          <p>TB status: {data.debug.tbStatus ?? '—'}</p>
+          <p>Guild member ID: {data.debug.guildMemberId}</p>
+        </div>
+      )}
 
       {/* Active TB + assignments */}
       {!data.activeTbName ? (
