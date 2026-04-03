@@ -1051,89 +1051,85 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
           </div>
         </header>
 
-        {/* Settings Card */}
         <section className="card mb-8 animate-fade-in">
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Scenario ignore */}
-            <div>
-              <div className="metric-label">Ignore for this scenario</div>
-              <div className="mt-3 text-sm text-[var(--color-text-muted)]">
-                Ignored scopes are removed from the solve and their units no longer compete with the remaining scopes.
-              </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <select
-                  value={scopeDraftPhase}
-                  onChange={(e) => setScopeDraftPhase(e.target.value)}
-                  className="select"
-                >
-                  <option value="">Select phase</option>
-                  {availableDraftPhases.map((phase) => (
-                    <option key={phase} value={String(phase)}>
-                      Phase {phase}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={scopeDraftCategory}
-                  onChange={(e) => setScopeDraftCategory(e.target.value as PlanetCategory | '')}
-                  className="select"
-                >
-                  <option value="">Select category</option>
-                  {availableDraftCategories.map((category) => (
-                    <option key={category} value={category}>
-                      {getMatchingCategoryLabel(category)}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={addIgnoredScopeFromDraft}
-                  disabled={!scopeDraftPhase || !scopeDraftCategory}
-                  className="btn btn-secondary"
-                >
-                  Add
-                </button>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {ignoredScopeLabels.length > 0 ? (
-                  ignoredScopes.map((scope, index) => (
-                    <button
-                      key={getIgnoredMatchingScopeKey(scope)}
-                      type="button"
-                      onClick={() => toggleIgnoredScope(scope)}
-                      className="rounded-full border border-[var(--color-accent-rose)]/40 bg-[var(--color-accent-rose)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent-rose)]"
-                    >
-                      {ignoredScopeLabels[index] ?? formatIgnoredMatchingScopeLabel(scope)} ×
-                    </button>
-                  ))
-                ) : (
-                  <div className="text-sm text-[var(--color-text-muted)]">No ignored scopes active.</div>
-                )}
-              </div>
+          <div className="metric-label">Pick zone</div>
+          <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+            Choose the phase/category target for auto mode first.
+          </div>
+          <div className="mt-4">
+            <select
+              value={selectedAutoTargetValue}
+              onChange={(e) => handleAutoTargetChange(e.target.value)}
+              disabled={mode !== 'auto'}
+              className="select"
+            >
+              <option value="">Select target zone</option>
+              {autoTargetOptions.map((option) => (
+                <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+              Im Auto mode sind nur unvollständige Zonen auswählbar.
             </div>
+          </div>
+        </section>
 
-            {/* Auto Target */}
-            <div>
-              <div className="metric-label">Auto target</div>
-              <div className="mt-4">
-                <select 
-                  value={selectedAutoTargetValue} 
-                  onChange={(e) => handleAutoTargetChange(e.target.value)} 
-                  disabled={mode !== 'auto'} 
-                  className="select"
+        <section className="card mb-8 animate-fade-in">
+          <div className="metric-label">Ignore for this scenario</div>
+          <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+            Ignored scopes are removed from the solve and their units no longer compete with the remaining scopes.
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <select
+              value={scopeDraftPhase}
+              onChange={(e) => setScopeDraftPhase(e.target.value)}
+              className="select"
+            >
+              <option value="">Select phase</option>
+              {availableDraftPhases.map((phase) => (
+                <option key={phase} value={String(phase)}>
+                  Phase {phase}
+                </option>
+              ))}
+            </select>
+            <select
+              value={scopeDraftCategory}
+              onChange={(e) => setScopeDraftCategory(e.target.value as PlanetCategory | '')}
+              className="select"
+            >
+              <option value="">Select category</option>
+              {availableDraftCategories.map((category) => (
+                <option key={category} value={category}>
+                  {getMatchingCategoryLabel(category)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={addIgnoredScopeFromDraft}
+              disabled={!scopeDraftPhase || !scopeDraftCategory}
+              className="btn btn-secondary"
+            >
+              Add
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {ignoredScopeLabels.length > 0 ? (
+              ignoredScopes.map((scope, index) => (
+                <button
+                  key={getIgnoredMatchingScopeKey(scope)}
+                  type="button"
+                  onClick={() => toggleIgnoredScope(scope)}
+                  className="rounded-full border border-[var(--color-accent-rose)]/40 bg-[var(--color-accent-rose)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent-rose)]"
                 >
-                  <option value="">Select target zone</option>
-                  {autoTargetOptions.map((option) => (
-                    <option key={`${option.phase}::${option.category}`} value={`${option.phase}::${option.category}`}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-                  Im Auto mode sind nur unvollständige Zonen auswählbar.
-                </div>
-              </div>
-            </div>
+                  {ignoredScopeLabels[index] ?? formatIgnoredMatchingScopeLabel(scope)} ×
+                </button>
+              ))
+            ) : (
+              <div className="text-sm text-[var(--color-text-muted)]">No ignored scopes active.</div>
+            )}
           </div>
         </section>
 

@@ -48,6 +48,9 @@ type MatchingPlatoonRow =
     };
 
 type MatchingPlatoonSection = {
+  phase: number;
+  category: string | null;
+  isBonus: boolean;
   platoonKey: string;
   platoonNumber: number;
   zoneName: string;
@@ -105,6 +108,28 @@ function formatPlatoonTitle(input: {
   return `Platoon ${(input.fallbackIndex ?? 0) + 1}`;
 }
 
+function formatScopeTitle(input: {
+  phase: number;
+  category: string | null;
+  isBonus: boolean;
+}) {
+  return `P${input.phase} - ${getMatchingCategoryLabel(
+    input.isBonus ? 'SPECIAL' : ((input.category ?? 'SPECIAL') as 'LS' | 'DS' | 'MIX' | 'SPECIAL'),
+  )}`;
+}
+
+function formatPlatoonScopeTitle(section: MatchingPlatoonSection, fallbackIndex?: number) {
+  return `${formatScopeTitle({
+    phase: section.phase,
+    category: section.category,
+    isBonus: section.isBonus,
+  })} - ${formatPlatoonTitle({
+    platoonNumber: section.platoonNumber,
+    platoonKey: section.platoonKey,
+    fallbackIndex,
+  })}`;
+}
+
 function formatBestNextAction(gap: PlatoonMatchingGap) {
   const source = gap.possibleSources[0];
 
@@ -152,6 +177,9 @@ function buildMatchingPlatoonSections(
     }
 
     sections.set(assignment.platoonKey, {
+      phase: assignment.phase,
+      category: assignment.planetCategory,
+      isBonus: assignment.planetCategory === 'SPECIAL',
       platoonKey: assignment.platoonKey,
       platoonNumber: assignment.platoonNumber,
       zoneName: assignment.zoneName,
@@ -180,6 +208,9 @@ function buildMatchingPlatoonSections(
     }
 
     sections.set(gap.platoonKey, {
+      phase: gap.phase,
+      category: gap.planetCategory,
+      isBonus: gap.isBonus,
       platoonKey: gap.platoonKey,
       platoonNumber: gap.platoonNumber,
       zoneName: gap.zoneName,
@@ -207,6 +238,8 @@ function buildMatchingPlatoonSections(
 function CoverageCard({
   ignored,
   onToggleIgnore,
+  onCopyDiscord,
+  copyState,
   phase,
   category,
   fullPlatoons,
@@ -218,6 +251,8 @@ function CoverageCard({
 }: PlatoonMatchingResult['coverage'][number] & {
   ignored: boolean;
   onToggleIgnore: (scope: IgnoredMatchingScope) => void;
+  onCopyDiscord: () => void;
+  copyState: 'idle' | 'copied';
 }) {
   const getProgressColor = (pct: number) => {
     if (pct >= 100) return 'progress-fill-emerald';
@@ -269,6 +304,11 @@ function CoverageCard({
           className={`progress-fill ${getProgressColor(coveragePercent)}`}
           style={{ width: `${coveragePercent}%` }}
         />
+      </div>
+      <div className="mt-4 flex justify-end">
+        <button type="button" onClick={onCopyDiscord} className="btn btn-ghost text-xs">
+          {copyState === 'copied' ? 'Copied' : 'Copy for Discord'}
+        </button>
       </div>
     </div>
   );
@@ -365,6 +405,55 @@ function FilterSelect({
   );
 }
 
+async function copyTextToClipboard(text: string) {
+  await navigator.clipboard.writeText(text);
+}
+
+function buildScopeDiscordExport(params: {
+  phase: number;
+  category: string | null;
+  isBonus: boolean;
+  assignments: PlatoonMatchingResult['assignments'];
+  gaps: PlatoonMatchingResult['gaps'];
+}) {
+  const { phase, category, isBonus, assignments, gaps } = params;
+  const scopedAssignments = assignments.filter(
+    (assignment) => assignment.phase === phase && assignment.planetCategory === category,
+  );
+  const scopedGaps = gaps.filter(
+    (gap) => gap.phase === phase && gap.planetCategory === category,
+  );
+  const sections = buildMatchingPlatoonSections(scopedAssignments, scopedGaps);
+  const assignedCount = scopedAssignments.length;
+  const requirementCount = scopedAssignments.length + scopedGaps.length;
+
+  return [
+    `${formatScopeTitle({ phase, category, isBonus })} - ${assignedCount}/${requirementCount} assigned`,
+    '',
+    ...sections.flatMap((section, index) => [
+      formatPlatoonScopeTitle(section, index),
+      ...section.rows.flatMap((row) =>
+        row.kind === 'assigned'
+          ? [`${row.slotNumber}. ${row.unitName} -> ${row.playerName}`]
+          : [`${row.slotNumber}. ${row.unitName} -> OPEN`, `   Best next action: ${row.action}`],
+      ),
+      '',
+    ]),
+  ].join('\n');
+}
+
+function buildPlatoonDiscordExport(section: MatchingPlatoonSection, fallbackIndex?: number) {
+  return [
+    formatPlatoonScopeTitle(section, fallbackIndex),
+    '',
+    ...section.rows.flatMap((row) =>
+      row.kind === 'assigned'
+        ? [`${row.slotNumber}. ${row.unitName} -> ${row.playerName}`]
+        : [`${row.slotNumber}. ${row.unitName} -> OPEN`, `   Best next action: ${row.action}`],
+    ),
+  ].join('\n');
+}
+
 export default function PublicGuildMatchingBoard({
   slug,
   guildName,
@@ -381,6 +470,10 @@ export default function PublicGuildMatchingBoard({
   const [platoonFilter, setPlatoonFilter] = useState<string>('all');
   const [unitQuery, setUnitQuery] = useState('');
   const [ignoredScopes, setIgnoredScopes] = useState<IgnoredMatchingScope[]>([]);
+  const [copiedExportKey, setCopiedExportKey] = useState<string | null>(null);
+  const [platoonsOpen, setPlatoonsOpen] = useState(true);
+  const [assignmentsOpen, setAssignmentsOpen] = useState(false);
+  const [gapsOpen, setGapsOpen] = useState(false);
 
   const activeMatching = useMemo(() => {
     if (ignoredScopes.length === 0) {
@@ -426,6 +519,30 @@ export default function PublicGuildMatchingBoard({
     setPlatoonFilter('all');
   }
 
+  function markCopied(key: string) {
+    setCopiedExportKey(key);
+    window.setTimeout(() => {
+      setCopiedExportKey((current) => (current === key ? null : current));
+    }, 1800);
+  }
+
+  async function copyScopeDiscordExport(entry: PlatoonMatchingResult['coverage'][number]) {
+    const text = buildScopeDiscordExport({
+      phase: entry.phase,
+      category: entry.category,
+      isBonus: entry.isBonus,
+      assignments: activeMatching.assignments,
+      gaps: activeMatching.gaps,
+    });
+    await copyTextToClipboard(text);
+    markCopied(`scope:${entry.phase}:${entry.category}`);
+  }
+
+  async function copyPlatoonDiscordExport(section: MatchingPlatoonSection, fallbackIndex: number) {
+    await copyTextToClipboard(buildPlatoonDiscordExport(section, fallbackIndex));
+    markCopied(`platoon:${section.phase}:${section.category}:${section.platoonKey}`);
+  }
+
   const sortedCoverage = useMemo(() => {
     return [...matching.coverage]
       .filter((entry) => {
@@ -467,10 +584,16 @@ export default function PublicGuildMatchingBoard({
             isBonus={entry.isBonus}
             ignored={ignored}
             onToggleIgnore={toggleIgnoredScope}
+            onCopyDiscord={() => {
+              void copyScopeDiscordExport(entry);
+            }}
+            copyState={
+              copiedExportKey === `scope:${entry.phase}:${entry.category}` ? 'copied' : 'idle'
+            }
           />
         );
       }),
-    [activeCoverageByKey, ignoredScopes, sortedCoverage],
+    [activeCoverageByKey, copiedExportKey, ignoredScopes, sortedCoverage],
   );
 
   const baseFilteredAssignments = useMemo(() => {
@@ -854,11 +977,24 @@ export default function PublicGuildMatchingBoard({
 
             <section className="mb-10 animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold">Platoon detail</h2>
-                <Badge variant="neutral">{platoonDetailSections.length} visible</Badge>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-semibold">Platoon detail</h2>
+                  <Badge variant="neutral">{platoonDetailSections.length} visible</Badge>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPlatoonsOpen((current) => !current)}
+                  className="btn btn-ghost text-xs"
+                >
+                  {platoonsOpen ? 'Collapse' : 'Expand'}
+                </button>
               </div>
 
-              {platoonDetailSections.length === 0 ? (
+              {!platoonsOpen ? (
+                <div className="card text-center text-[var(--color-text-muted)]">
+                  Platoon detail is collapsed.
+                </div>
+              ) : platoonDetailSections.length === 0 ? (
                 <div className="card text-center text-[var(--color-text-muted)]">
                   No platoons match the current filters.
                 </div>
@@ -870,11 +1006,7 @@ export default function PublicGuildMatchingBoard({
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium">
-                              {formatPlatoonTitle({
-                                platoonNumber: platoon.platoonNumber,
-                                platoonKey: platoon.platoonKey,
-                                fallbackIndex: index,
-                              })}
+                              {formatPlatoonScopeTitle(platoon, index)}
                             </span>
                             <Badge variant={platoon.openCount > 0 ? 'warning' : 'success'} size="sm">
                               {platoon.openCount > 0
@@ -883,9 +1015,20 @@ export default function PublicGuildMatchingBoard({
                             </Badge>
                           </div>
                           <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                            {platoon.zoneName} · {platoon.platoonKey}
+                            {platoon.zoneName}
                           </p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void copyPlatoonDiscordExport(platoon, index);
+                          }}
+                          className="btn btn-ghost text-xs"
+                        >
+                          {copiedExportKey === `platoon:${platoon.phase}:${platoon.category}:${platoon.platoonKey}`
+                            ? 'Copied'
+                            : 'Copy for Discord'}
+                        </button>
                       </div>
 
                       <div className="mt-4 grid gap-3">
@@ -929,13 +1072,26 @@ export default function PublicGuildMatchingBoard({
             {/* Assignments Section */}
             <section className="mb-10 animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold">
-                  {mode === 'member' ? 'Assignments for selected member' : 'Assignments'}
-                </h2>
-                <Badge variant="neutral">{visibleAssignments.length} visible</Badge>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-semibold">
+                    {mode === 'member' ? 'Assignments for selected member' : 'Assignments'}
+                  </h2>
+                  <Badge variant="neutral">{visibleAssignments.length} visible</Badge>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAssignmentsOpen((current) => !current)}
+                  className="btn btn-ghost text-xs"
+                >
+                  {assignmentsOpen ? 'Collapse' : 'Expand'}
+                </button>
               </div>
 
-              {visibleAssignments.length === 0 ? (
+              {!assignmentsOpen ? (
+                <div className="card text-center text-[var(--color-text-muted)]">
+                  Assignments are collapsed.
+                </div>
+              ) : visibleAssignments.length === 0 ? (
                 <div className="card text-center text-[var(--color-text-muted)]">
                   No assignments match the current filters.
                 </div>
@@ -954,13 +1110,26 @@ export default function PublicGuildMatchingBoard({
             {/* Gaps Section */}
             <section className="animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold">
-                  {mode === 'member' ? 'Possible placements / open gaps' : 'Gaps'}
-                </h2>
-                <Badge variant="neutral">{visibleGaps.length} visible</Badge>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-semibold">
+                    {mode === 'member' ? 'Possible placements / open gaps' : 'Gaps'}
+                  </h2>
+                  <Badge variant="neutral">{visibleGaps.length} visible</Badge>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setGapsOpen((current) => !current)}
+                  className="btn btn-ghost text-xs"
+                >
+                  {gapsOpen ? 'Collapse' : 'Expand'}
+                </button>
               </div>
 
-              {visibleGaps.length === 0 ? (
+              {!gapsOpen ? (
+                <div className="card text-center text-[var(--color-text-muted)]">
+                  Gaps are collapsed.
+                </div>
+              ) : visibleGaps.length === 0 ? (
                 <div className="card text-center text-[var(--color-text-muted)]">
                   No gaps match the current filters.
                 </div>
