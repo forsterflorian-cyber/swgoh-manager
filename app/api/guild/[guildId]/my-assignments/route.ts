@@ -75,6 +75,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
         guildName: guildResult.rows[0].name,
         guildSlug: guildResult.rows[0].slug,
         activeTbName: null,
+        debug: { tbInstanceId: null, tbStatus: null, guildMemberId: registration.guildMemberId },
       });
     }
 
@@ -114,6 +115,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       guildName: guildResult.rows[0].name,
       guildSlug: guildResult.rows[0].slug,
       activeTbName: tbName,
+      debug: { tbInstanceId: tb.id, tbStatus: tb.status, guildMemberId: registration.guildMemberId },
     });
   } catch (error: unknown) {
     console.error('my-assignments GET error:', error);

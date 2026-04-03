@@ -85,9 +85,6 @@ export function Navbar() {
 
   const adminLinks: NavLink[] = [
     { href: '/dashboard', label: 'Dashboard' },
-    ...(ctx?.adminGuild
-      ? [{ href: `/planning/platoons`, label: 'Platoons' }]
-      : []),
     ...(ctx?.adminGuild?.canManageGuild
       ? [{ href: '/settings/guild', label: 'Guild Settings' }]
       : []),
@@ -96,6 +93,8 @@ export function Navbar() {
   const memberLinks: NavLink[] = ctx?.memberGuild
     ? [
         { href: `/gilde/${ctx.memberGuild.slug}/registrieren`, label: 'Registration' },
+        { href: `/public/guild/${ctx.memberGuild.slug}/matching`, label: 'Matching' },
+        { href: `/public/guild/${ctx.memberGuild.slug}/simulator`, label: 'Planner' },
         { href: `/gilde/${ctx.memberGuild.slug}/meine-zuweisungen`, label: 'My Assignments' },
       ]
     : [];
