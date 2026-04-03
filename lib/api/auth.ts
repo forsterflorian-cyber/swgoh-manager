@@ -83,6 +83,33 @@ export async function getDiscordUserIdForUser(userId: string): Promise<string | 
   return result.rows[0]?.discord_user_id ?? null;
 }
 
+export type RegisteredMemberInfo = {
+  id: string;
+  allyCode: string;
+  guildMemberId: string;
+};
+
+export async function getRegisteredMemberForGuild(
+  discordUserId: string,
+  guildId: string
+): Promise<RegisteredMemberInfo | null> {
+  const result = await sql<{ id: string; ally_code: string; guild_member_id: string }>`
+    SELECT id, ally_code, guild_member_id
+    FROM registered_members
+    WHERE guild_id = ${guildId}
+      AND discord_user_id = ${discordUserId}
+    LIMIT 1
+  `;
+
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    allyCode: row.ally_code,
+    guildMemberId: row.guild_member_id,
+  };
+}
+
 export async function userCanAccessTbInstance(
   userId: string,
   tbInstanceId: string

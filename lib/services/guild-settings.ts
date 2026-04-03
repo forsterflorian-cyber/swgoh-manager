@@ -72,6 +72,7 @@ export type GuildMemberRow = {
   allyCode: string | null;
   galacticPower: number;
   ignoredAt: string | null;
+  isRegistered: boolean;
 };
 
 type GuildMemberDbRow = {
@@ -80,16 +81,26 @@ type GuildMemberDbRow = {
   ally_code: string | null;
   galactic_power: number;
   ignored_at: string | null;
+  is_registered: boolean;
 };
 
 export async function getGuildMemberList(guildDbId: string): Promise<GuildMemberRow[]> {
   const result = await sql<GuildMemberDbRow>`
-    SELECT id, player_name, ally_code, galactic_power, ignored_at::text
-    FROM guild_members
-    WHERE guild_id = ${guildDbId}
-    ORDER BY 
-      CASE WHEN ignored_at IS NULL THEN 0 ELSE 1 END,
-      galactic_power DESC
+    SELECT
+      gm.id,
+      gm.player_name,
+      gm.ally_code,
+      gm.galactic_power,
+      gm.ignored_at::text,
+      (rm.guild_member_id IS NOT NULL) AS is_registered
+    FROM guild_members gm
+    LEFT JOIN registered_members rm
+      ON rm.guild_id = gm.guild_id
+     AND rm.guild_member_id = gm.id
+    WHERE gm.guild_id = ${guildDbId}
+    ORDER BY
+      CASE WHEN gm.ignored_at IS NULL THEN 0 ELSE 1 END,
+      gm.galactic_power DESC
   `;
 
   return result.rows.map((row) => ({
@@ -98,6 +109,7 @@ export async function getGuildMemberList(guildDbId: string): Promise<GuildMember
     allyCode: row.ally_code,
     galacticPower: row.galactic_power,
     ignoredAt: row.ignored_at,
+    isRegistered: row.is_registered,
   }));
 }
 

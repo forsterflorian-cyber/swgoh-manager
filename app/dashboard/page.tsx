@@ -64,6 +64,13 @@ type Notice = {
   message: string;
 };
 
+type MemberRegistration = {
+  guildId: string;
+  allyCode: string;
+  guildName: string;
+  guildSlug: string;
+};
+
 type RosterState = {
   label: string;
   tone: 'good' | 'warn' | 'bad';
@@ -141,6 +148,7 @@ export default function DashboardPage() {
   const [strategicReadiness, setStrategicReadiness] =
     useState<DashboardStrategicReadiness | null>(null);
   const [canManageGuild, setCanManageGuild] = useState(false);
+  const [memberRegistration, setMemberRegistration] = useState<MemberRegistration | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +173,18 @@ export default function DashboardPage() {
         setStrategicReadiness(dashboard.strategicReadiness);
         setCanManageGuild(dashboard.permissions.canManageGuild);
         setError(null);
+
+        if (!dashboard.guild) {
+          try {
+            const regRes = await fetch('/api/me/registration');
+            const regPayload = (await regRes.json()) as ApiEnvelope<{ registration: MemberRegistration | null }>;
+            if (regPayload.ok) {
+              setMemberRegistration(regPayload.data.registration);
+            }
+          } catch {
+            // non-critical, ignore
+          }
+        }
       } catch (loadError: unknown) {
         setError(loadError instanceof Error ? loadError.message : 'Dashboard could not be loaded');
       } finally {
@@ -476,6 +496,35 @@ export default function DashboardPage() {
 
         {noGuildConnected ? (
           <>
+            {/* Member registration card — shown when user has no admin access but is a registered member */}
+            {memberRegistration && (
+              <section className="card card-glow-blue mb-6 animate-fade-in">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-blue)]">
+                    <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm text-[var(--color-text-muted)]">Guild member</p>
+                    <h1 className="mt-2 text-2xl font-bold tracking-tight">
+                      {memberRegistration.guildName}
+                    </h1>
+                    <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                      Ally code {memberRegistration.allyCode}
+                    </p>
+                    <div className="mt-5">
+                      <Link href={`/gilde/${memberRegistration.guildSlug}/meine-zuweisungen`}>
+                        <button className="btn btn-primary">
+                          View my assignments
+                        </button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
             {/* Welcome Section */}
             <section className="card card-glow-blue mb-8 animate-fade-in">
               <div className="flex items-start gap-4">
@@ -490,7 +539,7 @@ export default function DashboardPage() {
                     No guild connected
                   </h1>
                   <p className="mt-3 max-w-2xl text-[var(--color-text-secondary)]">
-                    Connect your SWGOH guild to start planning Territory Battles. 
+                    Connect your SWGOH guild to start planning Territory Battles.
                     Sync members, analyze roster data, and optimize platoon assignments.
                   </p>
                   <div className="mt-6">

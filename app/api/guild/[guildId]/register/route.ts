@@ -38,7 +38,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
     const discordUserId = await getDiscordUserIdForUser(user.id);
     if (!discordUserId) {
-      return jsonError('Unauthorized', 401);
+      return jsonError('Discord identity not linked. Please log out and log back in.', 422);
     }
 
     const { guildId } = await params;
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const discordUserId = await getDiscordUserIdForUser(user.id);
     if (!discordUserId) {
-      return jsonError('Unauthorized', 401);
+      return jsonError('Discord identity not linked. Please log out and log back in.', 422);
     }
 
     const body = await readJsonObject<RegisterBody>(request);
@@ -156,7 +156,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
 
     const discordUserId = await getDiscordUserIdForUser(user.id);
     if (!discordUserId) {
-      return jsonError('Unauthorized', 401);
+      return jsonError('Discord identity not linked. Please log out and log back in.', 422);
     }
 
     const { guildId } = await params;

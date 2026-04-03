@@ -31,7 +31,10 @@ export function Navbar({
   }
 
   const registrationLink = guildSlug
-    ? [{ href: `/gilde/${guildSlug}/registrieren`, label: 'Registrierung', match: `/gilde/${guildSlug}/registrieren` }]
+    ? [
+        { href: `/gilde/${guildSlug}/registrieren`, label: 'Registrierung', match: `/gilde/${guildSlug}/registrieren` },
+        { href: `/gilde/${guildSlug}/meine-zuweisungen`, label: 'Meine Zuweisungen', match: `/gilde/${guildSlug}/meine-zuweisungen` },
+      ]
     : [];
 
   const adminLinks = canManageGuild

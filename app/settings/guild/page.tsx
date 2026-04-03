@@ -322,11 +322,16 @@ export default async function GuildSettingsPage() {
                             {m.allyCode ?? '—'}
                           </td>
                           <td>
-                            {m.ignoredAt ? (
-                              <Badge variant="warning">Ignored</Badge>
-                            ) : (
-                              <Badge variant="success">Active</Badge>
-                            )}
+                            <div className="flex flex-wrap gap-1">
+                              {m.ignoredAt ? (
+                                <Badge variant="warning">Ignored</Badge>
+                              ) : (
+                                <Badge variant="success">Active</Badge>
+                              )}
+                              {m.isRegistered && (
+                                <Badge variant="info" size="sm">Discord</Badge>
+                              )}
+                            </div>
                           </td>
                           <td>
                             {m.allyCode ? (
