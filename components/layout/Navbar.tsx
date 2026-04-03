@@ -30,9 +30,15 @@ export function Navbar({
     return null;
   }
 
-  const links = canManageGuild
-    ? [...NAV_LINKS, { href: '/settings/guild', label: 'Guild Settings', match: '/settings/guild' }]
-    : NAV_LINKS;
+  const registrationLink = guildSlug
+    ? [{ href: `/gilde/${guildSlug}/registrieren`, label: 'Registrierung', match: `/gilde/${guildSlug}/registrieren` }]
+    : [];
+
+  const adminLinks = canManageGuild
+    ? [{ href: '/settings/guild', label: 'Guild Settings', match: '/settings/guild' }]
+    : [];
+
+  const links = [...NAV_LINKS, ...registrationLink, ...adminLinks];
 
   return (
     <header className="border-b border-gray-800 bg-gray-950/90 backdrop-blur">
