@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
 import { formatDateTime } from '@/lib/utils/format-date';
@@ -142,6 +143,7 @@ function getProgressColor(percent: number): string {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [guild, setGuild] = useState<DashboardGuild | null>(null);
   const [activeTb, setActiveTb] = useState<DashboardTb | null>(null);
   const [lastRosterSync, setLastRosterSync] = useState<string | null>(null);
@@ -152,6 +154,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [joinSlug, setJoinSlug] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
@@ -490,9 +493,9 @@ export default function DashboardPage() {
 
         {noGuildConnected ? (
           <>
-            {/* Member registration card — shown when user has no admin access but is a registered member */}
-            {memberRegistration && (
-              <section className="card card-glow-blue mb-6 animate-fade-in">
+            {memberRegistration ? (
+              /* Already registered — show member card only */
+              <section className="card card-glow-blue animate-fade-in">
                 <div className="flex items-start gap-4">
                   <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-blue)]">
                     <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -517,59 +520,62 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </section>
-            )}
-
-            {/* Welcome Section */}
-            <section className="card card-glow-blue mb-8 animate-fade-in">
-              <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent-blue)]">
-                  <svg className="h-7 w-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-[var(--color-text-muted)]">Guild setup</p>
-                  <h1 className="mt-2 text-3xl font-bold tracking-tight">
-                    No guild connected
-                  </h1>
-                  <p className="mt-3 max-w-2xl text-[var(--color-text-secondary)]">
-                    Connect your SWGOH guild to start planning Territory Battles.
-                    Sync members, analyze roster data, and optimize platoon assignments.
+            ) : (
+              /* Fresh account — two-path choice */
+              <section className="grid gap-6 md:grid-cols-2 animate-fade-in">
+                {/* Path A: guild admin */}
+                <div className="card card-glow-blue flex flex-col">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-accent-blue)]">
+                    <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
+                  <h2 className="mt-4 text-xl font-bold tracking-tight">I manage a guild</h2>
+                  <p className="mt-2 flex-1 text-sm text-[var(--color-text-secondary)]">
+                    Connect your SWGOH guild, import members, and use the planner and matching tools.
                   </p>
                   <div className="mt-6">
                     <Link href="/settings/guild">
-                      <button className="btn btn-primary">
-                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                        </svg>
-                        Connect guild
+                      <button className="btn btn-primary w-full">
+                        Set up my guild
                       </button>
                     </Link>
                   </div>
                 </div>
-              </div>
-            </section>
 
-            {/* Steps */}
-            <section className="grid gap-6 md:grid-cols-3">
-              {[
-                { step: 1, title: 'Connect guild', desc: 'Add your SWGOH guild identifier and choose the public slug.', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-                { step: 2, title: 'Sync roster', desc: 'Import guild members and roster data for planning.', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-                { step: 3, title: 'Plan & manage', desc: 'Use matching and simulator for optimal platoon planning.', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
-              ].map((item) => (
-                <div key={item.step} className="card animate-fade-in">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-blue)] text-lg font-bold">
-                      {item.step}
-                    </div>
-                    <h3 className="text-lg font-semibold">{item.title}</h3>
+                {/* Path B: guild member */}
+                <div className="card flex flex-col">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-bg-tertiary)]">
+                    <svg className="h-6 w-6 text-[var(--color-text-secondary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
                   </div>
-                  <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-                    {item.desc}
+                  <h2 className="mt-4 text-xl font-bold tracking-tight">I&apos;m a guild member</h2>
+                  <p className="mt-2 flex-1 text-sm text-[var(--color-text-secondary)]">
+                    Enter your guild&apos;s slug to register with your ally code and view your assignments.
                   </p>
+                  <form
+                    className="mt-6 flex gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const slug = joinSlug.trim().toLowerCase();
+                      if (slug) router.push(`/gilde/${slug}/registrieren`);
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="guild-slug"
+                      value={joinSlug}
+                      onChange={(e) => setJoinSlug(e.target.value)}
+                      className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-accent-blue)] focus:outline-none"
+                    />
+                    <button type="submit" className="btn btn-primary shrink-0">
+                      Join
+                    </button>
+                  </form>
                 </div>
-              ))}
-            </section>
+              </section>
+            )}
           </>
         ) : (
           <>
