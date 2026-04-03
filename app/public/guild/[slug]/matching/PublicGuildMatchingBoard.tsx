@@ -630,8 +630,10 @@ export default function PublicGuildMatchingBoard({
         if (categoryFilter !== 'all' && gapCategory !== categoryFilter) return false;
 
         if (memberFilter !== 'all') {
-          const hasMatchingSource = gap.possibleSources.some((source) => source.playerName === memberFilter);
-          if (!hasMatchingSource) return false;
+          const preferredSource = gap.possibleSources[0];
+          if (!preferredSource || preferredSource.playerName !== memberFilter) {
+            return false;
+          }
         }
 
         if (unitQuery.trim()) {
