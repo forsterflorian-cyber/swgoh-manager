@@ -6,27 +6,31 @@ import Link from 'next/link';
 
 import type { ApiEnvelope } from '@/lib/types/api';
 
-type Assignment = {
-  unitName: string | null;
-  requiredRelicTier: number | null;
+type PlatoonAssignment = {
+  phase: number;
   zoneName: string;
   platoonNumber: number;
   slotNumber: number;
-  status: string;
-  playerRelicAtAssignment: number;
+  unitName: string | null;
+  unitBaseId: string;
+  currentRelicTier: number | null;
+};
+
+type UpgradePath = {
+  unitBaseId: string;
+  unitName: string;
+  planetCategory: string | null;
+  note: string | null;
+  currentRelicTier: number | null;
 };
 
 type MyAssignmentsData = {
-  assignments: Assignment[];
   playerName: string | null;
   guildName: string;
   guildSlug: string;
-  activeTbName: string | null;
-  debug?: {
-    tbInstanceId: string | null;
-    tbStatus: string | null;
-    guildMemberId: string;
-  };
+  hasRosterData: boolean;
+  platoonAssignments: PlatoonAssignment[];
+  upgradePaths: UpgradePath[];
 };
 
 type Props = {
@@ -34,6 +38,26 @@ type Props = {
   guildName: string;
   guildSlug: string;
 };
+
+function RelicBadge({ tier }: { tier: number | null }) {
+  if (tier == null) return null;
+  return (
+    <span className="rounded-full border border-gray-700 bg-gray-800 px-2 py-0.5 text-xs text-gray-300">
+      R{tier}
+    </span>
+  );
+}
+
+function SectionHeader({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="flex items-end justify-between">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">{title}</p>
+      </div>
+      <span className="text-sm text-gray-500">{count} {count === 1 ? 'item' : 'items'}</span>
+    </div>
+  );
+}
 
 export function MeineZuweisungenView({ guildId, guildName, guildSlug }: Props) {
   const { status: sessionStatus } = useSession();
@@ -99,9 +123,7 @@ export function MeineZuweisungenView({ guildId, guildName, guildSlug }: Props) {
   if (error === 'not_registered') {
     return (
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-8">
-        <p className="text-sm text-gray-400">
-          You are not registered as a member of this guild yet.
-        </p>
+        <p className="text-sm text-gray-400">You are not registered as a member of this guild yet.</p>
         <Link
           href={`/gilde/${guildSlug}/registrieren`}
           className="mt-5 inline-flex rounded-xl border border-indigo-600 bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
@@ -130,107 +152,100 @@ export function MeineZuweisungenView({ guildId, guildName, guildSlug }: Props) {
 
   if (!data) return null;
 
+  const nothingToShow = data.platoonAssignments.length === 0 && data.upgradePaths.length === 0;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Player info */}
       <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-          Registered as
-        </p>
-        <p className="mt-2 text-lg font-semibold text-white">
-          {data.playerName ?? 'Unknown player'}
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Registered as</p>
+        <p className="mt-2 text-lg font-semibold text-white">{data.playerName ?? 'Unknown player'}</p>
         <p className="mt-1 text-sm text-gray-400">{guildName}</p>
+        {!data.hasRosterData && (
+          <p className="mt-3 text-xs text-amber-400">
+            Roster not yet synced — assignments may be incomplete.
+          </p>
+        )}
       </div>
 
-      {/* Debug panel — shown when no assignments to help diagnose */}
-      {data.debug && (data.assignments.length === 0) && (
-        <div className="rounded-xl border border-gray-700 bg-gray-900/50 px-4 py-3 font-mono text-xs text-gray-500">
-          <p className="mb-1 font-semibold text-gray-400">Debug info</p>
-          <p>TB instance: {data.debug.tbInstanceId ?? 'none found'}</p>
-          <p>TB status: {data.debug.tbStatus ?? '—'}</p>
-          <p>Guild member ID: {data.debug.guildMemberId}</p>
-        </div>
-      )}
-
-      {/* Active TB + assignments */}
-      {!data.activeTbName ? (
+      {nothingToShow ? (
         <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-8 text-center">
-          <p className="text-lg font-semibold text-white">No active Territory Battle</p>
+          <p className="text-lg font-semibold text-white">No assignments yet</p>
           <p className="mt-2 text-sm text-gray-400">
-            Check back once guild leadership has started a new TB.
-          </p>
-        </div>
-      ) : data.assignments.length === 0 ? (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-8 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-            {data.activeTbName}
-          </p>
-          <p className="mt-3 text-lg font-semibold text-white">No assignments for you yet</p>
-          <p className="mt-2 text-sm text-gray-400">
-            Guild leadership has not assigned any platoon slots to you in the current TB.
+            Guild leadership has not assigned any platoon slots or upgrade targets to you yet.
           </p>
         </div>
       ) : (
-        <div>
-          <div className="mb-4 flex items-end justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-                {data.activeTbName}
-              </p>
-              <h2 className="mt-2 text-xl font-semibold text-white">
-                Your assignments ({data.assignments.length})
-              </h2>
-            </div>
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/70">
-            <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.8fr)] gap-4 border-b border-gray-800 bg-gray-950/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
-              <div>Unit</div>
-              <div>Zone / Platoon</div>
-              <div>Relic</div>
-            </div>
-
-            <div className="divide-y divide-gray-800">
-              {data.assignments.map((a, i) => {
-                const meetsRelic =
-                  a.requiredRelicTier == null ||
-                  a.playerRelicAtAssignment >= a.requiredRelicTier;
-
-                return (
-                  <div
-                    key={i}
-                    className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.8fr)] gap-4 px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">
-                        {a.unitName ?? '—'}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">Slot {a.slotNumber}</p>
+        <>
+          {/* Part A: Platoon matching assignments */}
+          {data.platoonAssignments.length > 0 && (
+            <section>
+              <SectionHeader title="Platoon assignments" count={data.platoonAssignments.length} />
+              <div className="mt-3 overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/70">
+                <div className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.2fr)_minmax(0,0.6fr)] gap-4 border-b border-gray-800 bg-gray-950/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                  <div>Unit</div>
+                  <div>Zone / Platoon</div>
+                  <div>Relic</div>
+                </div>
+                <div className="divide-y divide-gray-800">
+                  {data.platoonAssignments.map((a, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.2fr)_minmax(0,0.6fr)] gap-4 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">{a.unitName ?? a.unitBaseId}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Phase {a.phase} · Slot {a.slotNumber}</p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-gray-300">{a.zoneName}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">Platoon {a.platoonNumber}</p>
+                      </div>
+                      <div className="flex items-center">
+                        <RelicBadge tier={a.currentRelicTier} />
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm text-gray-300">{a.zoneName}</p>
-                      <p className="mt-1 text-xs text-gray-500">Platoon {a.platoonNumber}</p>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Part B: Upgrade paths */}
+          {data.upgradePaths.length > 0 && (
+            <section>
+              <SectionHeader title="Upgrade targets" count={data.upgradePaths.length} />
+              <div className="mt-3 overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/70">
+                <div className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,0.6fr)] gap-4 border-b border-gray-800 bg-gray-950/80 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                  <div>Unit</div>
+                  <div>Category</div>
+                  <div>Relic</div>
+                </div>
+                <div className="divide-y divide-gray-800">
+                  {data.upgradePaths.map((u, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,0.6fr)] gap-4 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">{u.unitName}</p>
+                        {u.note && (
+                          <p className="mt-0.5 truncate text-xs text-gray-500">{u.note}</p>
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-400">
+                        {u.planetCategory ?? '—'}
+                      </div>
+                      <div className="flex items-center">
+                        <RelicBadge tier={u.currentRelicTier} />
+                      </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {a.requiredRelicTier != null && (
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-xs ${
-                            meetsRelic
-                              ? 'border-emerald-900 bg-emerald-950/50 text-emerald-200'
-                              : 'border-rose-900 bg-rose-950/50 text-rose-200'
-                          }`}
-                        >
-                          R{a.playerRelicAtAssignment} / R{a.requiredRelicTier}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
   );

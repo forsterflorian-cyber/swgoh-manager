@@ -7,20 +7,12 @@ import {
   getRegisteredMemberForGuild,
 } from '@/lib/api/auth';
 import { jsonError, jsonOk } from '@/lib/api/responses';
+import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 
 export const runtime = 'nodejs';
 
 type RouteParams = { params: Promise<{ guildId: string }> };
-
-type AssignmentRow = {
-  unit_name: string | null;
-  required_relic_tier: number | null;
-  zone_name: string;
-  platoon_number: number;
-  slot_number: number;
-  status: string;
-  player_relic_at_assignment: number;
-};
 
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
@@ -41,81 +33,84 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       return jsonError('Not registered as a member of this guild', 403);
     }
 
-    // Get guild name for context
+    // Resolve guild slug (needed for dataset loader)
     const guildResult = await sql<{ name: string; slug: string }>`
       SELECT name, slug FROM guilds WHERE id = ${guildId} LIMIT 1
     `;
     if (guildResult.rows.length === 0) {
       return jsonError('Guild not found', 404);
     }
+    const { name: guildName, slug: guildSlug } = guildResult.rows[0];
 
-    // Get player name from guild_members
+    // Player name
     const memberResult = await sql<{ player_name: string }>`
       SELECT player_name FROM guild_members WHERE id = ${registration.guildMemberId} LIMIT 1
     `;
     const playerName = memberResult.rows[0]?.player_name ?? null;
 
-    // Find the most relevant TB instance (active preferred, then planning)
-    const tbResult = await sql<{ id: string; name: string | null; definition_name: string; status: string }>`
-      SELECT ti.id, ti.name, td.name AS definition_name, ti.status
-      FROM tb_instances ti
-      JOIN tb_definitions td ON td.id = ti.tb_definition_id
-      WHERE ti.guild_id = ${guildId}
-        AND ti.status IN ('active', 'planning')
-      ORDER BY
-        CASE ti.status WHEN 'active' THEN 0 ELSE 1 END,
-        ti.created_at DESC
-      LIMIT 1
+    // --- Part A: Platoon matching assignments for this member ---
+    const dataset = await loadStrategicPlannerDatasetForGuildSlug(guildSlug);
+    const matching = dataset.guild && dataset.reference
+      ? computePlatoonMatching(dataset)
+      : null;
+
+    const matchingAssignments = (matching?.assignments ?? [])
+      .filter((a) => a.memberId === registration.guildMemberId)
+      .map((a) => ({
+        phase: a.phase,
+        zoneName: a.zoneName,
+        platoonNumber: a.platoonNumber,
+        slotNumber: a.slotNumber,
+        unitName: a.unitName,
+        unitBaseId: a.unitBaseId,
+      }));
+
+    // Current relic tier for each assigned unit (from roster)
+    const rosterByUnit = new Map(
+      dataset.roster
+        .filter((r) => r.memberId === registration.guildMemberId)
+        .map((r) => [r.unitBaseId, r])
+    );
+
+    const platoonAssignments = matchingAssignments.map((a) => {
+      const rosterEntry = rosterByUnit.get(a.unitBaseId);
+      return {
+        ...a,
+        currentRelicTier: rosterEntry?.relicTier ?? null,
+      };
+    });
+
+    // --- Part B: Upgrade path assignments for this member ---
+    const upgradeRows = await sql<{
+      unit_base_id: string;
+      planet_category: string | null;
+      note: string | null;
+    }>`
+      SELECT unit_base_id, planet_category, note
+      FROM guild_upgrade_assignments
+      WHERE guild_id = ${guildId}
+        AND guild_member_id = ${registration.guildMemberId}
+      ORDER BY created_at DESC
     `;
 
-    if (tbResult.rows.length === 0) {
-      return jsonOk({
-        assignments: [],
-        playerName,
-        guildName: guildResult.rows[0].name,
-        guildSlug: guildResult.rows[0].slug,
-        activeTbName: null,
-        debug: { tbInstanceId: null, tbStatus: null, guildMemberId: registration.guildMemberId },
-      });
-    }
+    // Enrich with unit name from roster cache
+    const unitNames = new Map(dataset.roster.map((r) => [r.unitBaseId, r.unitName]));
 
-    const tb = tbResult.rows[0];
-    const tbName = tb.name || tb.definition_name;
-
-    const assignments = await sql<AssignmentRow>`
-      SELECT
-        tps.unit_name,
-        tps.required_relic_tier,
-        tz.name  AS zone_name,
-        tp.platoon_number,
-        tps.slot_number,
-        ta.status,
-        ta.player_relic_at_assignment
-      FROM tb_assignments ta
-      JOIN tb_platoon_slots tps ON tps.id = ta.tb_platoon_slot_id
-      JOIN tb_platoons      tp  ON tp.id  = tps.tb_platoon_id
-      JOIN tb_zones         tz  ON tz.id  = tp.tb_zone_id
-      WHERE ta.tb_instance_id = ${tb.id}
-        AND ta.guild_member_id = ${registration.guildMemberId}
-        AND ta.tb_platoon_slot_id IS NOT NULL
-      ORDER BY tz.name, tp.platoon_number, tps.slot_number
-    `;
+    const upgradePaths = upgradeRows.rows.map((row) => ({
+      unitBaseId: row.unit_base_id,
+      unitName: unitNames.get(row.unit_base_id) ?? row.unit_base_id,
+      planetCategory: row.planet_category,
+      note: row.note,
+      currentRelicTier: rosterByUnit.get(row.unit_base_id)?.relicTier ?? null,
+    }));
 
     return jsonOk({
-      assignments: assignments.rows.map((row) => ({
-        unitName: row.unit_name,
-        requiredRelicTier: row.required_relic_tier,
-        zoneName: row.zone_name,
-        platoonNumber: row.platoon_number,
-        slotNumber: row.slot_number,
-        status: row.status,
-        playerRelicAtAssignment: row.player_relic_at_assignment,
-      })),
       playerName,
-      guildName: guildResult.rows[0].name,
-      guildSlug: guildResult.rows[0].slug,
-      activeTbName: tbName,
-      debug: { tbInstanceId: tb.id, tbStatus: tb.status, guildMemberId: registration.guildMemberId },
+      guildName,
+      guildSlug,
+      hasRosterData: dataset.roster.length > 0,
+      platoonAssignments,
+      upgradePaths,
     });
   } catch (error: unknown) {
     console.error('my-assignments GET error:', error);
