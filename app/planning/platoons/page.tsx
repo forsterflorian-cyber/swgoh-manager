@@ -165,13 +165,7 @@ function PlatoonReadinessContent() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
-  const navbar = (
-    <Navbar
-      guildName={data?.guild?.name ?? null}
-      guildSlug={data?.guild?.slug ?? null}
-      canManageGuild={data?.permissions.canManageTargets ?? false}
-    />
-  );
+  const navbar = <Navbar />;
 
   const loadPlanner = useCallback(
     async (showLoadingState = true) => {

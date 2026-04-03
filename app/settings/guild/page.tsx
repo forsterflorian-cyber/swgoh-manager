@@ -122,7 +122,7 @@ export default async function GuildSettingsPage() {
   if (!isGuildManagerRole(guild.role)) {
     return (
       <div className="min-h-screen">
-        <Navbar guildName={guild.name} guildSlug={guild.slug} />
+        <Navbar />
         <div className="mx-auto max-w-4xl px-6 py-10">
           <Card variant="danger" className="animate-fade-in">
             <div className="flex items-center gap-3">
@@ -155,7 +155,7 @@ export default async function GuildSettingsPage() {
 
   return (
     <div className="min-h-screen">
-      <Navbar guildName={guild.name} guildSlug={guild.slug} canManageGuild />
+      <Navbar />
       <div className="mx-auto max-w-4xl px-6 py-10">
         {/* Header */}
         <header className="mb-8 animate-fade-in">

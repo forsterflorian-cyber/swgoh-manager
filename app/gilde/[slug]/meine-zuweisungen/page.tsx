@@ -26,7 +26,7 @@ export default async function MeineZuweisungenPage({
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <Navbar guildName={guild.name} guildSlug={slug} />
+      <Navbar />
 
       <header className="border-b border-gray-800 bg-gradient-to-b from-blue-950/30 via-gray-950 to-gray-950">
         <div className="mx-auto max-w-2xl px-4 py-10">

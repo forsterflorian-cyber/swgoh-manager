@@ -155,13 +155,7 @@ export default function DashboardPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
-  const navbar = (
-    <Navbar
-      guildName={guild?.name ?? null}
-      guildSlug={guild?.slug ?? null}
-      canManageGuild={canManageGuild}
-    />
-  );
+  const navbar = <Navbar />;
 
   useEffect(() => {
     async function loadDashboard() {

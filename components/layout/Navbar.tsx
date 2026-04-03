@@ -1,87 +1,153 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 
 import { LogoutButton } from '@/components/auth/logout-button';
-import { SessionIndicator } from '@/components/auth/session-indicator';
+import type { ApiEnvelope } from '@/lib/types/api';
 
-type NavbarProps = {
-  guildName?: string | null;
-  guildSlug?: string | null;
-  canManageGuild?: boolean;
+type NavContext = {
+  adminGuild: {
+    name: string;
+    slug: string;
+    canManageGuild: boolean;
+  } | null;
+  memberGuild: {
+    name: string;
+    slug: string;
+  } | null;
 };
 
-const NAV_LINKS = [
-  { href: '/dashboard', label: 'Dashboard', match: '/dashboard' },
-] as const;
+type NavLink = { href: string; label: string };
 
-export function Navbar({
-  guildName,
-  guildSlug,
-  canManageGuild = false,
-}: NavbarProps) {
+function NavLink({ href, label, pathname }: NavLink & { pathname: string }) {
+  const active = pathname === href || pathname.startsWith(href + '/');
+  return (
+    <Link
+      href={href}
+      className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+        active
+          ? 'border-blue-500 bg-blue-950/50 text-blue-100'
+          : 'border-gray-800 bg-gray-900/70 text-gray-300 hover:border-gray-700 hover:bg-gray-900'
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function NavSection({
+  label,
+  links,
+  pathname,
+}: {
+  label: string;
+  links: NavLink[];
+  pathname: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="hidden text-xs font-semibold uppercase tracking-widest text-gray-600 lg:inline">
+        {label}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {links.map((link) => (
+          <NavLink key={link.href} href={link.href} label={link.label} pathname={pathname} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function Navbar() {
   const pathname = usePathname();
   const { data: session, status } = useSession();
+  const [ctx, setCtx] = useState<NavContext | null>(null);
+
   const displayName = session?.user?.name?.trim() || session?.user?.email?.trim() || null;
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+
+    fetch('/api/me/nav-context')
+      .then((r) => r.json())
+      .then((payload: ApiEnvelope<NavContext>) => {
+        if (payload.ok) setCtx(payload.data);
+      })
+      .catch(() => {/* non-critical */});
+  }, [status]);
 
   if (status !== 'authenticated' || !displayName) {
     return null;
   }
 
-  const registrationLink = guildSlug
+  const adminLinks: NavLink[] = [
+    { href: '/dashboard', label: 'Dashboard' },
+    ...(ctx?.adminGuild
+      ? [{ href: `/planning/platoons`, label: 'Platoons' }]
+      : []),
+    ...(ctx?.adminGuild?.canManageGuild
+      ? [{ href: '/settings/guild', label: 'Guild Settings' }]
+      : []),
+  ];
+
+  const memberLinks: NavLink[] = ctx?.memberGuild
     ? [
-        { href: `/gilde/${guildSlug}/registrieren`, label: 'Registrierung', match: `/gilde/${guildSlug}/registrieren` },
-        { href: `/gilde/${guildSlug}/meine-zuweisungen`, label: 'Meine Zuweisungen', match: `/gilde/${guildSlug}/meine-zuweisungen` },
+        { href: `/gilde/${ctx.memberGuild.slug}/registrieren`, label: 'Registration' },
+        { href: `/gilde/${ctx.memberGuild.slug}/meine-zuweisungen`, label: 'My Assignments' },
       ]
     : [];
 
-  const adminLinks = canManageGuild
-    ? [{ href: '/settings/guild', label: 'Guild Settings', match: '/settings/guild' }]
-    : [];
-
-  const links = [...NAV_LINKS, ...registrationLink, ...adminLinks];
+  const guildName = ctx?.adminGuild?.name ?? ctx?.memberGuild?.name ?? null;
+  const guildSlug = ctx?.adminGuild?.slug ?? ctx?.memberGuild?.slug ?? null;
 
   return (
-    <header className="border-b border-gray-800 bg-gray-950/90 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
-          <Link href="/dashboard" className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-300">
+    <header className="sticky top-0 z-50 border-b border-gray-800 bg-gray-950/95 backdrop-blur">
+      <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+
+        {/* Left: brand + nav areas */}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-5">
+          <Link
+            href="/dashboard"
+            className="shrink-0 text-sm font-semibold uppercase tracking-[0.2em] text-blue-300"
+          >
             SWGOH Manager
           </Link>
 
-          <nav className="flex flex-wrap gap-2">
-            {links.map((link) => {
-              const active =
-                pathname === link.href ||
-                (link.match !== link.href && pathname?.startsWith(link.match));
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Admin area */}
+            <NavSection label="Admin" links={adminLinks} pathname={pathname} />
 
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={`rounded-lg border px-3 py-2 text-sm transition-colors ${
-                    active
-                      ? 'border-blue-500 bg-blue-950/50 text-blue-100'
-                      : 'border-gray-800 bg-gray-900/70 text-gray-300 hover:border-gray-700 hover:bg-gray-900'
-                  }`}
-                >
-                  {link.label}
-                </Link>
-              );
-            })}
-          </nav>
+            {/* Divider — only when both areas exist */}
+            {memberLinks.length > 0 && (
+              <span className="hidden h-5 w-px bg-gray-700 lg:inline-block" aria-hidden />
+            )}
+
+            {/* Member area */}
+            {memberLinks.length > 0 && (
+              <NavSection label="Member" links={memberLinks} pathname={pathname} />
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 lg:justify-end">
-          <SessionIndicator
-            displayName={displayName}
-            guildName={guildName}
-            guildSlug={guildSlug}
-          />
+        {/* Right: user info + logout */}
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-end">
+            <span className="text-sm font-medium text-gray-200">{displayName}</span>
+            {guildName && guildSlug && (
+              <Link
+                href={`/gilde/${guildSlug}`}
+                className="text-xs text-gray-500 hover:text-gray-400"
+              >
+                {guildName}
+              </Link>
+            )}
+          </div>
           <LogoutButton />
         </div>
+
       </div>
     </header>
   );

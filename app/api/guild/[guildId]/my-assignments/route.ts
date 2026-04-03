@@ -55,14 +55,16 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     `;
     const playerName = memberResult.rows[0]?.player_name ?? null;
 
-    // Find active TB instance
-    const tbResult = await sql<{ id: string; name: string | null; definition_name: string }>`
-      SELECT ti.id, ti.name, td.name AS definition_name
+    // Find the most relevant TB instance (active preferred, then planning)
+    const tbResult = await sql<{ id: string; name: string | null; definition_name: string; status: string }>`
+      SELECT ti.id, ti.name, td.name AS definition_name, ti.status
       FROM tb_instances ti
       JOIN tb_definitions td ON td.id = ti.tb_definition_id
       WHERE ti.guild_id = ${guildId}
-        AND ti.status = 'active'
-      ORDER BY ti.created_at DESC
+        AND ti.status IN ('active', 'planning')
+      ORDER BY
+        CASE ti.status WHEN 'active' THEN 0 ELSE 1 END,
+        ti.created_at DESC
       LIMIT 1
     `;
 
@@ -94,6 +96,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       JOIN tb_zones         tz  ON tz.id  = tp.tb_zone_id
       WHERE ta.tb_instance_id = ${tb.id}
         AND ta.guild_member_id = ${registration.guildMemberId}
+        AND ta.tb_platoon_slot_id IS NOT NULL
       ORDER BY tz.name, tp.platoon_number, tps.slot_number
     `;
 
