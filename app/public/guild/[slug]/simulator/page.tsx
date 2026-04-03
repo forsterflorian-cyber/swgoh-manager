@@ -815,16 +815,16 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
     };
   }, [slug, debouncedActions, ignoredScopes, mode, autoTarget]);
 
-  const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
-  const firstCandidate = data?.advisory.first ?? null;
-  const secondCandidate = data?.advisory.second ?? null;
+  const summary = useMemo(() => data?.simulation?.delta ?? null, [data]);
+  const firstCandidate = data?.advisory?.first ?? null;
+  const secondCandidate = data?.advisory?.second ?? null;
   const autoPlan = data?.autoPlan ?? null;
   const lookups = data?.lookups;
   const ignoreScopeOptions = useMemo(() => data?.ignoreScopeOptions ?? [], [data?.ignoreScopeOptions]);
   const autoTargetOptions = useMemo(() => data?.autoTargetOptions ?? [], [data?.autoTargetOptions]);
   const fullNewAssignments = data?.fullNewAssignments ?? [];
   const guildName = data?.guildName ?? slug;
-  const visibleCoverage = data?.simulation.baseline.coverage ?? [];
+  const visibleCoverage = data?.simulation?.baseline?.coverage ?? [];
   const availableDraftPhases = [...new Set(ignoreScopeOptions.map((option) => option.phase))].sort((a, b) => a - b);
   const availableDraftCategories = ignoreScopeOptions
     .filter((option) => (scopeDraftPhase ? option.phase === Number(scopeDraftPhase) : true))
@@ -1245,25 +1245,25 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
               )}
             </div>
 
-            {data && (
+            {summary && (
               <div className="mt-5 stat-card">
                 <div className="stat-label">Scenario effect</div>
                 <div className="mt-4 space-y-3 text-sm">
                   <div className="flex items-center justify-between">
                     <span>Delta covered slots</span>
-                    <span className="font-semibold">{data.simulation.delta.deltaCoveredSlots ?? '—'}</span>
+                    <span className="font-semibold">{summary.deltaCoveredSlots ?? '—'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Delta full platoons</span>
-                    <span className="font-semibold">{data.simulation.delta.deltaFullPlatoons ?? '—'}</span>
+                    <span className="font-semibold">{summary.deltaFullPlatoons ?? '—'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Delta full zones</span>
-                    <span className="font-semibold">{data.simulation.delta.deltaFullZones ?? '—'}</span>
+                    <span className="font-semibold">{summary.deltaFullZones ?? '—'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Displaced assignments</span>
-                    <span className="font-semibold">{data.simulation.delta.displacedAssignmentCount ?? '—'}</span>
+                    <span className="font-semibold">{summary.displacedAssignmentCount ?? '—'}</span>
                   </div>
                 </div>
               </div>

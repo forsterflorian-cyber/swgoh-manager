@@ -3,13 +3,27 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+import {
+  formatIgnoredMatchingScopeLabel,
+  getIgnoredMatchingScopeKey,
+  getMatchingCategoryLabel,
+  isIgnoredMatchingScope,
+  normalizeIgnoredMatchingScopes,
+} from '@/lib/utils/matching-scopes';
 import UpgradeRecommendations from './UpgradeRecommendations';
-import type { PlatoonMatchingGap, PlatoonMatchingResult } from '@/lib/types/platoon-readiness';
+import type {
+  IgnoredMatchingScope,
+  PlatoonMatchingGap,
+  PlatoonMatchingResult,
+  StrategicPlannerMatchingInput,
+} from '@/lib/types/platoon-readiness';
 
 type Props = {
   slug: string;
   guildName: string;
   tbKey: string;
+  matchingInput: StrategicPlannerMatchingInput;
   matching: PlatoonMatchingResult;
 };
 
@@ -191,6 +205,8 @@ function buildMatchingPlatoonSections(
 }
 
 function CoverageCard({
+  ignored,
+  onToggleIgnore,
   phase,
   category,
   fullPlatoons,
@@ -199,7 +215,10 @@ function CoverageCard({
   requirementCount,
   coveragePercent,
   isBonus,
-}: PlatoonMatchingResult['coverage'][number]) {
+}: PlatoonMatchingResult['coverage'][number] & {
+  ignored: boolean;
+  onToggleIgnore: (scope: IgnoredMatchingScope) => void;
+}) {
   const getProgressColor = (pct: number) => {
     if (pct >= 100) return 'progress-fill-emerald';
     if (pct >= 75) return 'progress-fill-blue';
@@ -208,14 +227,26 @@ function CoverageCard({
   };
 
   return (
-    <div className={`metric-card animate-fade-in ${
+    <div
+      className={`metric-card animate-fade-in relative ${
       coveragePercent === 100 ? 'card-glow-emerald' : 
       coveragePercent >= 50 ? '' : 'card-glow-rose'
-    }`}>
+    } ${ignored ? 'opacity-70' : ''}`}
+    >
+      <label className="absolute right-4 top-4 flex items-center gap-2 rounded-full border border-[var(--color-border-primary)] bg-[var(--color-surface-secondary)] px-2 py-1 text-xs text-[var(--color-text-secondary)]">
+        <input
+          type="checkbox"
+          checked={ignored}
+          onChange={() => onToggleIgnore({ phase, category })}
+          className="h-3.5 w-3.5 rounded border-[var(--color-border-secondary)] bg-[var(--color-bg-tertiary)] text-[var(--color-accent-rose)] focus:ring-[var(--color-accent-rose)]"
+        />
+        Ignore
+      </label>
+
       <div className="flex items-center justify-between">
         <div>
           <div className="metric-label">
-            P{phase} · {isBonus ? 'Bonus' : category}
+            P{phase} · {getMatchingCategoryLabel(isBonus ? 'SPECIAL' : category)}
           </div>
           <div className="mt-1 text-sm text-[var(--color-text-muted)]">
             {assignedCount} / {requirementCount} assigned
@@ -223,6 +254,11 @@ function CoverageCard({
           <div className="mt-1 text-xs text-[var(--color-text-muted)]">
             Full Platoons {fullPlatoons}/{totalPlatoons}
           </div>
+          {ignored && (
+            <div className="mt-2 text-xs font-medium text-[var(--color-accent-rose)]">
+              Ignored for this scenario
+            </div>
+          )}
         </div>
         <div className="text-right">
           <div className="text-2xl font-bold">{coveragePercent}%</div>
@@ -333,6 +369,7 @@ export default function PublicGuildMatchingBoard({
   slug,
   guildName,
   tbKey,
+  matchingInput,
   matching,
 }: Props) {
   const [mode, setMode] = useState<ViewMode>('officer');
@@ -343,12 +380,51 @@ export default function PublicGuildMatchingBoard({
   const [coverageStatusFilter, setCoverageStatusFilter] = useState<CoverageStatusFilter>('all');
   const [platoonFilter, setPlatoonFilter] = useState<string>('all');
   const [unitQuery, setUnitQuery] = useState('');
+  const [ignoredScopes, setIgnoredScopes] = useState<IgnoredMatchingScope[]>([]);
+
+  const activeMatching = useMemo(() => {
+    if (ignoredScopes.length === 0) {
+      return matching;
+    }
+
+    return computePlatoonMatching(matchingInput, { ignoredScopes });
+  }, [ignoredScopes, matching, matchingInput]);
+
+  const activeCoverageByKey = useMemo(
+    () =>
+      new Map(
+        activeMatching.coverage.map((entry) => [
+          getIgnoredMatchingScopeKey({ phase: entry.phase, category: entry.category }),
+          entry,
+        ]),
+      ),
+    [activeMatching.coverage],
+  );
+
+  const ignoredScopeLabels = useMemo(
+    () => ignoredScopes.map((scope) => formatIgnoredMatchingScopeLabel(scope)),
+    [ignoredScopes],
+  );
 
   const uniqueMembers = useMemo(() => {
-    return [...new Set(matching.assignments.map((a) => a.playerName).filter(Boolean))].sort((a, b) =>
+    return [...new Set(activeMatching.assignments.map((a) => a.playerName).filter(Boolean))].sort((a, b) =>
       a.localeCompare(b),
     );
-  }, [matching.assignments]);
+  }, [activeMatching.assignments]);
+
+  function toggleIgnoredScope(scope: IgnoredMatchingScope) {
+    setIgnoredScopes((previous) => {
+      const next = isIgnoredMatchingScope(previous, scope)
+        ? previous.filter(
+            (entry) =>
+              getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
+          )
+        : [...previous, scope];
+
+      return normalizeIgnoredMatchingScopes(next);
+    });
+    setPlatoonFilter('all');
+  }
 
   const sortedCoverage = useMemo(() => {
     return [...matching.coverage]
@@ -375,9 +451,30 @@ export default function PublicGuildMatchingBoard({
         return String(a.category).localeCompare(String(b.category));
       });
   }, [matching.coverage, phaseFilter, categoryFilter, coverageStatusFilter, mode]);
+  const coverageCards = useMemo(
+    () =>
+      sortedCoverage.map((entry) => {
+        const scope = { phase: entry.phase, category: entry.category };
+        const activeEntry = activeCoverageByKey.get(getIgnoredMatchingScopeKey(scope));
+        const ignored = isIgnoredMatchingScope(ignoredScopes, scope);
+        const displayEntry = activeEntry ?? entry;
+
+        return (
+          <CoverageCard
+            key={`${entry.phase}-${entry.category}-${entry.isBonus ? 'bonus' : 'main'}`}
+            {...displayEntry}
+            category={entry.category}
+            isBonus={entry.isBonus}
+            ignored={ignored}
+            onToggleIgnore={toggleIgnoredScope}
+          />
+        );
+      }),
+    [activeCoverageByKey, ignoredScopes, sortedCoverage],
+  );
 
   const baseFilteredAssignments = useMemo(() => {
-    return [...matching.assignments]
+    return [...activeMatching.assignments]
       .filter((assignment) => {
         if (phaseFilter !== 'all' && String(assignment.phase) !== phaseFilter) return false;
 
@@ -393,10 +490,10 @@ export default function PublicGuildMatchingBoard({
         }
         return true;
       });
-  }, [matching.assignments, phaseFilter, categoryFilter, memberFilter, unitQuery]);
+  }, [activeMatching.assignments, phaseFilter, categoryFilter, memberFilter, unitQuery]);
 
   const baseFilteredGaps = useMemo(() => {
-    return [...matching.gaps]
+    return [...activeMatching.gaps]
       .filter((gap) => {
         if (phaseFilter !== 'all' && String(gap.phase) !== phaseFilter) return false;
 
@@ -416,7 +513,7 @@ export default function PublicGuildMatchingBoard({
 
         return true;
       });
-  }, [matching.gaps, phaseFilter, categoryFilter, memberFilter, unitQuery]);
+  }, [activeMatching.gaps, phaseFilter, categoryFilter, memberFilter, unitQuery]);
 
   const availablePlatoons = useMemo(
     () => buildMatchingPlatoonSections(baseFilteredAssignments, baseFilteredGaps),
@@ -530,8 +627,9 @@ export default function PublicGuildMatchingBoard({
                   Platoon Matching · {guildName}
                 </h1>
                 <p className="mt-2 text-[var(--color-text-secondary)]">
-                  Territory Battle: {tbKey} · Coverage {matching.coveragePercent}% ·{' '}
-                  {matching.totalAssigned}/{matching.totalRequired} assigned
+                  Territory Battle: {tbKey} · Coverage {activeMatching.coveragePercent}% ·{' '}
+                  {activeMatching.totalAssigned}/{activeMatching.totalRequired} assigned
+                  {ignoredScopes.length > 0 ? ` · ${ignoredScopes.length} scope${ignoredScopes.length === 1 ? '' : 's'} ignored` : ''}
                 </p>
               </div>
             </div>
@@ -559,12 +657,12 @@ export default function PublicGuildMatchingBoard({
                 </svg>
               </div>
             </div>
-            <div className="metric-value">{matching.coveragePercent}%</div>
-            <div className="metric-detail">{matching.totalAssigned} / {matching.totalRequired} slots filled</div>
+            <div className="metric-value">{activeMatching.coveragePercent}%</div>
+            <div className="metric-detail">{activeMatching.totalAssigned} / {activeMatching.totalRequired} slots filled</div>
             <div className="mt-4 progress-bar">
               <div
                 className="progress-fill progress-fill-blue"
-                style={{ width: `${matching.coveragePercent}%` }}
+                style={{ width: `${activeMatching.coveragePercent}%` }}
               />
             </div>
           </div>
@@ -578,7 +676,7 @@ export default function PublicGuildMatchingBoard({
                 </svg>
               </div>
             </div>
-            <div className="metric-value">{matching.assignments.length}</div>
+            <div className="metric-value">{activeMatching.assignments.length}</div>
             <div className="metric-detail">Optimal committed placements</div>
           </div>
 
@@ -591,7 +689,7 @@ export default function PublicGuildMatchingBoard({
                 </svg>
               </div>
             </div>
-            <div className="metric-value">{matching.gaps.length}</div>
+            <div className="metric-value">{activeMatching.gaps.length}</div>
             <div className="metric-detail">Unmatched required slots</div>
           </div>
         </section>
@@ -702,6 +800,40 @@ export default function PublicGuildMatchingBoard({
           <UpgradeRecommendations slug={slug} />
         ) : (
           <>
+            {ignoredScopes.length > 0 && (
+              <section className="mb-6 animate-fade-in">
+                <div className="card">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="metric-label">Scenario ignore</div>
+                      <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+                        Checked cards are removed from the solve so the remaining scopes can refill.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIgnoredScopes([])}
+                      className="btn btn-secondary"
+                    >
+                      Clear ignored scopes
+                    </button>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {ignoredScopes.map((scope, index) => (
+                      <button
+                        key={getIgnoredMatchingScopeKey(scope)}
+                        type="button"
+                        onClick={() => toggleIgnoredScope(scope)}
+                        className="rounded-full border border-[var(--color-accent-rose)]/40 bg-[var(--color-accent-rose)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent-rose)]"
+                      >
+                        {ignoredScopeLabels[index]} ×
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+
             {/* Coverage Section */}
             <section className="mb-10 animate-fade-in">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -715,12 +847,7 @@ export default function PublicGuildMatchingBoard({
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  {sortedCoverage.map((entry) => (
-                    <CoverageCard
-                      key={`${entry.phase}-${entry.category}-${entry.isBonus ? 'bonus' : 'main'}`}
-                      {...entry}
-                    />
-                  ))}
+                  {coverageCards}
                 </div>
               )}
             </section>

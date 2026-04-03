@@ -25,6 +25,11 @@
         slug={slug}
         guildName={dataset.guild.name ?? slug}
         tbKey={dataset.reference.tbKey}
+        matchingInput={{
+          slots: dataset.slots,
+          roster: dataset.roster,
+          members: dataset.members,
+        }}
         matching={matching}
       />
     );
