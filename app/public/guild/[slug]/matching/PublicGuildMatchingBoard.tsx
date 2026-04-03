@@ -727,16 +727,30 @@ export default function PublicGuildMatchingBoard({
       });
   }, [filteredGaps, statusFilter, mode]);
 
+  const platoonDetailAssignments = useMemo(() => {
+    if (statusFilter === 'gaps_only') {
+      return [];
+    }
+
+    return sortedAssignments;
+  }, [sortedAssignments, statusFilter]);
+
+  const platoonDetailGaps = useMemo(() => {
+    if (statusFilter === 'assigned_only') {
+      return [];
+    }
+
+    return sortedGaps;
+  }, [sortedGaps, statusFilter]);
+
   const platoonDetailSections = useMemo(
-    () => buildMatchingPlatoonSections(filteredAssignments, filteredGaps),
-    [filteredAssignments, filteredGaps],
+    () => buildMatchingPlatoonSections(platoonDetailAssignments, platoonDetailGaps),
+    [platoonDetailAssignments, platoonDetailGaps],
   );
 
-  const visibleAssignments =
-    mode === 'officer' && statusFilter === 'gaps_only' ? [] : sortedAssignments;
+  const visibleAssignments = platoonDetailAssignments;
 
-  const visibleGaps =
-    mode === 'member' && statusFilter === 'assigned_only' ? [] : sortedGaps;
+  const visibleGaps = platoonDetailGaps;
 
   return (
     <main className="min-h-screen">
