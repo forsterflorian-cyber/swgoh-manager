@@ -333,6 +333,7 @@ function buildEmptyPlannerData(input: {
     permissions: {
       canManageTargets: input.canManageTargets ?? false,
     },
+    matchingInput: null,
     matching: {
       coverage: [],
       assignments: [],
@@ -1674,6 +1675,11 @@ function analyzeDataset(dataset: StrategicPlannerDataset): StrategicPlannerData 
           : 0,
     },
     permissions: dataset.permissions,
+    matchingInput: {
+      slots: dataset.slots,
+      roster: dataset.roster,
+      members: dataset.members,
+    },
     matching: computePlatoonMatching(dataset),
   };
 }

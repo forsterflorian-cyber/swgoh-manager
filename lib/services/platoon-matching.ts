@@ -35,16 +35,18 @@
 
 import type {
   GapActionType,
+  IgnoredMatchingScope,
   GapPossibleSource,
   PlanetCategory,
   PlatoonMatchingAssignment,
   PlatoonMatchingCoverage,
   PlatoonMatchingGap,
   PlatoonMatchingResult,
-  StrategicPlannerDataset,
+  StrategicPlannerMatchingInput,
   StrategicPlannerRosterInput,
   StrategicPlannerSlotInput,
 } from '@/lib/types/platoon-readiness';
+import { filterSlotsByIgnoredMatchingScopes } from '@/lib/utils/matching-scopes';
 
 export type {
   GapActionType,
@@ -53,6 +55,10 @@ export type {
   PlatoonMatchingCoverage,
   PlatoonMatchingGap,
   PlatoonMatchingResult,
+};
+
+export type ComputePlatoonMatchingOptions = {
+  ignoredScopes?: IgnoredMatchingScope[];
 };
 
 /** Maximum platoon slots a single member may fill per category per phase. */
@@ -611,8 +617,15 @@ function buildGaps(
  * Compute the optimal assignment of guild characters to platoon slots
  * for all phases and all planet categories using Min-Cost Max-Flow.
  */
-export function computePlatoonMatching(dataset: StrategicPlannerDataset): PlatoonMatchingResult {
-  const { slots, roster, members } = dataset;
+export function computePlatoonMatching(
+  dataset: StrategicPlannerMatchingInput,
+  options?: ComputePlatoonMatchingOptions,
+): PlatoonMatchingResult {
+  const slots = filterSlotsByIgnoredMatchingScopes(
+    dataset.slots,
+    options?.ignoredScopes ?? [],
+  );
+  const { roster, members } = dataset;
 
   const memberNameMap = new Map<string, string>(
     members.map((m) => [m.memberId, m.playerName]),

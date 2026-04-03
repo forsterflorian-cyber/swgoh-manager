@@ -10,6 +10,11 @@ export interface StrategicPlannerGuild {
 
 export type PlanetCategory = 'LS' | 'DS' | 'MIX' | 'SPECIAL';
 
+export interface IgnoredMatchingScope {
+  phase: number;
+  category: PlanetCategory;
+}
+
 /** Whether a platoon slot requires a ship or a character. Derived at slot-load time from game data. */
 export type UnitCategory = 'CHARACTER' | 'SHIP';
 
@@ -145,6 +150,11 @@ export interface StrategicPlannerDataset {
   strategicAssignments: StrategicPlannerAssignmentInput[];
   permissions: StrategicPlannerPermissions;
 }
+
+export type StrategicPlannerMatchingInput = Pick<
+  StrategicPlannerDataset,
+  'slots' | 'roster' | 'members'
+>;
 
 export interface StrategicPlannerSummary {
   totalZones: number;
@@ -351,5 +361,6 @@ export interface StrategicPlannerData {
   recommendedActions: string[];
   dataState: StrategicPlannerDataState;
   permissions: StrategicPlannerPermissions;
+  matchingInput: StrategicPlannerMatchingInput | null;
   matching: PlatoonMatchingResult;
 }

@@ -7,16 +7,29 @@ import {
   type AutoZonePlan,
 } from '@/lib/services/platoon-completion-advisor';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
-import type { StrategicPlannerDataset, PlanetCategory } from '@/lib/types/platoon-readiness';
+import { normalizePlanetCategory } from '@/lib/services/strategic-targets';
+import type {
+  IgnoredMatchingScope,
+  StrategicPlannerDataset,
+  PlanetCategory,
+} from '@/lib/types/platoon-readiness';
 import type { PlatoonSimulatorAction } from '@/lib/types/platoon-simulator';
+import {
+  filterSlotsByIgnoredMatchingScopes,
+  formatIgnoredMatchingScopeLabel,
+  MATCHING_SCOPE_CATEGORY_ORDER,
+  normalizeIgnoredMatchingScopes,
+} from '@/lib/utils/matching-scopes';
 
 type RouteParams = { slug: string };
 type RouteContext = { params: Promise<RouteParams> };
 type PlannerMode = 'manual' | 'auto';
 
-type BonusZoneOption = {
-  zoneKey: string;
+type IgnoreScopeOption = {
+  phase: number;
+  category: PlanetCategory;
   label: string;
+  requirementCount: number;
 };
 
 type AutoTargetOption = {
@@ -53,11 +66,32 @@ function parseMode(body: unknown): PlannerMode {
   return (body as { mode?: unknown }).mode === 'auto' ? 'auto' : 'manual';
 }
 
-function parseIncludedBonusZoneKeys(body: unknown): string[] {
+function parseIgnoredScopes(body: unknown): IgnoredMatchingScope[] {
   if (!body || typeof body !== 'object') return [];
-  const candidate = (body as { includedBonusZoneKeys?: unknown }).includedBonusZoneKeys;
+  const candidate = (body as { ignoredScopes?: unknown }).ignoredScopes;
   if (!Array.isArray(candidate)) return [];
-  return candidate.filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  return normalizeIgnoredMatchingScopes(
+    candidate.flatMap((value): IgnoredMatchingScope[] => {
+      if (!value || typeof value !== 'object') {
+        return [];
+      }
+
+      const record = value as Record<string, unknown>;
+      const phase =
+        typeof record.phase === 'number' ? record.phase : Number(record.phase);
+      const category =
+        typeof record.category === 'string'
+          ? normalizePlanetCategory(record.category)
+          : null;
+
+      if (!Number.isFinite(phase) || !category) {
+        return [];
+      }
+
+      return [{ phase, category }];
+    }),
+  );
 }
 
 function parseAutoTarget(body: unknown): AutoModeTarget {
@@ -76,36 +110,48 @@ function parseAutoTarget(body: unknown): AutoModeTarget {
   return { kind: 'phase-category', phase, category };
 }
 
-function filterDatasetBySelectedBonusZones(
+function filterDatasetByIgnoredScopes(
   dataset: StrategicPlannerDataset,
-  includedBonusZoneKeys: string[],
+  ignoredScopes: IgnoredMatchingScope[],
 ): StrategicPlannerDataset {
-  const included = new Set(includedBonusZoneKeys);
-
   return {
     ...dataset,
-    slots: dataset.slots.filter((slot) => {
-      if (slot.planetCategory !== 'SPECIAL') return true;
-      return included.has(slot.zoneKey);
-    }),
+    slots: filterSlotsByIgnoredMatchingScopes(dataset.slots, ignoredScopes),
   };
 }
 
-function collectBonusZoneOptions(dataset: StrategicPlannerDataset): BonusZoneOption[] {
-  const byZone = new Map<string, BonusZoneOption>();
+function collectIgnoreScopeOptions(dataset: StrategicPlannerDataset): IgnoreScopeOption[] {
+  const byScope = new Map<string, IgnoreScopeOption>();
 
   for (const slot of dataset.slots) {
-    if (slot.planetCategory !== 'SPECIAL') continue;
+    if (!slot.planetCategory) continue;
+    const key = `${slot.phase}::${slot.planetCategory}`;
 
-    if (!byZone.has(slot.zoneKey)) {
-      byZone.set(slot.zoneKey, {
-        zoneKey: slot.zoneKey,
-        label: `Phase ${slot.phase} · ${slot.zoneName}`,
+    if (!byScope.has(key)) {
+      byScope.set(key, {
+        phase: slot.phase,
+        category: slot.planetCategory,
+        label: formatIgnoredMatchingScopeLabel({
+          phase: slot.phase,
+          category: slot.planetCategory,
+        }),
+        requirementCount: 0,
       });
+    }
+
+    const existing = byScope.get(key);
+    if (existing) {
+      existing.requirementCount += 1;
     }
   }
 
-  return [...byZone.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return [...byScope.values()].sort((a, b) => {
+    if (a.phase !== b.phase) return a.phase - b.phase;
+    return (
+      MATCHING_SCOPE_CATEGORY_ORDER.indexOf(a.category) -
+      MATCHING_SCOPE_CATEGORY_ORDER.indexOf(b.category)
+    );
+  });
 }
 
 function collectAutoTargetOptions(
@@ -212,7 +258,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const body = await request.json();
 
     const actions = parseActions(body);
-    const includedBonusZoneKeys = parseIncludedBonusZoneKeys(body);
+    const ignoredScopes = parseIgnoredScopes(body);
     const mode = parseMode(body);
     const autoTarget = parseAutoTarget(body);
 
@@ -224,8 +270,8 @@ export async function POST(request: Request, { params }: RouteContext) {
       return NextResponse.json({ error: 'Guild dataset not found.', timings }, { status: 404 });
     }
 
-    const bonusZoneOptions = collectBonusZoneOptions(dataset);
-    const effectiveDataset = filterDatasetBySelectedBonusZones(dataset, includedBonusZoneKeys);
+    const ignoreScopeOptions = collectIgnoreScopeOptions(dataset);
+    const effectiveDataset = filterDatasetByIgnoredScopes(dataset, ignoredScopes);
 
     const simulationStartedAt = Date.now();
     const simulation = await withStageTimeout('simulation', () => simulatePlatoonScenario(effectiveDataset, actions), 120000);
@@ -286,8 +332,8 @@ export async function POST(request: Request, { params }: RouteContext) {
         advisory,
         autoPlan,
         lookups: { memberNames, unitNames, platoonLabels },
-        settings: { includedBonusZoneKeys, mode, autoTarget },
-        bonusZoneOptions,
+        settings: { ignoredScopes, mode, autoTarget },
+        ignoreScopeOptions,
         autoTargetOptions,
         fullNewAssignments,
         debug: { actionsCount: actions.length, timings },

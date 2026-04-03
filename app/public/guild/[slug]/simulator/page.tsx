@@ -6,7 +6,18 @@ import type {
   PlatoonSimulatorResponse,
   SequentialFullPlatoonPlan,
 } from '@/lib/types/platoon-simulator';
-import type { PlanetCategory } from '@/lib/types/platoon-readiness';
+import type {
+  IgnoredMatchingScope,
+  PlanetCategory,
+  PlatoonMatchingCoverage,
+} from '@/lib/types/platoon-readiness';
+import {
+  formatIgnoredMatchingScopeLabel,
+  getIgnoredMatchingScopeKey,
+  getMatchingCategoryLabel,
+  isIgnoredMatchingScope,
+  normalizeIgnoredMatchingScopes,
+} from '@/lib/utils/matching-scopes';
 
 type Lookups = {
   memberNames: Record<string, string>;
@@ -16,9 +27,11 @@ type Lookups = {
 
 type PlannerMode = 'manual' | 'auto';
 
-type BonusZoneOption = {
-  zoneKey: string;
+type IgnoreScopeOption = {
+  phase: number;
+  category: PlanetCategory;
   label: string;
+  requirementCount: number;
 };
 
 type AutoTargetOption = {
@@ -98,11 +111,11 @@ type SimulatorApiResponse = {
   autoPlan: AutoZonePlan | null;
   lookups: Lookups;
   settings?: {
-    includedBonusZoneKeys?: string[];
+    ignoredScopes?: IgnoredMatchingScope[];
     mode?: PlannerMode;
     autoTarget?: AutoTarget;
   };
-  bonusZoneOptions?: BonusZoneOption[];
+  ignoreScopeOptions?: IgnoreScopeOption[];
   autoTargetOptions?: AutoTargetOption[];
   fullNewAssignments?: FullNewAssignment[];
 };
@@ -207,10 +220,24 @@ function describeAction(action: PlatoonSimulatorAction, lookups?: Lookups): stri
   }
 }
 
+function getIgnoredScopeLabels(
+  ignoredScopes: IgnoredMatchingScope[],
+  ignoreScopeOptions: IgnoreScopeOption[],
+): string[] {
+  return ignoredScopes.map((scope) => {
+    const option = ignoreScopeOptions.find(
+      (entry) =>
+        entry.phase === scope.phase && entry.category === scope.category,
+    );
+
+    return option?.label ?? formatIgnoredMatchingScopeLabel(scope);
+  });
+}
+
 function buildExportPlanText(params: {
   mode: PlannerMode;
-  includedBonusZoneKeys: string[];
-  bonusZoneOptions: BonusZoneOption[];
+  ignoredScopes: IgnoredMatchingScope[];
+  ignoreScopeOptions: IgnoreScopeOption[];
   autoTarget: AutoTarget;
   autoTargetOptions: AutoTargetOption[];
   lookups?: Lookups;
@@ -221,8 +248,8 @@ function buildExportPlanText(params: {
 }): string {
   const {
     mode,
-    includedBonusZoneKeys,
-    bonusZoneOptions,
+    ignoredScopes,
+    ignoreScopeOptions,
     autoTarget,
     autoTargetOptions,
     lookups,
@@ -233,9 +260,7 @@ function buildExportPlanText(params: {
   } = params;
 
   const lines: string[] = [];
-  const includedBonusLabels = bonusZoneOptions
-    .filter((zone) => includedBonusZoneKeys.includes(zone.zoneKey))
-    .map((zone) => zone.label);
+  const ignoredScopeLabels = getIgnoredScopeLabels(ignoredScopes, ignoreScopeOptions);
 
   const autoTargetLabel =
     autoTarget && autoTarget.kind === 'phase-category'
@@ -249,7 +274,7 @@ function buildExportPlanText(params: {
   lines.push('SWGOH TB Plan Export');
   lines.push(`Mode: ${mode === 'manual' ? 'Manual mode' : 'Auto mode'}`);
   lines.push(
-    `Included bonus zones: ${includedBonusLabels.length ? includedBonusLabels.join(', ') : 'None'}`,
+    `Ignored for this scenario: ${ignoredScopeLabels.length ? ignoredScopeLabels.join(', ') : 'None'}`,
   );
   lines.push(`Auto target: ${autoTargetLabel}`);
   lines.push('');
@@ -351,22 +376,22 @@ function buildExportPlanText(params: {
 
 function buildExportFullNewAssignmentText(params: {
   mode: PlannerMode;
-  includedBonusZoneKeys: string[];
-  bonusZoneOptions: BonusZoneOption[];
+  ignoredScopes: IgnoredMatchingScope[];
+  ignoreScopeOptions: IgnoreScopeOption[];
   autoTarget: AutoTarget;
   autoTargetOptions: AutoTargetOption[];
   assignments: FullNewAssignment[];
 }): string {
-  const { mode, includedBonusZoneKeys, bonusZoneOptions, autoTarget, autoTargetOptions, assignments } = params;
+  const { mode, ignoredScopes, ignoreScopeOptions, autoTarget, autoTargetOptions, assignments } = params;
   const lines: string[] = [];
-  const includedBonusLabels = bonusZoneOptions.filter((zone) => includedBonusZoneKeys.includes(zone.zoneKey)).map((zone) => zone.label);
+  const ignoredScopeLabels = getIgnoredScopeLabels(ignoredScopes, ignoreScopeOptions);
   const autoTargetLabel = autoTarget && autoTarget.kind === 'phase-category'
     ? autoTargetOptions.find((option) => option.phase === autoTarget.phase && option.category === autoTarget.category)?.label ?? `${autoTarget.phase} · ${autoTarget.category}`
     : 'None';
 
   lines.push('SWGOH TB Full New Assignment Export');
   lines.push(`Mode: ${mode === 'manual' ? 'Manual mode' : 'Auto mode'}`);
-  lines.push(`Included bonus zones: ${includedBonusLabels.length ? includedBonusLabels.join(', ') : 'None'}`);
+  lines.push(`Ignored for this scenario: ${ignoredScopeLabels.length ? ignoredScopeLabels.join(', ') : 'None'}`);
   lines.push(`Auto target: ${autoTargetLabel}`);
   lines.push('');
 
@@ -527,15 +552,6 @@ function CandidateCard({ title, candidate, onApplyOne, onApplyAll, onReplaceOne,
   );
 }
 
-function StatCard({ label, value, big = true }: { label: string; value: string | number; big?: boolean }) {
-  return (
-    <div className="stat-card">
-      <div className="stat-label">{label}</div>
-      <div className={`stat-value ${big ? 'text-3xl' : 'text-xl'}`}>{value}</div>
-    </div>
-  );
-}
-
 function AutoPlanCard({ plan, lookups, canApply, onApplyAll }: { plan: AutoZonePlan | null; lookups?: Lookups; canApply: boolean; onApplyAll: (actions: PlatoonSimulatorAction[]) => void }) {
   if (!plan) {
     return (
@@ -615,6 +631,105 @@ function AutoPlanCard({ plan, lookups, canApply, onApplyAll }: { plan: AutoZoneP
   );
 }
 
+function ScenarioCoverageGrid({
+  coverage,
+  ignoredScopes,
+  onToggleScope,
+}: {
+  coverage: PlatoonMatchingCoverage[];
+  ignoredScopes: IgnoredMatchingScope[];
+  onToggleScope: (scope: IgnoredMatchingScope) => void;
+}) {
+  if (coverage.length === 0) {
+    return (
+      <div className="rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
+        No active scopes remain in the current scenario.
+      </div>
+    );
+  }
+
+  const phases = [...new Set(coverage.map((entry) => entry.phase))].sort((a, b) => a - b);
+  const categories = ['LS', 'DS', 'MIX', 'SPECIAL'] as PlanetCategory[];
+
+  function getCell(phase: number, category: PlanetCategory) {
+    return coverage.find(
+      (entry) => entry.phase === phase && entry.category === category,
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[720px] text-sm">
+        <thead>
+          <tr className="border-b border-[var(--color-border-primary)] text-left">
+            <th className="pb-3 pr-4 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+              Phase
+            </th>
+            {categories.map((category) => (
+              <th
+                key={category}
+                className="px-2 pb-3 text-center text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-text-muted)]"
+              >
+                {getMatchingCategoryLabel(category)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {phases.map((phase) => (
+            <tr
+              key={phase}
+              className="border-b border-[var(--color-border-primary)] last:border-b-0"
+            >
+              <td className="py-4 pr-4 font-semibold">P{phase}</td>
+              {categories.map((category) => {
+                const cell = getCell(phase, category);
+                if (!cell) {
+                  return (
+                    <td
+                      key={category}
+                      className="px-2 py-4 text-center text-[var(--color-text-muted)]"
+                    >
+                      —
+                    </td>
+                  );
+                }
+
+                const scope = { phase, category };
+                const ignored = isIgnoredMatchingScope(ignoredScopes, scope);
+
+                return (
+                  <td key={category} className="px-2 py-4 align-top">
+                    <div className="rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-3 py-3 text-center">
+                      <div className="text-base font-semibold">
+                        {cell.assignedCount}/{cell.requirementCount}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        {cell.coveragePercent}% coverage
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onToggleScope(scope)}
+                        className={`mt-3 rounded-full border px-3 py-1 text-xs font-medium ${
+                          ignored
+                            ? 'border-[var(--color-accent-rose)]/40 bg-[var(--color-accent-rose)]/10 text-[var(--color-accent-rose)]'
+                            : 'border-[var(--color-border-secondary)] text-[var(--color-text-secondary)] hover:text-white'
+                        }`}
+                      >
+                        {ignored ? 'Restore' : 'Ignore'}
+                      </button>
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function PublicGuildSimulatorPage({ params }: { params: Promise<{ slug: string }> }) {
   const [slug, setSlug] = useState<string>('');
   const [actions, setActions] = useState<PlatoonSimulatorAction[]>([]);
@@ -622,7 +737,9 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debouncedActions, setDebouncedActions] = useState<PlatoonSimulatorAction[]>([]);
-  const [includedBonusZoneKeys, setIncludedBonusZoneKeys] = useState<string[]>([]);
+  const [ignoredScopes, setIgnoredScopes] = useState<IgnoredMatchingScope[]>([]);
+  const [scopeDraftPhase, setScopeDraftPhase] = useState<string>('');
+  const [scopeDraftCategory, setScopeDraftCategory] = useState<PlanetCategory | ''>('');
   const [mode, setMode] = useState<PlannerMode>('manual');
   const [autoTarget, setAutoTarget] = useState<AutoTarget>(null);
   const [exportPlanState, setExportPlanState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -657,7 +774,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
         const res = await fetch(`/api/public/guild/${slug}/simulator`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ actions: debouncedActions, includedBonusZoneKeys, mode, autoTarget }),
+          body: JSON.stringify({ actions: debouncedActions, ignoredScopes, mode, autoTarget }),
           signal: controller.signal,
         });
 
@@ -696,31 +813,95 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [slug, debouncedActions, includedBonusZoneKeys, mode, autoTarget]);
+  }, [slug, debouncedActions, ignoredScopes, mode, autoTarget]);
 
   const summary = useMemo(() => data?.simulation.delta ?? null, [data]);
   const firstCandidate = data?.advisory.first ?? null;
   const secondCandidate = data?.advisory.second ?? null;
   const autoPlan = data?.autoPlan ?? null;
   const lookups = data?.lookups;
-  const bonusZoneOptions = data?.bonusZoneOptions ?? [];
-  const autoTargetOptions = data?.autoTargetOptions ?? [];
+  const ignoreScopeOptions = useMemo(() => data?.ignoreScopeOptions ?? [], [data?.ignoreScopeOptions]);
+  const autoTargetOptions = useMemo(() => data?.autoTargetOptions ?? [], [data?.autoTargetOptions]);
   const fullNewAssignments = data?.fullNewAssignments ?? [];
   const guildName = data?.guildName ?? slug;
+  const visibleCoverage = data?.simulation.baseline.coverage ?? [];
+  const availableDraftPhases = [...new Set(ignoreScopeOptions.map((option) => option.phase))].sort((a, b) => a - b);
+  const availableDraftCategories = ignoreScopeOptions
+    .filter((option) => (scopeDraftPhase ? option.phase === Number(scopeDraftPhase) : true))
+    .map((option) => option.category)
+    .filter((value, index, array) => array.indexOf(value) === index);
+  const ignoredScopeLabels = getIgnoredScopeLabels(ignoredScopes, ignoreScopeOptions);
 
   const newlyFullLabels = useMemo(() => {
     if (!summary?.becameFullPlatoonIds?.length) return [];
     return summary.becameFullPlatoonIds.map((id) => lookups?.platoonLabels?.[id] ?? id);
   }, [summary, lookups]);
 
+  useEffect(() => {
+    if (!scopeDraftPhase && ignoreScopeOptions.length > 0) {
+      setScopeDraftPhase(String(ignoreScopeOptions[0].phase));
+    }
+  }, [ignoreScopeOptions, scopeDraftPhase]);
+
+  useEffect(() => {
+    if (!scopeDraftCategory && availableDraftCategories.length > 0) {
+      setScopeDraftCategory(availableDraftCategories[0]);
+      return;
+    }
+
+    if (
+      scopeDraftCategory &&
+      availableDraftCategories.length > 0 &&
+      !availableDraftCategories.includes(scopeDraftCategory)
+    ) {
+      setScopeDraftCategory(availableDraftCategories[0]);
+    }
+  }, [availableDraftCategories, scopeDraftCategory]);
+
+  useEffect(() => {
+    if (!autoTarget) {
+      return;
+    }
+
+    const stillAvailable = autoTargetOptions.some(
+      (option) =>
+        option.phase === autoTarget.phase &&
+        option.category === autoTarget.category,
+    );
+
+    if (!stillAvailable) {
+      setAutoTarget(
+        autoTargetOptions.length > 0
+          ? {
+              kind: 'phase-category',
+              phase: autoTargetOptions[0].phase,
+              category: autoTargetOptions[0].category,
+            }
+          : null,
+      );
+    }
+  }, [autoTarget, autoTargetOptions]);
+
   function applyOne(action: PlatoonSimulatorAction) { setActions((prev) => upsertActionByRequirementId(prev, action)); }
   function applyAll(nextActions: PlatoonSimulatorAction[]) { setActions((prev) => mergeActions(prev, nextActions)); }
   function removeAction(action: PlatoonSimulatorAction) { const keyToRemove = getActionKey(action); setActions((prev) => prev.filter((item) => getActionKey(item) !== keyToRemove)); }
   function replaceAction(_currentAction: PlatoonSimulatorAction, replacement: PlatoonSimulatorAction) { setActions((prev) => upsertActionByRequirementId(prev, replacement)); }
-  function resetScenario() { setActions([]); }
+  function resetScenario() {
+    setActions([]);
+    setIgnoredScopes([]);
+  }
 
-  function toggleBonusZone(zoneKey: string) {
-    setIncludedBonusZoneKeys((prev) => prev.includes(zoneKey) ? prev.filter((item) => item !== zoneKey) : [...prev, zoneKey]);
+  function toggleIgnoredScope(scope: IgnoredMatchingScope) {
+    setIgnoredScopes((previous) => {
+      const next = isIgnoredMatchingScope(previous, scope)
+        ? previous.filter(
+            (entry) =>
+              getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
+          )
+        : [...previous, scope];
+
+      return normalizeIgnoredMatchingScopes(next);
+    });
   }
 
   function handleModeChange(nextMode: PlannerMode) {
@@ -748,11 +929,20 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
     setAutoTarget({ kind: 'phase-category', phase, category });
   }
 
+  function addIgnoredScopeFromDraft() {
+    const phase = Number(scopeDraftPhase);
+    if (!Number.isFinite(phase) || !scopeDraftCategory) {
+      return;
+    }
+
+    toggleIgnoredScope({ phase, category: scopeDraftCategory });
+  }
+
   async function exportPlan() {
     const text = buildExportPlanText({
       mode,
-      includedBonusZoneKeys,
-      bonusZoneOptions,
+      ignoredScopes,
+      ignoreScopeOptions,
       autoTarget,
       autoTargetOptions,
       lookups,
@@ -772,7 +962,14 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
   }
 
   async function exportFullNewAssignment() {
-    const text = buildExportFullNewAssignmentText({ mode, includedBonusZoneKeys, bonusZoneOptions, autoTarget, autoTargetOptions, assignments: fullNewAssignments });
+    const text = buildExportFullNewAssignmentText({
+      mode,
+      ignoredScopes,
+      ignoreScopeOptions,
+      autoTarget,
+      autoTargetOptions,
+      assignments: fullNewAssignments,
+    });
     try {
       await copyOrDownloadText(text, 'swgoh-tb-full-new-assignment.txt');
       setExportFullState('copied');
@@ -845,7 +1042,7 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
               <button 
                 type="button" 
                 onClick={resetScenario} 
-                disabled={actions.length === 0} 
+                disabled={actions.length === 0 && ignoredScopes.length === 0} 
                 className="btn btn-danger"
               >
                 Reset scenario
@@ -857,27 +1054,60 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
         {/* Settings Card */}
         <section className="card mb-8 animate-fade-in">
           <div className="grid gap-6 lg:grid-cols-2">
-            {/* Bonus Zones */}
+            {/* Scenario ignore */}
             <div>
-              <div className="metric-label">Bonus zones</div>
-              <div className="mt-4 flex flex-wrap gap-3">
-                {bonusZoneOptions.length === 0 ? (
-                  <div className="text-sm text-[var(--color-text-muted)]">No bonus zones available.</div>
+              <div className="metric-label">Ignore for this scenario</div>
+              <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+                Ignored scopes are removed from the solve and their units no longer compete with the remaining scopes.
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <select
+                  value={scopeDraftPhase}
+                  onChange={(e) => setScopeDraftPhase(e.target.value)}
+                  className="select"
+                >
+                  <option value="">Select phase</option>
+                  {availableDraftPhases.map((phase) => (
+                    <option key={phase} value={String(phase)}>
+                      Phase {phase}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={scopeDraftCategory}
+                  onChange={(e) => setScopeDraftCategory(e.target.value as PlanetCategory | '')}
+                  className="select"
+                >
+                  <option value="">Select category</option>
+                  {availableDraftCategories.map((category) => (
+                    <option key={category} value={category}>
+                      {getMatchingCategoryLabel(category)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addIgnoredScopeFromDraft}
+                  disabled={!scopeDraftPhase || !scopeDraftCategory}
+                  className="btn btn-secondary"
+                >
+                  Add
+                </button>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {ignoredScopeLabels.length > 0 ? (
+                  ignoredScopes.map((scope, index) => (
+                    <button
+                      key={getIgnoredMatchingScopeKey(scope)}
+                      type="button"
+                      onClick={() => toggleIgnoredScope(scope)}
+                      className="rounded-full border border-[var(--color-accent-rose)]/40 bg-[var(--color-accent-rose)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent-rose)]"
+                    >
+                      {ignoredScopeLabels[index] ?? formatIgnoredMatchingScopeLabel(scope)} ×
+                    </button>
+                  ))
                 ) : (
-                  bonusZoneOptions.map((zone) => {
-                    const checked = includedBonusZoneKeys.includes(zone.zoneKey);
-                    return (
-                      <label key={zone.zoneKey} className="flex items-center gap-3 rounded-xl border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] px-4 py-3 text-sm cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={checked} 
-                          onChange={() => toggleBonusZone(zone.zoneKey)} 
-                          className="h-4 w-4 rounded border-[var(--color-border-secondary)] bg-[var(--color-bg-tertiary)] text-[var(--color-accent-blue)] focus:ring-[var(--color-accent-blue)]"
-                        />
-                        <span>{zone.label}</span>
-                      </label>
-                    );
-                  })
+                  <div className="text-sm text-[var(--color-text-muted)]">No ignored scopes active.</div>
                 )}
               </div>
             </div>
@@ -904,6 +1134,24 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="card mb-8 animate-fade-in">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <div className="metric-label">Coverage by phase and category</div>
+              <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Quick-ignore any active scope directly from the current solve.
+              </div>
+            </div>
+          </div>
+          <div className="mt-5">
+            <ScenarioCoverageGrid
+              coverage={visibleCoverage}
+              ignoredScopes={ignoredScopes}
+              onToggleScope={toggleIgnoredScope}
+            />
           </div>
         </section>
 
@@ -965,10 +1213,20 @@ export default function PublicGuildSimulatorPage({ params }: { params: Promise<{
               <div className="stat-value text-4xl">{actions.length}</div>
             </div>
 
+            <div className="mt-5 stat-card">
+              <div className="stat-label">Ignored scopes</div>
+              <div className="stat-value text-4xl">{ignoredScopes.length}</div>
+              <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+                {ignoredScopeLabels.length > 0 ? ignoredScopeLabels.join(', ') : 'No ignored scopes'}
+              </div>
+            </div>
+
             <div className="mt-5 space-y-3">
               {actions.length === 0 ? (
                 <div className="stat-card text-center text-[var(--color-text-muted)]">
-                  Noch keine Aktionen aktiv.
+                  {ignoredScopes.length > 0
+                    ? 'No direct actions applied. Scenario is currently shaped by ignored scopes.'
+                    : 'Noch keine Aktionen aktiv.'}
                 </div>
               ) : (
                 actions.map((action) => (

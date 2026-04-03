@@ -1,20 +1,30 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import { formatDateTime } from '@/lib/utils/format-date';
+import {
+  formatIgnoredMatchingScopeLabel,
+  getIgnoredMatchingScopeKey,
+  getMatchingCategoryLabel,
+  isIgnoredMatchingScope,
+  normalizeIgnoredMatchingScopes,
+} from '@/lib/utils/matching-scopes';
 import type { ApiEnvelope } from '@/lib/types/api';
 import type {
   GapActionType,
+  IgnoredMatchingScope,
   PlanetCategory,
   PlatoonMatchingCoverage,
   PlatoonMatchingGap,
   PlatoonMatchingResult,
   StrategicMemberAssignmentLoad,
   StrategicPlannerData,
+  StrategicPlannerMatchingInput,
   StrategicPlatoonStatus,
   StrategicPlannerSummary,
   StrategicRequirementSummary,
@@ -526,8 +536,9 @@ function PlatoonReadinessContent() {
         ) : plannerView === 'matching' ? (
           <MatchingView
             matching={planner?.matching ?? null}
+            matchingInput={planner?.matchingInput ?? null}
             selectedCoverageCell={selectedCoverageCell}
-            onSelectCoverageCell={(phase, category) => setSelectedCoverageCell({ phase, category })}
+            onSelectCoverageCell={setSelectedCoverageCell}
           />
         ) : (
           <MemberTargetsView
@@ -1504,6 +1515,15 @@ function PlannerPlatoonStatusCard({
 
 // ── Matching view ─────────────────────────────────────────────────────────────
 
+const EMPTY_MATCHING_RESULT: PlatoonMatchingResult = {
+  coverage: [],
+  assignments: [],
+  gaps: [],
+  totalAssigned: 0,
+  totalRequired: 0,
+  coveragePercent: 100,
+};
+
 const GAP_ACTION_META: Record<GapActionType, { label: string; className: string; detail: string }> =
   {
     use_unused: {
@@ -1530,16 +1550,29 @@ const GAP_ACTION_META: Record<GapActionType, { label: string; className: string;
 
 function CoverageGrid({
   coverage,
+  referenceCoverage,
+  selectedCell,
+  ignoredScopes,
   onSelect,
+  onToggleIgnore,
 }: {
   coverage: PlatoonMatchingCoverage[];
+  referenceCoverage?: PlatoonMatchingCoverage[];
+  selectedCell?: SelectedCoverageCell;
+  ignoredScopes?: IgnoredMatchingScope[];
   onSelect?: (phase: number, category: PlanetCategory) => void;
+  onToggleIgnore?: (scope: IgnoredMatchingScope) => void;
 }) {
-  const phases = [...new Set(coverage.map((c) => c.phase))].sort((a, b) => a - b);
+  const coverageSource = referenceCoverage ?? coverage;
+  const phases = [...new Set(coverageSource.map((c) => c.phase))].sort((a, b) => a - b);
   const categories: PlanetCategory[] = ['LS', 'DS', 'MIX', 'SPECIAL'];
 
   function cellFor(phase: number, category: PlanetCategory) {
     return coverage.find((c) => c.phase === phase && c.category === category);
+  }
+
+  function referenceCellFor(phase: number, category: PlanetCategory) {
+    return coverageSource.find((c) => c.phase === phase && c.category === category);
   }
 
   function cellClass(pct: number) {
@@ -1562,7 +1595,7 @@ function CoverageGrid({
                 key={cat}
                 className="px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-gray-500"
               >
-                {cat === 'SPECIAL' ? 'Bonus' : cat}
+                {getMatchingCategoryLabel(cat)}
               </th>
             ))}
           </tr>
@@ -1572,22 +1605,72 @@ function CoverageGrid({
             <tr key={phase}>
               <td className="py-3 pr-4 font-semibold text-white">P{phase}</td>
               {categories.map((cat) => {
+                const scope = { phase, category: cat };
                 const cell = cellFor(phase, cat);
-                if (!cell) {
+                const referenceCell = referenceCellFor(phase, cat);
+                const ignored = isIgnoredMatchingScope(ignoredScopes ?? [], scope);
+                const selected =
+                  selectedCell?.phase === phase && selectedCell.category === cat;
+
+                if (!cell && !referenceCell) {
                   return (
                     <td key={cat} className="px-3 py-2 text-center text-gray-700">
                       —
                     </td>
                   );
                 }
+
+                const displayCell = cell ?? referenceCell;
+                if (!displayCell) {
+                  return (
+                    <td key={cat} className="px-3 py-2 text-center text-gray-700">
+                      —
+                    </td>
+                  );
+                }
+
                 return (
                   <td key={cat} className="px-3 py-2 text-center">
-                    <span
-                      onClick={() => onSelect?.(phase, cat)}
-                      className={`cursor-pointer inline-block rounded-full border px-3 py-1 text-xs font-semibold ${cellClass(cell.coveragePercent)}`}
-                    >
-                      {cell.assignedCount}/{cell.requirementCount}
-                    </span>
+                    <div className="flex flex-col items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!ignored) {
+                            onSelect?.(phase, cat);
+                          }
+                        }}
+                        disabled={ignored}
+                        className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                          ignored
+                            ? 'cursor-not-allowed border-gray-800 bg-gray-900 text-gray-500'
+                            : `${cellClass(displayCell.coveragePercent)} ${selected ? 'ring-2 ring-white/40' : ''}`
+                        }`}
+                      >
+                        {ignored
+                          ? 'Ignored'
+                          : `${displayCell.assignedCount}/${displayCell.requirementCount}`}
+                      </button>
+
+                      {ignored && referenceCell ? (
+                        <span className="text-[11px] text-gray-500">
+                          was {referenceCell.assignedCount}/{referenceCell.requirementCount}
+                        </span>
+                      ) : null}
+
+                      {onToggleIgnore ? (
+                        <button
+                          type="button"
+                          onClick={() => onToggleIgnore(scope)}
+                          className={`text-[11px] font-medium ${
+                            ignored
+                              ? 'text-red-300 hover:text-red-200'
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          {ignored ? 'Restore' : 'Ignore'}
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 );
               })}
@@ -1733,47 +1816,83 @@ function buildMatchingPlatoonSections(
 
 function MatchingView({
   matching,
+  matchingInput,
   selectedCoverageCell,
   onSelectCoverageCell,
 }: {
   matching: PlatoonMatchingResult | null;
+  matchingInput: StrategicPlannerMatchingInput | null;
   selectedCoverageCell: SelectedCoverageCell;
-  onSelectCoverageCell: (phase: number, category: PlanetCategory) => void;
+  onSelectCoverageCell: (cell: SelectedCoverageCell) => void;
 }) {
   const [gapFilter, setGapFilter] = useState<GapActionType | 'all'>('all');
   const [selectedPlatoonKey, setSelectedPlatoonKey] = useState<string | 'all'>('all');
+  const [ignoredScopes, setIgnoredScopes] = useState<IgnoredMatchingScope[]>([]);
+  const baselineMatching = matching ?? EMPTY_MATCHING_RESULT;
 
-  if (!matching || matching.totalRequired === 0) {
-    return (
-      <section className="mt-6">
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5 text-sm text-gray-400">
-          No platoon slot data available for matching analysis.
-        </div>
-      </section>
-    );
-  }
+  const availableScopeKeys = useMemo(
+    () =>
+      new Set(
+        baselineMatching.coverage.map((entry) =>
+          getIgnoredMatchingScopeKey({
+            phase: entry.phase,
+            category: entry.category,
+          }),
+        ),
+      ),
+    [baselineMatching.coverage],
+  );
 
-  const selectedCoverage = selectedCoverageCell
-    ? matching.coverage.find(
+  const sanitizedIgnoredScopes = useMemo(
+    () =>
+      normalizeIgnoredMatchingScopes(
+        ignoredScopes.filter((scope) =>
+          availableScopeKeys.has(getIgnoredMatchingScopeKey(scope)),
+        ),
+      ),
+    [availableScopeKeys, ignoredScopes],
+  );
+
+  const activeMatching = useMemo(() => {
+    if (!matchingInput || sanitizedIgnoredScopes.length === 0) {
+      return baselineMatching;
+    }
+
+    return computePlatoonMatching(matchingInput, { ignoredScopes: sanitizedIgnoredScopes });
+  }, [baselineMatching, sanitizedIgnoredScopes, matchingInput]);
+
+  const activeSelectedCoverageCell =
+    selectedCoverageCell &&
+    !isIgnoredMatchingScope(sanitizedIgnoredScopes, selectedCoverageCell) &&
+    activeMatching.coverage.some(
+      (entry) =>
+        entry.phase === selectedCoverageCell.phase &&
+        entry.category === selectedCoverageCell.category,
+    )
+      ? selectedCoverageCell
+      : null;
+
+  const selectedCoverage = activeSelectedCoverageCell
+    ? activeMatching.coverage.find(
         (c) =>
-          c.phase === selectedCoverageCell.phase &&
-          c.category === selectedCoverageCell.category
+          c.phase === activeSelectedCoverageCell.phase &&
+          c.category === activeSelectedCoverageCell.category
       ) ?? null
     : null;
 
-  const selectedAssignments = selectedCoverageCell
-    ? matching.assignments.filter(
+  const selectedAssignments = activeSelectedCoverageCell
+    ? activeMatching.assignments.filter(
         (a) =>
-          a.phase === selectedCoverageCell.phase &&
-          a.planetCategory === selectedCoverageCell.category
+          a.phase === activeSelectedCoverageCell.phase &&
+          a.planetCategory === activeSelectedCoverageCell.category
       )
     : [];
 
-  const selectedGaps = selectedCoverageCell
-    ? matching.gaps.filter(
+  const selectedGaps = activeSelectedCoverageCell
+    ? activeMatching.gaps.filter(
         (gap) =>
-          gap.phase === selectedCoverageCell.phase &&
-          gap.planetCategory === selectedCoverageCell.category
+          gap.phase === activeSelectedCoverageCell.phase &&
+          gap.planetCategory === activeSelectedCoverageCell.category
       )
     : [];
   const availableSelectedPlatoons = buildMatchingPlatoonSections(selectedAssignments, selectedGaps);
@@ -1832,10 +1951,25 @@ function MatchingView({
             selectedGapActionOrder.indexOf(b.recommendedAction)
         )
       : filteredSelectedGaps.filter((g) => g.recommendedAction === gapFilter);
-  const discordExport = selectedCoverageCell && selectedCoverage
+  const selectedBaselineCoverage = activeSelectedCoverageCell
+    ? baselineMatching.coverage.find(
+        (entry) =>
+          entry.phase === activeSelectedCoverageCell.phase &&
+          entry.category === activeSelectedCoverageCell.category,
+      ) ?? null
+    : null;
+  const discordExport = activeSelectedCoverageCell && selectedCoverage
     ? [
+        `Ignored for this scenario: ${
+          sanitizedIgnoredScopes.length > 0
+            ? sanitizedIgnoredScopes
+                .map((scope) => formatIgnoredMatchingScopeLabel(scope))
+                .join(', ')
+            : 'None'
+        }`,
+        '',
         `P${selectedCoverage.phase} · ${
-          selectedCoverage.category === 'SPECIAL' ? 'Bonus' : selectedCoverage.category
+          getMatchingCategoryLabel(selectedCoverage.category)
         } — ${selectedScopeAssignedCount}/${selectedScopeRequiredCount} assigned, ${filteredSelectedGaps.length} open`,
         '',
         ...visibleSelectedPlatoons.flatMap((platoon, index) => [
@@ -1860,21 +1994,59 @@ function MatchingView({
   const globalGapCounts = Object.fromEntries(
     globalGapActionOrder.map((action) => [
       action,
-      matching.gaps.filter((g) => g.recommendedAction === action).length,
+      activeMatching.gaps.filter((g) => g.recommendedAction === action).length,
     ])
   ) as Record<GapActionType, number>;
 
   const visibleGlobalGaps =
-    gapFilter === 'all'
-      ? [...matching.gaps].sort(
+      gapFilter === 'all'
+      ? [...activeMatching.gaps].sort(
           (a, b) =>
             globalGapActionOrder.indexOf(a.recommendedAction) -
             globalGapActionOrder.indexOf(b.recommendedAction)
         )
-      : matching.gaps.filter((g) => g.recommendedAction === gapFilter);
+      : activeMatching.gaps.filter((g) => g.recommendedAction === gapFilter);
+  const totalAssignedDelta = activeMatching.totalAssigned - baselineMatching.totalAssigned;
+  const totalRequiredDelta = activeMatching.totalRequired - baselineMatching.totalRequired;
+  const selectedAssignedDelta =
+    selectedCoverage && selectedBaselineCoverage
+      ? selectedCoverage.assignedCount - selectedBaselineCoverage.assignedCount
+      : null;
+
+  if (!matching || matching.totalRequired === 0) {
+    return (
+      <section className="mt-6">
+        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5 text-sm text-gray-400">
+          No platoon slot data available for matching analysis.
+        </div>
+      </section>
+    );
+  }
+
   const handleCoverageSelect = (phase: number, category: PlanetCategory) => {
     setSelectedPlatoonKey('all');
-    onSelectCoverageCell(phase, category);
+    onSelectCoverageCell({ phase, category });
+  };
+
+  const handleToggleIgnoreScope = (scope: IgnoredMatchingScope) => {
+    setSelectedPlatoonKey('all');
+    setGapFilter('all');
+    if (
+      activeSelectedCoverageCell &&
+      getIgnoredMatchingScopeKey(activeSelectedCoverageCell) === getIgnoredMatchingScopeKey(scope)
+    ) {
+      onSelectCoverageCell(null);
+    }
+    setIgnoredScopes((previous) => {
+      const next = isIgnoredMatchingScope(previous, scope)
+        ? previous.filter(
+            (entry) =>
+              getIgnoredMatchingScopeKey(entry) !== getIgnoredMatchingScopeKey(scope),
+          )
+        : [...previous, scope];
+
+      return normalizeIgnoredMatchingScopes(next);
+    });
   };
 
   return (
@@ -1886,44 +2058,129 @@ function MatchingView({
               Matching
             </p>
             <div className="flex items-center justify-between">
-  <h3 className="text-sm font-semibold text-indigo-200">
-    Phase × Category Coverage
-  </h3>
+              <h3 className="text-sm font-semibold text-indigo-200">
+                Phase × Category Coverage
+              </h3>
 
-  {discordExport && (
-    <button
-      onClick={() => navigator.clipboard.writeText(discordExport)}
-      className="rounded-lg border border-indigo-900 bg-indigo-950/40 px-3 py-1 text-xs font-semibold text-indigo-200 hover:bg-indigo-950/70"
-    >
-      Copy Discord export
-    </button>
-  )}
-</div>
+              {discordExport && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(discordExport)}
+                  className="rounded-lg border border-indigo-900 bg-indigo-950/40 px-3 py-1 text-xs font-semibold text-indigo-200 hover:bg-indigo-950/70"
+                >
+                  Copy Discord export
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap gap-3 text-sm">
             <span className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-emerald-200">
-              {matching.totalAssigned} assigned
+              {activeMatching.totalAssigned} assigned
             </span>
             <span className="rounded-full border border-red-900 bg-red-950/40 px-3 py-1 text-red-200">
-              {matching.gaps.length} gaps
+              {activeMatching.gaps.length} gaps
             </span>
             <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-gray-300">
-              {matching.coveragePercent}% overall
+              {activeMatching.coveragePercent}% overall
             </span>
           </div>
         </div>
 
+        <div className="mt-5 rounded-2xl border border-gray-800 bg-gray-950/50 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                Ignore For This Scenario
+              </p>
+              <p className="mt-2 text-sm text-gray-400">
+                Ignored scopes are removed from the solve and their units no longer compete with
+                the remaining scopes.
+              </p>
+            </div>
+            {sanitizedIgnoredScopes.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setGapFilter('all');
+                  setSelectedPlatoonKey('all');
+                  setIgnoredScopes([]);
+                }}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-200 hover:border-gray-600 hover:bg-gray-800"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {sanitizedIgnoredScopes.length > 0 ? (
+              sanitizedIgnoredScopes.map((scope) => (
+                <button
+                  key={getIgnoredMatchingScopeKey(scope)}
+                  type="button"
+                  onClick={() => handleToggleIgnoreScope(scope)}
+                  className="rounded-full border border-red-900 bg-red-950/30 px-3 py-1 text-xs font-medium text-red-200 hover:bg-red-950/50"
+                >
+                  {formatIgnoredMatchingScopeLabel(scope)} ×
+                </button>
+              ))
+            ) : (
+              <span className="rounded-full border border-gray-800 bg-gray-900 px-3 py-1 text-xs text-gray-400">
+                No ignored scopes
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-4">
+          <MetricCard
+            title="Baseline"
+            value={`${matching.totalAssigned}/${matching.totalRequired}`}
+            detail={`${matching.coveragePercent}% coverage before scenario filters`}
+            tone="info"
+          />
+          <MetricCard
+            title="Scenario"
+            value={`${activeMatching.totalAssigned}/${activeMatching.totalRequired}`}
+            detail={`${activeMatching.coveragePercent}% coverage after ignored scopes`}
+            tone={sanitizedIgnoredScopes.length > 0 ? 'warning' : 'positive'}
+          />
+          <MetricCard
+            title="Delta covered"
+            value={`${totalAssignedDelta >= 0 ? '+' : ''}${totalAssignedDelta}`}
+            detail="Assigned slots gained or lost under the scenario"
+            tone={totalAssignedDelta >= 0 ? 'positive' : 'warning'}
+          />
+          <MetricCard
+            title="Delta required"
+            value={`${totalRequiredDelta >= 0 ? '+' : ''}${totalRequiredDelta}`}
+            detail={
+              activeSelectedCoverageCell && selectedAssignedDelta !== null
+                ? `${formatIgnoredMatchingScopeLabel(activeSelectedCoverageCell)} delta assigned ${selectedAssignedDelta >= 0 ? '+' : ''}${selectedAssignedDelta}`
+                : 'Select a scope to compare local assignment deltas'
+            }
+            tone={selectedAssignedDelta == null || selectedAssignedDelta >= 0 ? 'info' : 'warning'}
+          />
+        </div>
+
         <div className="mt-5">
-          <CoverageGrid coverage={matching.coverage} onSelect={handleCoverageSelect} />
+          <CoverageGrid
+            coverage={activeMatching.coverage}
+            referenceCoverage={matching.coverage}
+            selectedCell={activeSelectedCoverageCell}
+            ignoredScopes={sanitizedIgnoredScopes}
+            onSelect={handleCoverageSelect}
+            onToggleIgnore={handleToggleIgnoreScope}
+          />
         </div>
 
         <p className="mt-4 text-xs text-gray-500">
           Each cell shows assigned / required slots. Colour: green ≥ 100% · blue ≥ 75% · amber ≥
-          40% · red &lt; 40%. Bonus zone capacity is budgeted independently from main zones.
+          40% · red &lt; 40%. Use Ignore to remove a phase/category scope from this scenario and
+          recalculate the optimum for the remaining scopes.
         </p>
       </div>
 
-      {selectedCoverageCell && selectedCoverage && (
+      {activeSelectedCoverageCell && selectedCoverage && (
         <>
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -1933,7 +2190,7 @@ function MatchingView({
                 </p>
                 <h3 className="mt-2 text-2xl font-semibold text-white">
                   P{selectedCoverage.phase} ·{' '}
-                  {selectedCoverage.category === 'SPECIAL' ? 'Bonus' : selectedCoverage.category}
+                  {getMatchingCategoryLabel(selectedCoverage.category)}
                   {selectedPlatoonLabel
                     ? ` · ${formatPlatoonTitle({
                         platoonNumber: selectedPlatoonLabel.platoonNumber,
@@ -2120,7 +2377,7 @@ function MatchingView({
         </>
       )}
 
-      {!selectedCoverageCell && matching.gaps.length > 0 && (
+      {!activeSelectedCoverageCell && activeMatching.gaps.length > 0 && (
         <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -2128,7 +2385,8 @@ function MatchingView({
                 Gap Analysis
               </p>
               <h3 className="mt-2 text-2xl font-semibold text-white">
-                {matching.gaps.length} unresolved slot{matching.gaps.length === 1 ? '' : 's'}
+                {activeMatching.gaps.length} unresolved slot
+                {activeMatching.gaps.length === 1 ? '' : 's'}
               </h3>
             </div>
             <p className="max-w-sm text-sm text-gray-400">
@@ -2168,10 +2426,17 @@ function MatchingView({
         </div>
       )}
 
-      {matching.gaps.length === 0 && (
+      {activeMatching.totalRequired === 0 && sanitizedIgnoredScopes.length > 0 && (
+        <div className="rounded-2xl border border-blue-900 bg-blue-950/30 p-5 text-sm text-blue-100">
+          Every phase/category scope is currently ignored. Restore one or more scopes above to see
+          the recomputed matching result.
+        </div>
+      )}
+
+      {activeMatching.totalRequired > 0 && activeMatching.gaps.length === 0 && (
         <div className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-5 text-sm text-emerald-100">
           Every platoon slot has a valid assignment. The guild can fully cover all imported platoon
-          requirements under the matching constraints.
+          requirements under the current matching scenario.
         </div>
       )}
     </section>
