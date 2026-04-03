@@ -69,12 +69,13 @@ model Guild {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  owner       User          @relation("GuildOwner", fields: [ownerId], references: [id])
-  permissions Permission[]
-  members     GuildMember[]
+  owner             User               @relation("GuildOwner", fields: [ownerId], references: [id])
+  permissions       Permission[]
+  members           GuildMember[]
   upgradeAssignments GuildUpgradeAssignment[]
-  rosterCache RosterCache[]
-  tbInstances TbInstance[]
+  rosterCache       RosterCache[]
+  tbInstances       TbInstance[]
+  registeredMembers RegisteredMember[]
 
   @@map("guilds")
 }
@@ -115,9 +116,10 @@ model GuildMember {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  guild       Guild          @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  assignments TbAssignment[]
+  guild            Guild              @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  assignments      TbAssignment[]
   upgradeAssignments GuildUpgradeAssignment[]
+  registeredMember RegisteredMember?
 
   @@unique([id, guildId], map: "guild_members_id_guild_id_unique")
   @@unique([guildId, allyCode])
@@ -306,4 +308,23 @@ model GuildUpgradeAssignment {
   @@index([guildId, unitBaseId])
   @@index([guildId, guildMemberId])
   @@map("guild_upgrade_assignments")
+}
+
+model RegisteredMember {
+  id            String   @id @default(uuid())
+  guildId       String   @map("guild_id")
+  discordUserId String   @map("discord_user_id")
+  allyCode      String   @map("ally_code")
+  guildMemberId String   @map("guild_member_id")
+  status        String   @default("active")
+  registeredAt  DateTime @default(now()) @map("registered_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  guild       Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  guildMember GuildMember @relation(fields: [guildMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, discordUserId])
+  @@unique([guildId, allyCode])
+  @@index([guildId])
+  @@map("registered_members")
 }
