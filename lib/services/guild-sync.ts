@@ -98,6 +98,7 @@ export type GuildSyncResult = {
   inserted: number;
   updated: number;
   skipped: number;
+  deleted: number;
 };
 
 export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult> {
@@ -228,6 +229,11 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
     // xmax = 0 on the returned row means it was freshly inserted; non-zero means updated.
     let inserted = 0;
     let updated = 0;
+    let deleted = 0;
+
+    const authoritativePlayerIds = guildMembers
+      .map((m) => m.playerId?.trim())
+      .filter((id): id is string => Boolean(id));
 
     await client.sql`BEGIN`;
 
@@ -263,6 +269,30 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
           updated++;
         }
       }
+      if (authoritativePlayerIds.length === 0) {
+        throw new Error('Guild sync returned zero members; aborting cleanup for safety');
+      }
+      // Cleanup stale guild members:
+      // Membership truth comes from the guild endpoint, not from resolved player details.
+      const existingMembersResult = await client.sql<{ player_id: string }>`
+        SELECT player_id
+        FROM guild_members
+        WHERE guild_id = ${guildId}
+      `;
+
+      const authoritativeSet = new Set(authoritativePlayerIds);
+      const stalePlayerIds = existingMembersResult.rows
+        .map((row) => row.player_id)
+        .filter((playerId) => !authoritativeSet.has(playerId));
+
+      for (const stalePlayerId of stalePlayerIds) {
+        await client.sql`
+          DELETE FROM guild_members
+          WHERE guild_id = ${guildId}
+            AND player_id = ${stalePlayerId}
+        `;
+        deleted++;
+      }
 
       await client.sql`COMMIT`;
     } catch (error) {
@@ -271,10 +301,10 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
     }
 
     console.log(
-      `[guild-sync] Finished for guild ${guildId}: inserted=${inserted} updated=${updated} skipped=${skipped}`
+      `[guild-sync] Finished for guild ${guildId}: inserted=${inserted} updated=${updated} skipped=${skipped} deleted=${deleted}`
     );
 
-    return { guildId, inserted, updated, skipped };
+    return { guildId, inserted, updated, skipped, deleted };
   } finally {
     client.release();
   }

@@ -33,6 +33,7 @@ export async function POST() {
       inserted: result.inserted,
       updated: result.updated,
       skipped: result.skipped,
+      deleted: result.deleted,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Guild sync failed';
