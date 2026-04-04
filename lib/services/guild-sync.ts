@@ -274,6 +274,10 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
       }
       // Cleanup stale guild members:
       // Membership truth comes from the guild endpoint, not from resolved player details.
+      // Cleanup stale guild members:
+      // Membership truth comes from the guild endpoint, not from resolved player details.
+      // Cleanup stale guild members:
+      // Membership truth comes from the guild endpoint, not from resolved player details.
       const existingMembersResult = await client.sql<{ player_id: string }>`
         SELECT player_id
         FROM guild_members
@@ -287,10 +291,17 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
 
       for (const stalePlayerId of stalePlayerIds) {
         await client.sql`
+          DELETE FROM player_roster
+          WHERE guild_id = ${guildId}
+            AND player_id = ${stalePlayerId}
+        `;
+
+        await client.sql`
           DELETE FROM guild_members
           WHERE guild_id = ${guildId}
             AND player_id = ${stalePlayerId}
         `;
+
         deleted++;
       }
 
