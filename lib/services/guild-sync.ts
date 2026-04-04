@@ -98,7 +98,8 @@ export type GuildSyncResult = {
   inserted: number;
   updated: number;
   skipped: number;
-  deleted: number;
+  deletedMembers: number;
+  deletedRosters: number;
 };
 
 export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult> {
@@ -230,7 +231,8 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
     let inserted = 0;
     let updated = 0;
     let deleted = 0;
-
+    let deletedMembers = 0;
+    let deletedRosters = 0;
     const authoritativePlayerIds = guildMembers
       .map((m) => m.playerId?.trim())
       .filter((id): id is string => Boolean(id));
@@ -272,37 +274,47 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
       if (authoritativePlayerIds.length === 0) {
         throw new Error('Guild sync returned zero members; aborting cleanup for safety');
       }
-      // Cleanup stale guild members:
+
+      // Cleanup stale guild members and stale roster rows.
       // Membership truth comes from the guild endpoint, not from resolved player details.
-      // Cleanup stale guild members:
-      // Membership truth comes from the guild endpoint, not from resolved player details.
-      // Cleanup stale guild members:
-      // Membership truth comes from the guild endpoint, not from resolved player details.
+      const authoritativeSet = new Set(authoritativePlayerIds);
+
       const existingMembersResult = await client.sql<{ player_id: string }>`
         SELECT player_id
         FROM guild_members
         WHERE guild_id = ${guildId}
       `;
 
-      const authoritativeSet = new Set(authoritativePlayerIds);
-      const stalePlayerIds = existingMembersResult.rows
+      const staleMemberPlayerIds = existingMembersResult.rows
         .map((row) => row.player_id)
         .filter((playerId) => !authoritativeSet.has(playerId));
 
-      for (const stalePlayerId of stalePlayerIds) {
-        await client.sql`
-          DELETE FROM player_roster
-          WHERE guild_id = ${guildId}
-            AND player_id = ${stalePlayerId}
-        `;
-
+      for (const stalePlayerId of staleMemberPlayerIds) {
         await client.sql`
           DELETE FROM guild_members
           WHERE guild_id = ${guildId}
             AND player_id = ${stalePlayerId}
         `;
+          deletedMembers++;
+      }
 
-        deleted++;
+      const existingRosterResult = await client.sql<{ player_id: string }>`
+        SELECT DISTINCT player_id
+        FROM player_roster
+        WHERE guild_id = ${guildId}
+      `;
+
+      const staleRosterPlayerIds = existingRosterResult.rows
+        .map((row) => row.player_id)
+        .filter((playerId) => !authoritativeSet.has(playerId));
+
+      for (const stalePlayerId of staleRosterPlayerIds) {
+        await client.sql`
+          DELETE FROM player_roster
+          WHERE guild_id = ${guildId}
+            AND player_id = ${stalePlayerId}
+        `;
+        deletedRosters++;
       }
 
       await client.sql`COMMIT`;
@@ -315,7 +327,7 @@ export async function syncGuildMembers(guildId: string): Promise<GuildSyncResult
       `[guild-sync] Finished for guild ${guildId}: inserted=${inserted} updated=${updated} skipped=${skipped} deleted=${deleted}`
     );
 
-    return { guildId, inserted, updated, skipped, deleted };
+    return { guildId, inserted, updated, skipped, deletedMembers, deletedRosters };
   } finally {
     client.release();
   }
