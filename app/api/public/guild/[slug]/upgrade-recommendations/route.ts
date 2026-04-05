@@ -27,6 +27,7 @@ type UpgradeRecommendation = {
   }[];
   estimatedCost: number;
   impactScore: number;
+  finalScore: number;
   priority: 'top' | 'good' | 'longterm';
 };
 
@@ -148,8 +149,6 @@ export async function GET(
 
       const recommendations: UpgradeRecommendation[] = Array.from(groupedByUnit.entries())
         .map(([unitBaseId, candidates]) => {
-          // Wähle je Unit den kleinsten nächsten sinnvollen Schritt,
-          // nicht die global größte Meta-Aggregation.
           candidates.sort(
             (a, b) =>
               a.missingRelicTiers - b.missingRelicTiers ||
@@ -160,7 +159,6 @@ export async function GET(
 
           const best = candidates[0];
 
-          // Nur Gaps zählen, die genau von DIESEM Schritt profitieren würden.
           const exactStepMatches = candidates.filter(
             (candidate) =>
               candidate.toRelic === best.toRelic &&
@@ -200,26 +198,21 @@ export async function GET(
           });
 
           const slotsUnlocked = Math.max(1, exactStepMatches.length);
-
-          // Score bewusst individueller:
-          // - Basis aus candidate.score
-          // - kleiner Bonus für echte Step-Matches
-          // - kleiner Malus für Heavy-Contributors
-          // - kleiner Bonus für günstige Steps
           const stepSize = Math.max(1, best.toRelic - best.fromRelic);
           const cost = calculateRelicCost(best.fromRelic, best.toRelic);
           const costEfficiencyBonus =
             cost > 0 ? Math.max(0, Math.round((slotsUnlocked / cost) * 1000) / 10) : 0;
 
-          const impactScore = Math.round(
-            (
-              best.score +
-              slotsUnlocked * 2 +
-              costEfficiencyBonus -
-              memberContributions * 0.5 -
-              (stepSize - 1) * 3
-            ) * 100
-          ) / 100;
+          const impactScore =
+            Math.round(
+              (
+                best.score +
+                slotsUnlocked * 2 +
+                costEfficiencyBonus -
+                memberContributions * 0.5 -
+                (stepSize - 1) * 3
+              ) * 100
+            ) / 100;
 
           const priority = determinePriority(impactScore);
 
@@ -234,23 +227,21 @@ export async function GET(
             affectedPhases,
             estimatedCost: cost,
             impactScore,
+            finalScore: impactScore,
             priority,
           };
         })
         .sort((a, b) => {
-          // zuerst besserer individueller Score
-          if (b.impactScore !== a.impactScore) {
-            return b.impactScore - a.impactScore;
+          if (b.finalScore !== a.finalScore) {
+            return b.finalScore - a.finalScore;
           }
 
-          // dann kleinere Schritte bevorzugen
           const aStep = a.toRelic - a.fromRelic;
           const bStep = b.toRelic - b.fromRelic;
           if (aStep !== bStep) {
             return aStep - bStep;
           }
 
-          // dann günstigere Empfehlungen
           if (a.estimatedCost !== b.estimatedCost) {
             return a.estimatedCost - b.estimatedCost;
           }
@@ -258,31 +249,29 @@ export async function GET(
           return a.unitName.localeCompare(b.unitName);
         });
 
-const topRecommendations: UpgradeRecommendation[] = [];
-const seenUnitsForMember = new Set<string>();
+      const topRecommendations: UpgradeRecommendation[] = [];
+      const seenUnitsForMember = new Set<string>();
 
-for (const recommendation of recommendations) {
-  if (topRecommendations.length >= 3) break;
+      for (const recommendation of recommendations) {
+        if (topRecommendations.length >= 3) break;
+        if (seenUnitsForMember.has(recommendation.unitBaseId)) continue;
 
-  // Nicht dieselbe Unit doppelt
-  if (seenUnitsForMember.has(recommendation.unitBaseId)) continue;
+        const isLargeMetaStep =
+          recommendation.impactScore >= 40 &&
+          recommendation.toRelic - recommendation.fromRelic >= 2;
 
-  // Nur eine harte Meta-Empfehlung mit großem Schritt in die Top 3
-  const isLargeMetaStep =
-    recommendation.impactScore >= 40 &&
-    recommendation.toRelic - recommendation.fromRelic >= 2;
+        const alreadyHasLargeMetaStep = topRecommendations.some(
+          (rec) => rec.impactScore >= 40 && rec.toRelic - rec.fromRelic >= 2
+        );
 
-  const alreadyHasLargeMetaStep = topRecommendations.some(
-    (rec) => rec.impactScore >= 40 && rec.toRelic - rec.fromRelic >= 2
-  );
+        if (isLargeMetaStep && alreadyHasLargeMetaStep) {
+          continue;
+        }
 
-  if (isLargeMetaStep && alreadyHasLargeMetaStep) {
-    continue;
-  }
+        seenUnitsForMember.add(recommendation.unitBaseId);
+        topRecommendations.push(recommendation);
+      }
 
-  seenUnitsForMember.add(recommendation.unitBaseId);
-  topRecommendations.push(recommendation);
-}
       const potentialGain = topRecommendations.reduce(
         (sum, recommendation) => sum + recommendation.slotsUnlocked,
         0
@@ -299,58 +288,65 @@ for (const recommendation of recommendations) {
         },
       ];
     });
+
     memberRecommendations.sort((a, b) => {
-  if (b.potentialGain !== a.potentialGain) {
-    return b.potentialGain - a.potentialGain;
-  }
+      if (b.potentialGain !== a.potentialGain) {
+        return b.potentialGain - a.potentialGain;
+      }
 
-  if (a.currentContributions !== b.currentContributions) {
-    return a.currentContributions - b.currentContributions;
-  }
+      if (a.currentContributions !== b.currentContributions) {
+        return a.currentContributions - b.currentContributions;
+      }
 
-  return a.playerName.localeCompare(b.playerName);
-});
-const globalUnitUsage = new Map<string, number>();
-
-for (const memberRecommendation of memberRecommendations) {
-  const rescored = memberRecommendation.recommendations
-    .map((recommendation) => {
-      const usage = globalUnitUsage.get(recommendation.unitBaseId) ?? 0;
-      const diversityPenalty = usage * 12;
-
-const rescoredImpact = Math.max(0, recommendation.impactScore - diversityPenalty);
-
-return {
-  ...recommendation,
-  impactScore: rescoredImpact,
-  priority: determinePriority(rescoredImpact),
-};
-    })
-    .sort((a, b) => {
-      if (b.impactScore !== a.impactScore) return b.impactScore - a.impactScore;
-
-      const aStep = a.toRelic - a.fromRelic;
-      const bStep = b.toRelic - b.fromRelic;
-      if (aStep !== bStep) return aStep - bStep;
-
-      if (a.estimatedCost !== b.estimatedCost) return a.estimatedCost - b.estimatedCost;
-
-      return a.unitName.localeCompare(b.unitName);
+      return a.playerName.localeCompare(b.playerName);
     });
 
-  memberRecommendation.recommendations = rescored.slice(0, 3);
+    const globalUnitUsage = new Map<string, number>();
 
-for (const recommendation of memberRecommendation.recommendations) {
-  globalUnitUsage.set(
-    recommendation.unitBaseId,
-    (globalUnitUsage.get(recommendation.unitBaseId) ?? 0) + 1
-  );
-}
-  memberRecommendation.potentialGain = memberRecommendation.recommendations.reduce(
-    (sum, recommendation) => sum + recommendation.slotsUnlocked,
-    0
-  );
-}
+    for (const memberRecommendation of memberRecommendations) {
+      const rescored = memberRecommendation.recommendations
+        .map((recommendation) => {
+          const usage = globalUnitUsage.get(recommendation.unitBaseId) ?? 0;
+          const diversityPenalty =
+            Math.round(Math.log2(usage + 1) * 6 * 100) / 100;
+
+          const finalScore = Math.max(
+            recommendation.impactScore * 0.35,
+            recommendation.impactScore - diversityPenalty
+          );
+
+          return {
+            ...recommendation,
+            finalScore,
+          };
+        })
+        .sort((a, b) => {
+          if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+
+          const aStep = a.toRelic - a.fromRelic;
+          const bStep = b.toRelic - b.fromRelic;
+          if (aStep !== bStep) return aStep - bStep;
+
+          if (a.estimatedCost !== b.estimatedCost) return a.estimatedCost - b.estimatedCost;
+
+          return a.unitName.localeCompare(b.unitName);
+        });
+
+      memberRecommendation.recommendations = rescored.slice(0, 3);
+
+      for (const recommendation of memberRecommendation.recommendations) {
+        globalUnitUsage.set(
+          recommendation.unitBaseId,
+          (globalUnitUsage.get(recommendation.unitBaseId) ?? 0) + 1
+        );
+      }
+
+      memberRecommendation.potentialGain = memberRecommendation.recommendations.reduce(
+        (sum, recommendation) => sum + recommendation.slotsUnlocked,
+        0
+      );
+    }
+
     memberRecommendations.sort((a, b) => {
       if (b.potentialGain !== a.potentialGain) {
         return b.potentialGain - a.potentialGain;
