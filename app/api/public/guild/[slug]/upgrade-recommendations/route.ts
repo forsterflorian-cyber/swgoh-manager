@@ -17,17 +17,18 @@ type UpgradeRecommendation = {
   recommendedRelic: number;
   fromRelic: number;
   toRelic: number;
-  slotsUnlocked: number;
+  slotsUnlocked: number; // realistisch nutzbare zusätzliche Slots (max. 1 pro Phase/Kategorie)
+  matchingOpenSlots: number; // wie viele offene Gaps dieser Step grundsätzlich matchen würde
   affectedPhases: {
     phase: number;
     category: string;
     currentCoverage: number;
     newCoverage: number;
-    slotsAdded: number;
+    slotsAdded: number; // bewusst max. 1 pro Phase/Kategorie
   }[];
   estimatedCost: number;
-  impactScore: number;
-  finalScore: number;
+  impactScore: number; // fachlicher Score für Anzeige
+  finalScore: number; // Ranking-Score inkl. globaler Diversifizierung
   priority: 'top' | 'good' | 'longterm';
 };
 
@@ -58,9 +59,23 @@ type UpgradeRecommendationsResponse = {
 };
 
 function determinePriority(upgradeScore: number): 'top' | 'good' | 'longterm' {
-  if (upgradeScore >= 25) return 'top';
-  if (upgradeScore >= 12) return 'good';
+  if (upgradeScore >= 55) return 'top';
+  if (upgradeScore >= 28) return 'good';
   return 'longterm';
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function buildSetMap(values: Array<[string, string]>): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const [key, value] of values) {
+    const existing = map.get(key) ?? new Set<string>();
+    existing.add(value);
+    map.set(key, existing);
+  }
+  return map;
 }
 
 export async function GET(
@@ -112,29 +127,47 @@ export async function GET(
       );
     }
 
-    const gapCandidates = buildGapRecommendationCandidates({
+    const allGapCandidates = buildGapRecommendationCandidates({
       matching,
       allyCodeByMemberId,
       rosterByMemberUnit,
       contributionCountByMemberId,
     });
 
+    // Für echte Upgrade-Empfehlungen nur Upgrade-Kandidaten betrachten.
+    let relevantCandidates = allGapCandidates.filter(
+      (candidate) => candidate.actionType === 'upgrade'
+    );
+
+    if (phaseFilter && categoryFilter) {
+      const phaseNum = parseInt(phaseFilter, 10);
+      relevantCandidates = relevantCandidates.filter(
+        (candidate) =>
+          candidate.phase === phaseNum && candidate.category === categoryFilter
+      );
+    }
+
+    const openGapCountByUnit = buildSetMap(
+      relevantCandidates.map((candidate) => [candidate.unitBaseId, candidate.gapKey])
+    );
+
+    const distinctMemberCountByUnit = buildSetMap(
+      relevantCandidates.map((candidate) => [candidate.unitBaseId, candidate.memberId])
+    );
+
+    const distinctMemberCountByExactStep = buildSetMap(
+      relevantCandidates.map((candidate) => [
+        `${candidate.unitBaseId}:${candidate.fromRelic}:${candidate.toRelic}`,
+        candidate.memberId,
+      ])
+    );
+
     const memberRecommendations: MemberRecommendation[] = activeMembers.flatMap((member) => {
       const memberContributions = contributionCountByMemberId.get(member.memberId) ?? 0;
 
-      let memberCandidates = gapCandidates.filter(
-        (candidate) =>
-          candidate.memberId === member.memberId &&
-          candidate.actionType !== 'acquire'
+      const memberCandidates = relevantCandidates.filter(
+        (candidate) => candidate.memberId === member.memberId
       );
-
-      if (phaseFilter && categoryFilter) {
-        const phaseNum = parseInt(phaseFilter, 10);
-        memberCandidates = memberCandidates.filter(
-          (candidate) =>
-            candidate.phase === phaseNum && candidate.category === categoryFilter
-        );
-      }
 
       if (memberCandidates.length === 0) {
         return [];
@@ -142,13 +175,14 @@ export async function GET(
 
       const groupedByUnit = new Map<string, typeof memberCandidates>();
       for (const candidate of memberCandidates) {
-        const existing = groupedByUnit.get(candidate.unitBaseId) || [];
+        const existing = groupedByUnit.get(candidate.unitBaseId) ?? [];
         existing.push(candidate);
         groupedByUnit.set(candidate.unitBaseId, existing);
       }
 
       const recommendations: UpgradeRecommendation[] = Array.from(groupedByUnit.entries())
         .map(([unitBaseId, candidates]) => {
+          // Kleinster sinnvoller nächster Schritt zuerst.
           candidates.sort(
             (a, b) =>
               a.missingRelicTiers - b.missingRelicTiers ||
@@ -167,13 +201,14 @@ export async function GET(
               candidate.missingRarity === best.missingRarity
           );
 
+          // Realistische Nutzbarkeit: max. 1 Slot pro Phase/Kategorie.
           const affectedPhasesMap = new Map<string, number>();
           for (const candidate of exactStepMatches) {
             const key = `${candidate.phase}:${candidate.category}`;
-            affectedPhasesMap.set(key, (affectedPhasesMap.get(key) ?? 0) + 1);
+            affectedPhasesMap.set(key, 1);
           }
 
-          const affectedPhases = Array.from(affectedPhasesMap.entries()).map(([key, count]) => {
+          const affectedPhases = Array.from(affectedPhasesMap.entries()).map(([key]) => {
             const [phase, category] = key.split(':');
             const phaseNum = parseInt(phase, 10);
 
@@ -189,32 +224,59 @@ export async function GET(
                 ? Math.min(
                     100,
                     Math.round(
-                      ((coverage.assignedCount + count) / coverage.requirementCount) * 100
+                      ((coverage.assignedCount + 1) / coverage.requirementCount) * 100
                     )
                   )
                 : 0,
-              slotsAdded: count,
+              slotsAdded: 1,
             };
           });
 
-          const slotsUnlocked = Math.max(1, exactStepMatches.length);
+          const slotsUnlocked = Math.max(1, affectedPhases.length);
+          const matchingOpenSlots = exactStepMatches.length;
+
           const stepSize = Math.max(1, best.toRelic - best.fromRelic);
           const cost = calculateRelicCost(best.fromRelic, best.toRelic);
-          const costEfficiencyBonus =
-            cost > 0 ? Math.max(0, Math.round((slotsUnlocked / cost) * 1000) / 10) : 0;
 
-          const impactScore =
-            Math.round(
-              (
-                best.score +
-                slotsUnlocked * 2 +
-                costEfficiencyBonus -
-                memberContributions * 0.5 -
-                (stepSize - 1) * 3
-              ) * 100
-            ) / 100;
+          const unitOpenGapCount = openGapCountByUnit.get(unitBaseId)?.size ?? 0;
+          const unitDistinctMemberCount = distinctMemberCountByUnit.get(unitBaseId)?.size ?? 1;
+          const exactStepMemberCount =
+            distinctMemberCountByExactStep.get(
+              `${unitBaseId}:${best.fromRelic}:${best.toRelic}`
+            )?.size ?? 1;
 
-          const priority = determinePriority(impactScore);
+          // Wenn wenige Members diese Unit / genau diesen Step liefern können,
+          // steigt die Priorität deutlich.
+          const scarcityRatio = unitOpenGapCount / Math.max(1, unitDistinctMemberCount);
+          const scarcityBonus = Math.min(28, scarcityRatio * 8);
+
+          const exactStepUniquenessBonus =
+            exactStepMemberCount === 1
+              ? 20
+              : Math.max(0, 16 - (exactStepMemberCount - 1) * 2);
+
+          const ubiquityPenalty = Math.max(0, (unitDistinctMemberCount - 3) * 1.5);
+          const largeStepPenalty = (stepSize - 1) * 8;
+          const costPenalty = Math.max(0, cost / 180 - 2);
+          const flexibilityBonus = Math.max(0, (slotsUnlocked - 1) * 3);
+
+          const completionBonus = affectedPhases.reduce((sum, phase) => {
+            if (phase.currentCoverage < 100 && phase.newCoverage === 100) {
+              return sum + 12;
+            }
+            return sum;
+          }, 0);
+
+          const impactScore = round2(
+            best.score +
+              scarcityBonus +
+              exactStepUniquenessBonus +
+              flexibilityBonus +
+              completionBonus -
+              ubiquityPenalty -
+              largeStepPenalty -
+              costPenalty
+          );
 
           return {
             unitBaseId,
@@ -224,95 +286,66 @@ export async function GET(
             fromRelic: best.fromRelic,
             toRelic: best.toRelic,
             slotsUnlocked,
+            matchingOpenSlots,
             affectedPhases,
             estimatedCost: cost,
             impactScore,
             finalScore: impactScore,
-            priority,
+            priority: determinePriority(impactScore),
           };
         })
         .sort((a, b) => {
-          if (b.finalScore !== a.finalScore) {
-            return b.finalScore - a.finalScore;
+          if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+          if (a.toRelic - a.fromRelic !== b.toRelic - b.fromRelic) {
+            return (a.toRelic - a.fromRelic) - (b.toRelic - b.fromRelic);
           }
-
-          const aStep = a.toRelic - a.fromRelic;
-          const bStep = b.toRelic - b.fromRelic;
-          if (aStep !== bStep) {
-            return aStep - bStep;
-          }
-
           if (a.estimatedCost !== b.estimatedCost) {
             return a.estimatedCost - b.estimatedCost;
           }
-
           return a.unitName.localeCompare(b.unitName);
         });
-
-      const topRecommendations: UpgradeRecommendation[] = [];
-      const seenUnitsForMember = new Set<string>();
-
-      for (const recommendation of recommendations) {
-        if (topRecommendations.length >= 3) break;
-        if (seenUnitsForMember.has(recommendation.unitBaseId)) continue;
-
-        const isLargeMetaStep =
-          recommendation.impactScore >= 40 &&
-          recommendation.toRelic - recommendation.fromRelic >= 2;
-
-        const alreadyHasLargeMetaStep = topRecommendations.some(
-          (rec) => rec.impactScore >= 40 && rec.toRelic - rec.fromRelic >= 2
-        );
-
-        if (isLargeMetaStep && alreadyHasLargeMetaStep) {
-          continue;
-        }
-
-        seenUnitsForMember.add(recommendation.unitBaseId);
-        topRecommendations.push(recommendation);
-      }
-
-      const potentialGain = topRecommendations.reduce(
-        (sum, recommendation) => sum + recommendation.slotsUnlocked,
-        0
-      );
 
       return [
         {
           memberId: member.memberId,
           playerName: member.playerName,
           allyCode: member.allyCode,
-          recommendations: topRecommendations,
+          recommendations,
           currentContributions: memberContributions,
-          potentialGain,
+          potentialGain: recommendations.reduce(
+            (sum, recommendation) => sum + recommendation.slotsUnlocked,
+            0
+          ),
         },
       ];
     });
 
+    // Erst Members grob nach Potenzial vorsortieren.
     memberRecommendations.sort((a, b) => {
       if (b.potentialGain !== a.potentialGain) {
         return b.potentialGain - a.potentialGain;
       }
-
       if (a.currentContributions !== b.currentContributions) {
         return a.currentContributions - b.currentContributions;
       }
-
       return a.playerName.localeCompare(b.playerName);
     });
 
+    // Danach globale Diversifizierung:
+    // häufig bereits vergebene Units verlieren nur fürs Ranking etwas an Gewicht.
     const globalUnitUsage = new Map<string, number>();
 
     for (const memberRecommendation of memberRecommendations) {
       const rescored = memberRecommendation.recommendations
         .map((recommendation) => {
           const usage = globalUnitUsage.get(recommendation.unitBaseId) ?? 0;
-          const diversityPenalty =
-            Math.round(Math.log2(usage + 1) * 6 * 100) / 100;
+          const diversityPenalty = round2(Math.log2(usage + 1) * 5);
 
-          const finalScore = Math.max(
-            recommendation.impactScore * 0.35,
-            recommendation.impactScore - diversityPenalty
+          const finalScore = round2(
+            Math.max(
+              recommendation.impactScore * 0.45,
+              recommendation.impactScore - diversityPenalty
+            )
           );
 
           return {
@@ -322,40 +355,58 @@ export async function GET(
         })
         .sort((a, b) => {
           if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
-
-          const aStep = a.toRelic - a.fromRelic;
-          const bStep = b.toRelic - b.fromRelic;
-          if (aStep !== bStep) return aStep - bStep;
-
-          if (a.estimatedCost !== b.estimatedCost) return a.estimatedCost - b.estimatedCost;
-
+          if (b.impactScore !== a.impactScore) return b.impactScore - a.impactScore;
+          if (a.toRelic - a.fromRelic !== b.toRelic - b.fromRelic) {
+            return (a.toRelic - a.fromRelic) - (b.toRelic - b.fromRelic);
+          }
+          if (a.estimatedCost !== b.estimatedCost) {
+            return a.estimatedCost - b.estimatedCost;
+          }
           return a.unitName.localeCompare(b.unitName);
         });
 
-      memberRecommendation.recommendations = rescored.slice(0, 3);
+      const picked: UpgradeRecommendation[] = [];
+      const seenUnits = new Set<string>();
+      let hasLargeMetaStep = false;
 
-      for (const recommendation of memberRecommendation.recommendations) {
+      for (const recommendation of rescored) {
+        if (picked.length >= 3) break;
+        if (seenUnits.has(recommendation.unitBaseId)) continue;
+
+        const isLargeMetaStep =
+          recommendation.impactScore >= 45 &&
+          recommendation.toRelic - recommendation.fromRelic >= 2;
+
+        if (isLargeMetaStep && hasLargeMetaStep) {
+          continue;
+        }
+
+        seenUnits.add(recommendation.unitBaseId);
+        if (isLargeMetaStep) hasLargeMetaStep = true;
+        picked.push(recommendation);
+      }
+
+      memberRecommendation.recommendations = picked;
+      memberRecommendation.potentialGain = picked.reduce(
+        (sum, recommendation) => sum + recommendation.slotsUnlocked,
+        0
+      );
+
+      for (const recommendation of picked) {
         globalUnitUsage.set(
           recommendation.unitBaseId,
           (globalUnitUsage.get(recommendation.unitBaseId) ?? 0) + 1
         );
       }
-
-      memberRecommendation.potentialGain = memberRecommendation.recommendations.reduce(
-        (sum, recommendation) => sum + recommendation.slotsUnlocked,
-        0
-      );
     }
 
     memberRecommendations.sort((a, b) => {
       if (b.potentialGain !== a.potentialGain) {
         return b.potentialGain - a.potentialGain;
       }
-
       if (a.currentContributions !== b.currentContributions) {
         return a.currentContributions - b.currentContributions;
       }
-
       return a.playerName.localeCompare(b.playerName);
     });
 
