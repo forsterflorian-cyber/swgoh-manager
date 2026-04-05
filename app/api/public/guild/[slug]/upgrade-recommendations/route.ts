@@ -73,7 +73,7 @@ function determinePriority(
   _primaryReason: UpgradeRecommendation['primaryReason']
 ): UpgradeRecommendation['priority'] {
   if (upgradeScore >= 18) return 'top';
-  if (upgradeScore >= 10) return 'good';
+  if (upgradeScore >= 12) return 'good';
   return 'longterm';
 }
 
@@ -315,10 +315,7 @@ const stepEfficiency =
   -6;
 
 const zoneNeed =
-  bestImmediateTarget.openSlots >= 30 ? 4 :
-  bestImmediateTarget.openSlots >= 20 ? 3 :
-  bestImmediateTarget.openSlots >= 10 ? 2 :
-  1;
+  bestImmediateTarget.openSlots / 10;
 
 const completionBonus = bestImmediateTarget.completesZone ? 3 : 0;
 
@@ -336,9 +333,9 @@ const baseScore =
   costPenalty;
 
 const exactStepScarcity =
-  exactStepMemberCount === 1 ? 6 :
-  exactStepMemberCount === 2 ? 4 :
-  exactStepMemberCount === 3 ? 2 :
+  exactStepMemberCount === 1 ? 5 :
+  exactStepMemberCount === 2 ? 3 :
+  exactStepMemberCount === 3 ? 1 :
   0;
 
 const unitScarcity =
@@ -353,9 +350,9 @@ const flexibilityBonus =
   0;
 
 const ubiquityPenalty =
-  unitDistinctMemberCount >= 14 ? 4 :
-  unitDistinctMemberCount >= 10 ? 2 :
-  0;
+  unitDistinctMemberCount <= 4
+    ? 0
+    : Math.min(6, Math.round((unitDistinctMemberCount - 4) * 0.6));
 
 const scarcityScore =
   exactStepScarcity +
