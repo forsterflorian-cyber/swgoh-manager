@@ -1,8 +1,8 @@
 import { notFound } from 'next/navigation';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import {
   buildGapRecommendationCandidates,
   calculateRelicCost,
@@ -33,7 +33,7 @@ type UpgradeRecommendation = {
 type MemberRecommendation = {
   memberId: string;
   playerName: string;
-  allyCode: string;
+  allyCode: string | null;
   recommendations: UpgradeRecommendation[];
   currentContributions: number;
   potentialGain: number;
@@ -56,15 +56,15 @@ type UpgradeRecommendationsResponse = {
   };
 };
 
-function determinePriority(score: number): 'top' | 'good' | 'longterm' {
-  if (score >= 25) return 'top';
-  if (score >= 12) return 'good';
+function determinePriority(upgradeScore: number): 'top' | 'good' | 'longterm' {
+  if (upgradeScore >= 25) return 'top';
+  if (upgradeScore >= 12) return 'good';
   return 'longterm';
 }
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
     const { slug } = await params;
@@ -96,18 +96,18 @@ export async function GET(
       dataset.roster.map((r) => [
         `${r.memberId}:${r.unitBaseId}`,
         { relicTier: r.relicTier, rarity: r.rarity },
-      ]),
+      ])
     );
 
     const allyCodeByMemberId = new Map(
-      dataset.members.map((m) => [m.memberId, m.allyCode ?? '']),
+      dataset.members.map((m) => [m.memberId, m.allyCode ?? ''])
     );
 
     const contributionCountByMemberId = new Map<string, number>();
     for (const assignment of matching.assignments) {
       contributionCountByMemberId.set(
         assignment.memberId,
-        (contributionCountByMemberId.get(assignment.memberId) ?? 0) + 1,
+        (contributionCountByMemberId.get(assignment.memberId) ?? 0) + 1
       );
     }
 
@@ -123,14 +123,15 @@ export async function GET(
 
       let memberCandidates = gapCandidates.filter(
         (candidate) =>
-          candidate.memberId === member.memberId && candidate.actionType !== 'acquire',
+          candidate.memberId === member.memberId &&
+          candidate.actionType !== 'acquire'
       );
 
       if (phaseFilter && categoryFilter) {
         const phaseNum = parseInt(phaseFilter, 10);
         memberCandidates = memberCandidates.filter(
           (candidate) =>
-            candidate.phase === phaseNum && candidate.category === categoryFilter,
+            candidate.phase === phaseNum && candidate.category === categoryFilter
         );
       }
 
@@ -147,27 +148,39 @@ export async function GET(
 
       const recommendations: UpgradeRecommendation[] = Array.from(groupedByUnit.entries())
         .map(([unitBaseId, candidates]) => {
+          // Wähle je Unit den kleinsten nächsten sinnvollen Schritt,
+          // nicht die global größte Meta-Aggregation.
           candidates.sort(
             (a, b) =>
-              b.score - a.score ||
               a.missingRelicTiers - b.missingRelicTiers ||
-              a.missingRarity - b.missingRarity,
+              a.missingRarity - b.missingRarity ||
+              a.toRelic - b.toRelic ||
+              b.score - a.score
           );
 
           const best = candidates[0];
-          const slotsUnlocked = candidates.length;
+
+          // Nur Gaps zählen, die genau von DIESEM Schritt profitieren würden.
+          const exactStepMatches = candidates.filter(
+            (candidate) =>
+              candidate.toRelic === best.toRelic &&
+              candidate.fromRelic === best.fromRelic &&
+              candidate.missingRelicTiers === best.missingRelicTiers &&
+              candidate.missingRarity === best.missingRarity
+          );
 
           const affectedPhasesMap = new Map<string, number>();
-          for (const candidate of candidates) {
+          for (const candidate of exactStepMatches) {
             const key = `${candidate.phase}:${candidate.category}`;
-            affectedPhasesMap.set(key, (affectedPhasesMap.get(key) || 0) + 1);
+            affectedPhasesMap.set(key, (affectedPhasesMap.get(key) ?? 0) + 1);
           }
 
           const affectedPhases = Array.from(affectedPhasesMap.entries()).map(([key, count]) => {
             const [phase, category] = key.split(':');
             const phaseNum = parseInt(phase, 10);
+
             const coverage = matching.coverage.find(
-              (c) => c.phase === phaseNum && c.category === category,
+              (c) => c.phase === phaseNum && c.category === category
             );
 
             return {
@@ -178,15 +191,36 @@ export async function GET(
                 ? Math.min(
                     100,
                     Math.round(
-                      ((coverage.assignedCount + count) / coverage.requirementCount) * 100,
-                    ),
+                      ((coverage.assignedCount + count) / coverage.requirementCount) * 100
+                    )
                   )
                 : 0,
               slotsAdded: count,
             };
           });
 
-          const impactScore = best.score + slotsUnlocked * 5;
+          const slotsUnlocked = Math.max(1, exactStepMatches.length);
+
+          // Score bewusst individueller:
+          // - Basis aus candidate.score
+          // - kleiner Bonus für echte Step-Matches
+          // - kleiner Malus für Heavy-Contributors
+          // - kleiner Bonus für günstige Steps
+          const stepSize = Math.max(1, best.toRelic - best.fromRelic);
+          const cost = calculateRelicCost(best.fromRelic, best.toRelic);
+          const costEfficiencyBonus =
+            cost > 0 ? Math.max(0, Math.round((slotsUnlocked / cost) * 1000) / 10) : 0;
+
+          const impactScore = Math.round(
+            (
+              best.score +
+              slotsUnlocked * 2 +
+              costEfficiencyBonus -
+              memberContributions * 0.5 -
+              (stepSize - 1) * 3
+            ) * 100
+          ) / 100;
+
           const priority = determinePriority(impactScore);
 
           return {
@@ -198,30 +232,66 @@ export async function GET(
             toRelic: best.toRelic,
             slotsUnlocked,
             affectedPhases,
-            estimatedCost: calculateRelicCost(best.fromRelic, best.toRelic),
+            estimatedCost: cost,
             impactScore,
             priority,
           };
         })
-        .sort((a, b) => b.impactScore - a.impactScore);
+        .sort((a, b) => {
+          // zuerst besserer individueller Score
+          if (b.impactScore !== a.impactScore) {
+            return b.impactScore - a.impactScore;
+          }
+
+          // dann kleinere Schritte bevorzugen
+          const aStep = a.toRelic - a.fromRelic;
+          const bStep = b.toRelic - b.fromRelic;
+          if (aStep !== bStep) {
+            return aStep - bStep;
+          }
+
+          // dann günstigere Empfehlungen
+          if (a.estimatedCost !== b.estimatedCost) {
+            return a.estimatedCost - b.estimatedCost;
+          }
+
+          return a.unitName.localeCompare(b.unitName);
+        });
+
+      const topRecommendations = recommendations.slice(0, 3);
+      const potentialGain = topRecommendations.reduce(
+        (sum, recommendation) => sum + recommendation.slotsUnlocked,
+        0
+      );
 
       return [
         {
           memberId: member.memberId,
           playerName: member.playerName,
           allyCode: member.allyCode,
-          recommendations: recommendations.slice(0, 3),
+          recommendations: topRecommendations,
           currentContributions: memberContributions,
-          potentialGain: recommendations.reduce((sum, rec) => sum + rec.slotsUnlocked, 0),
+          potentialGain,
         },
       ];
     });
 
-    memberRecommendations.sort((a, b) => b.potentialGain - a.potentialGain);
+    memberRecommendations.sort((a, b) => {
+      if (b.potentialGain !== a.potentialGain) {
+        return b.potentialGain - a.potentialGain;
+      }
+
+      if (a.currentContributions !== b.currentContributions) {
+        return a.currentContributions - b.currentContributions;
+      }
+
+      return a.playerName.localeCompare(b.playerName);
+    });
 
     const realisticSlotsUnlockable = memberRecommendations.reduce(
-      (sum, m) => sum + (m.recommendations[0]?.slotsUnlocked || 0),
-      0,
+      (sum, memberRecommendation) =>
+        sum + (memberRecommendation.recommendations[0]?.slotsUnlocked || 0),
+      0
     );
 
     let currentCoverage: number;
@@ -231,7 +301,7 @@ export async function GET(
     if (phaseFilter && categoryFilter) {
       const phaseNum = parseInt(phaseFilter, 10);
       const filteredCoverage = matching.coverage.find(
-        (c) => c.phase === phaseNum && c.category === categoryFilter,
+        (c) => c.phase === phaseNum && c.category === categoryFilter
       );
 
       currentCoverage = filteredCoverage?.coveragePercent ?? 0;
@@ -241,9 +311,9 @@ export async function GET(
             Math.round(
               ((filteredCoverage.assignedCount + realisticSlotsUnlockable) /
                 filteredCoverage.requirementCount) *
-                100,
+                100
             ),
-            95,
+            95
           )
         : 0;
     } else {
@@ -251,9 +321,9 @@ export async function GET(
       totalSlotsUnlockable = realisticSlotsUnlockable;
       potentialCoverage = Math.min(
         Math.round(
-          ((matching.totalAssigned + realisticSlotsUnlockable) / matching.totalRequired) * 100,
+          ((matching.totalAssigned + realisticSlotsUnlockable) / matching.totalRequired) * 100
         ),
-        95,
+        95
       );
     }
 
@@ -262,7 +332,9 @@ export async function GET(
       incompletePhases:
         phaseFilter && categoryFilter
           ? incompletePhases.filter(
-              (p) => p.phase === parseInt(phaseFilter, 10) && p.category === categoryFilter,
+              (phase) =>
+                phase.phase === parseInt(phaseFilter, 10) &&
+                phase.category === categoryFilter
             )
           : incompletePhases,
       memberRecommendations,
@@ -278,7 +350,7 @@ export async function GET(
     console.error('Upgrade recommendations error:', error);
     return NextResponse.json(
       { error: 'Failed to generate upgrade recommendations' },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
