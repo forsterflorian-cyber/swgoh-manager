@@ -94,23 +94,18 @@ function calculateRelicStepRecommendations(
       slot.requiredRelic <= 8
   );
 
-  const targetRelics = [...new Set(eligibleSlots.map(slot => slot.requiredRelic))].sort(
-    (a, b) => a - b
-  );
-
   const steps: Array<{
     fromRelic: number;
     toRelic: number;
     slotsByPhase: Map<string, number>;
   }> = [];
 
-  let previousRelic = memberRelic;
-
-  for (const targetRelic of targetRelics) {
+  for (let targetRelic = memberRelic + 1; targetRelic <= 8; targetRelic++) {
+    const previousRelic = targetRelic - 1;
     const slotsByPhase = new Map<string, number>();
 
     for (const slot of eligibleSlots) {
-      if (slot.requiredRelic > previousRelic && slot.requiredRelic <= targetRelic) {
+      if (slot.requiredRelic === targetRelic) {
         const key = `${slot.phase}:${slot.category}`;
         slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
       }
@@ -123,8 +118,6 @@ function calculateRelicStepRecommendations(
         slotsByPhase,
       });
     }
-
-    previousRelic = targetRelic;
   }
 
   return steps;
@@ -426,19 +419,33 @@ const memberRecommendations: MemberRecommendation[] = activeMembers
     }
 
     // Sortiere nach Impact
-    recommendations.sort((a, b) => b.impactScore - a.impactScore);
+const bestNextStepByUnit = new Map<string, UpgradeRecommendation>();
 
-    // Pro Unit nur die beste Recommendation behalten
-    const bestRecommendationByUnit = new Map<string, UpgradeRecommendation>();
-    for (const rec of recommendations) {
-      const existing = bestRecommendationByUnit.get(rec.unitBaseId);
-      if (!existing || rec.impactScore > existing.impactScore) {
-        bestRecommendationByUnit.set(rec.unitBaseId, rec);
-      }
-    }
+for (const rec of recommendations) {
+  const existing = bestNextStepByUnit.get(rec.unitBaseId);
 
-    const dedupedRecommendations = Array.from(bestRecommendationByUnit.values());
-    dedupedRecommendations.sort((a, b) => b.impactScore - a.impactScore);
+  if (!existing) {
+    bestNextStepByUnit.set(rec.unitBaseId, rec);
+    continue;
+  }
+
+  const recStepSize = rec.toRelic - rec.fromRelic;
+  const existingStepSize = existing.toRelic - existing.fromRelic;
+
+  const isBetterNextStep =
+    recStepSize < existingStepSize ||
+    (recStepSize === existingStepSize && rec.impactScore > existing.impactScore) ||
+    (recStepSize === existingStepSize &&
+      rec.impactScore === existing.impactScore &&
+      rec.toRelic < existing.toRelic);
+
+  if (isBetterNextStep) {
+    bestNextStepByUnit.set(rec.unitBaseId, rec);
+  }
+}
+
+const dedupedRecommendations = Array.from(bestNextStepByUnit.values());
+dedupedRecommendations.sort((a, b) => b.impactScore - a.impactScore);
 
     // Nur Recommendations für unvollständige Coverage behalten
     let filteredRecommendations = dedupedRecommendations.filter(rec =>
