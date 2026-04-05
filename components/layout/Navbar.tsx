@@ -4,13 +4,13 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+import { LayoutDashboard, Settings, UserRound, Swords, ClipboardList, ArrowUpRight } from 'lucide-react';
 
 import { LogoutButton } from '@/components/auth/logout-button';
+import { WorkspaceSwitcher, type WorkspaceMode } from '@/components/layout/WorkspaceSwitcher';
 import type { ApiEnvelope } from '@/lib/types/api';
 import { cn } from '@/lib/utils/cn';
 import { routes } from '@/lib/utils/routes';
-
-import { WorkspaceSwitcher, type WorkspaceMode } from './WorkspaceSwitcher';
 
 type NavContext = {
   adminGuild: {
@@ -24,23 +24,29 @@ type NavContext = {
   } | null;
 };
 
-type NavLink = { href: string; label: string; hint?: string };
+type NavItem = {
+  href: string;
+  label: string;
+  hint: string;
+  icon: React.ReactNode;
+};
 
-function WorkspaceLink({ href, label, hint, pathname }: NavLink & { pathname: string }) {
-  const active = pathname === href || pathname.startsWith(href + '/');
-
+function NavPill({ item, active }: { item: NavItem; active: boolean }) {
   return (
     <Link
-      href={href}
+      href={item.href}
       className={cn(
-        'rounded-2xl border px-4 py-3 transition-colors',
+        'group rounded-2xl border px-3 py-2 transition-colors',
         active
-          ? 'border-indigo-500/60 bg-indigo-950/50 text-white'
-          : 'border-slate-800 bg-slate-900/70 text-slate-200 hover:border-slate-700 hover:bg-slate-900'
+          ? 'border-blue-500 bg-blue-950/60 text-blue-100'
+          : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/20 hover:bg-white/[0.06] hover:text-white',
       )}
     >
-      <div className="text-sm font-medium">{label}</div>
-      {hint ? <div className="mt-1 text-xs text-slate-400">{hint}</div> : null}
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className={cn('text-slate-500', active && 'text-blue-300')}>{item.icon}</span>
+        {item.label}
+      </div>
+      <div className="mt-1 text-xs text-slate-500 group-hover:text-slate-400">{item.hint}</div>
     </Link>
   );
 }
@@ -49,7 +55,7 @@ export function Navbar() {
   const pathname = usePathname();
   const { data: session, status } = useSession();
   const [ctx, setCtx] = useState<NavContext | null>(null);
-  const [workspace, setWorkspace] = useState<WorkspaceMode>('admin');
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('officer');
 
   const displayName = session?.user?.name?.trim() || session?.user?.email?.trim() || null;
 
@@ -59,154 +65,126 @@ export function Navbar() {
     fetch('/api/me/nav-context')
       .then((r) => r.json())
       .then((payload: ApiEnvelope<NavContext>) => {
-        if (payload.ok) setCtx(payload.data);
+        if (payload.ok) {
+          setCtx(payload.data);
+        }
       })
       .catch(() => {
-        /* non-critical */
+        // non critical
       });
   }, [status]);
 
-  const hasAdminWorkspace = Boolean(ctx?.adminGuild);
-  const hasMemberWorkspace = Boolean(ctx?.memberGuild);
+  const availableModes = useMemo(() => {
+    const modes: WorkspaceMode[] = [];
+    if (ctx?.adminGuild) modes.push('officer');
+    if (ctx?.memberGuild) modes.push('member');
+    return modes;
+  }, [ctx]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem('swgoh-workspace-mode');
-    if (stored === 'admin' || stored === 'member') {
-      setWorkspace(stored);
+    if (availableModes.length === 1) {
+      setWorkspaceMode(availableModes[0]);
     }
-  }, []);
-
-  useEffect(() => {
-    if (hasAdminWorkspace && !hasMemberWorkspace) {
-      setWorkspace('admin');
-      return;
-    }
-
-    if (!hasAdminWorkspace && hasMemberWorkspace) {
-      setWorkspace('member');
-    }
-  }, [hasAdminWorkspace, hasMemberWorkspace]);
-
-  function handleWorkspaceChange(next: WorkspaceMode) {
-    setWorkspace(next);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('swgoh-workspace-mode', next);
-    }
-  }
-
-  const nav = useMemo(() => {
-    const adminLinks: NavLink[] = hasAdminWorkspace
-      ? [
-          { href: routes.dashboard(), label: 'Overview', hint: 'Guild health, sync, publishing' },
-          ...(ctx?.adminGuild?.canManageGuild
-            ? [{ href: routes.guildSettings(), label: 'Guild settings', hint: 'Guild setup, roles and sync' }]
-            : []),
-          ctx?.adminGuild
-            ? {
-                href: routes.publicGuildBoard(ctx.adminGuild.slug),
-                label: 'Guild board',
-                hint: 'What members can see publicly',
-              }
-            : null,
-        ].filter(Boolean) as NavLink[]
-      : [];
-
-    const memberLinks: NavLink[] = ctx?.memberGuild
-      ? [
-          { href: routes.guildAssignments(ctx.memberGuild.slug), label: 'My assignments', hint: 'Your published tasks' },
-          { href: routes.guildRegistration(ctx.memberGuild.slug), label: 'Registration', hint: 'Link ally code and guild' },
-          { href: routes.publicMatching(ctx.memberGuild.slug), label: 'Matching board', hint: 'Missing units and coverage' },
-          { href: routes.publicSimulator(ctx.memberGuild.slug), label: 'Planner', hint: 'Read-only planning view' },
-        ]
-      : [];
-
-    const activeWorkspace: WorkspaceMode = workspace === 'member' && hasMemberWorkspace ? 'member' : 'admin';
-
-    return {
-      activeWorkspace,
-      links: activeWorkspace === 'member' ? memberLinks : adminLinks,
-      guildName:
-        activeWorkspace === 'member'
-          ? ctx?.memberGuild?.name ?? ctx?.adminGuild?.name ?? null
-          : ctx?.adminGuild?.name ?? ctx?.memberGuild?.name ?? null,
-      guildSlug:
-        activeWorkspace === 'member'
-          ? ctx?.memberGuild?.slug ?? ctx?.adminGuild?.slug ?? null
-          : ctx?.adminGuild?.slug ?? ctx?.memberGuild?.slug ?? null,
-      subtitle:
-        activeWorkspace === 'member'
-          ? 'Member workflow'
-          : hasAdminWorkspace
-            ? 'Officer workflow'
-            : 'Workspace',
-    };
-  }, [ctx, hasAdminWorkspace, hasMemberWorkspace, workspace]);
+  }, [availableModes]);
 
   if (status !== 'authenticated' || !displayName) {
     return null;
   }
 
+  const officerItems: NavItem[] = [
+    {
+      href: routes.dashboard(),
+      label: 'Overview',
+      hint: 'Guild status and sync health',
+      icon: <LayoutDashboard className="h-4 w-4" />,
+    },
+    {
+      href: routes.guildSettings(),
+      label: 'Setup',
+      hint: 'Guild identity and sharing',
+      icon: <Settings className="h-4 w-4" />,
+    },
+    ...(ctx?.adminGuild?.slug
+      ? [
+          {
+            href: routes.matching(ctx.adminGuild.slug),
+            label: 'Public board',
+            hint: 'Member-facing matching view',
+            icon: <ArrowUpRight className="h-4 w-4" />,
+          },
+        ]
+      : []),
+  ];
+
+  const memberItems: NavItem[] = ctx?.memberGuild
+    ? [
+        {
+          href: routes.registration(ctx.memberGuild.slug),
+          label: 'Identity',
+          hint: 'Register your ally code',
+          icon: <UserRound className="h-4 w-4" />,
+        },
+        {
+          href: routes.assignments(ctx.memberGuild.slug),
+          label: 'Assignments',
+          hint: 'Your current platoon tasks',
+          icon: <ClipboardList className="h-4 w-4" />,
+        },
+        {
+          href: routes.matching(ctx.memberGuild.slug),
+          label: 'Guild board',
+          hint: 'Read-only planning view',
+          icon: <Swords className="h-4 w-4" />,
+        },
+      ]
+    : [];
+
+  const visibleItems = workspaceMode === 'member' && memberItems.length > 0 ? memberItems : officerItems;
+  const guildLabel = workspaceMode === 'member' ? ctx?.memberGuild?.name : ctx?.adminGuild?.name;
+  const guildHref = workspaceMode === 'member' && ctx?.memberGuild ? routes.publicGuild(ctx.memberGuild.slug) : ctx?.adminGuild?.slug ? routes.publicGuild(ctx.adminGuild.slug) : undefined;
+
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-800 bg-[rgba(2,6,23,0.92)] backdrop-blur-xl">
-      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/85 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-5">
-              <Link href={routes.dashboard()} className="shrink-0">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-indigo-300">
-                  SWGOH Manager
-                </div>
-                <div className="mt-1 text-sm text-slate-400">Guild operations, assignments and platoon planning</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link href={routes.dashboard()} className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-300">
+                SWGOH Manager
               </Link>
-
-              <WorkspaceSwitcher
-                value={nav.activeWorkspace}
-                onChange={handleWorkspaceChange}
-                adminAvailable={hasAdminWorkspace}
-                memberAvailable={hasMemberWorkspace}
-              />
+              {availableModes.length > 1 ? (
+                <WorkspaceSwitcher
+                  options={[
+                    { id: 'officer', label: 'Officer workspace', description: 'Setup, sync and publishing' },
+                    { id: 'member', label: 'Member workspace', description: 'Registration and assignments' },
+                  ].filter((option) => availableModes.includes(option.id))}
+                  defaultMode={availableModes.includes('officer') ? 'officer' : 'member'}
+                  onChange={setWorkspaceMode}
+                />
+              ) : null}
             </div>
-
-            <nav className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {nav.links.length > 0 ? (
-                nav.links.map((link) => (
-                  <WorkspaceLink
-                    key={link.href}
-                    href={link.href}
-                    label={link.label}
-                    hint={link.hint}
-                    pathname={pathname}
-                  />
-                ))
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-400">
-                  No workspace is connected yet. Start with guild setup or member registration.
-                </div>
-              )}
-            </nav>
+            {guildLabel ? (
+              <div className="text-sm text-slate-400">
+                <span className="text-slate-500">Current workspace:</span>{' '}
+                {guildHref ? <Link href={guildHref} className="font-medium text-slate-200 hover:text-white">{guildLabel}</Link> : guildLabel}
+              </div>
+            ) : null}
           </div>
 
-          <div className="flex flex-col gap-3 xl:items-end">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 xl:min-w-[18rem]">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">{nav.subtitle}</div>
-              <div className="mt-2 text-sm font-medium text-white">{displayName}</div>
-              {nav.guildName && nav.guildSlug ? (
-                <Link href={routes.publicGuildBoard(nav.guildSlug)} className="mt-1 block text-sm text-slate-400 hover:text-slate-200">
-                  {nav.guildName}
-                </Link>
-              ) : (
-                <div className="mt-1 text-sm text-slate-500">No guild selected</div>
-              )}
+          <div className="flex items-center gap-3 self-start lg:self-auto">
+            <div className="text-right">
+              <div className="text-sm font-medium text-slate-100">{displayName}</div>
+              <div className="text-xs text-slate-500">{workspaceMode === 'member' ? 'Member mode' : 'Officer mode'}</div>
             </div>
-            <div className="flex items-center gap-2">
-              <Link href={routes.home()} className="rounded-xl border border-slate-800 px-3 py-2 text-sm text-slate-300 transition-colors hover:border-slate-700 hover:text-white">
-                Home
-              </Link>
-              <LogoutButton />
-            </div>
+            <LogoutButton />
           </div>
         </div>
+
+        <nav className="grid gap-2 md:grid-cols-3 xl:grid-cols-4">
+          {visibleItems.map((item) => (
+            <NavPill key={item.href} item={item} active={pathname === item.href || pathname.startsWith(item.href + '/')} />
+          ))}
+        </nav>
       </div>
     </header>
   );
