@@ -17,22 +17,18 @@ type UpgradeRecommendation = {
   recommendedRelic: number;
   fromRelic: number;
   toRelic: number;
-
-  // Operativ: ein Char kann genau einmal gesetzt werden.
-  slotsUnlocked: number; // immer 1 pro Recommendation
-  matchingOpenSlots: number; // wie viele offene Gaps dieser Step theoretisch matcht
-
+  slotsUnlocked: number;
+  matchingOpenSlots: number;
   affectedPhases: {
     phase: number;
     category: string;
     currentCoverage: number;
     newCoverage: number;
-    slotsAdded: number; // immer 1
+    slotsAdded: number;
   }[];
-
   estimatedCost: number;
-  impactScore: number; // fachlicher Score für Anzeige
-  finalScore: number; // Ranking-Score nach globaler Diversifizierung
+  impactScore: number; // Basis-Score für Anzeige
+  finalScore: number; // Ranking-Score nach Diversifizierung
   priority: 'top' | 'good' | 'longterm';
   primaryReason:
     | 'unique_upgrade'
@@ -77,18 +73,18 @@ function determinePriority(
   primaryReason: UpgradeRecommendation['primaryReason']
 ): UpgradeRecommendation['priority'] {
   if (primaryReason === 'unique_upgrade' || primaryReason === 'scarce_unit') {
-    return upgradeScore >= 34 ? 'top' : upgradeScore >= 18 ? 'good' : 'longterm';
+    return upgradeScore >= 28 ? 'top' : upgradeScore >= 15 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'good_tradeoff') {
-    return upgradeScore >= 30 ? 'top' : upgradeScore >= 16 ? 'good' : 'longterm';
+    return upgradeScore >= 24 ? 'top' : upgradeScore >= 13 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'broad_match') {
-    return upgradeScore >= 32 ? 'top' : upgradeScore >= 17 ? 'good' : 'longterm';
+    return upgradeScore >= 22 ? 'top' : upgradeScore >= 12 ? 'good' : 'longterm';
   }
 
-  return upgradeScore >= 15 ? 'good' : 'longterm';
+  return upgradeScore >= 11 ? 'good' : 'longterm';
 }
 
 function getPrimaryReason(input: {
@@ -100,7 +96,7 @@ function getPrimaryReason(input: {
 }): UpgradeRecommendation['primaryReason'] {
   if (input.exactStepMemberCount === 1) return 'unique_upgrade';
   if (input.unitDistinctMemberCount <= 2) return 'scarce_unit';
-  if (input.stepSize === 1 && input.impactScore >= 16) return 'good_tradeoff';
+  if (input.stepSize === 1 && input.impactScore >= 13) return 'good_tradeoff';
   if (input.matchingOpenSlots >= 3) return 'broad_match';
   return 'longterm';
 }
@@ -319,40 +315,51 @@ export async function GET(
               `${unitBaseId}:${best.fromRelic}:${best.toRelic}`
             )?.size ?? 1;
 
-          // Härterer Guild-Kontext:
-          // seltene / einzigartige Upgrades deutlich bevorzugen,
-          // überall verfügbare Standard-Units deutlich herunterstufen.
+          // Neue, stabile Basis-Logik:
+          // - niemals negative Anzeige-Scores
+          // - ein Slot ist grundsätzlich wertvoll
+          // - Knappheit/Einzigartigkeit erhöhen den Wert deutlich
+          // - große Schritte / hohe Kosten drücken moderat
+          const immediateValue = 12;
+          const completionBonus = bestImmediateTarget.completesZone ? 8 : 0;
+
           const scarcityRatio = unitOpenGapCount / Math.max(1, unitDistinctMemberCount);
-          const scarcityBonus = Math.min(40, scarcityRatio * 12);
+          const scarcityBonus = Math.min(14, scarcityRatio * 4);
 
           const exactStepUniquenessBonus =
             exactStepMemberCount === 1
-              ? 30
+              ? 12
               : exactStepMemberCount === 2
-                ? 22
+                ? 9
                 : exactStepMemberCount === 3
-                  ? 14
-                  : Math.max(0, 10 - (exactStepMemberCount - 4) * 2);
+                  ? 6
+                  : 2;
 
-          const ubiquityPenalty = Math.max(0, (unitDistinctMemberCount - 2) * 3.5);
-          const largeStepPenalty = (stepSize - 1) * 10;
-          const costPenalty = Math.max(0, cost / 160 - 2);
-          const matchingPenalty = Math.max(0, (matchingOpenSlots - 2) * 0.8);
+          const broadMatchBonus = Math.min(4, Math.max(0, matchingOpenSlots - 1) * 1.2);
 
-          const completionBonus =
-            bestImmediateTarget.completesZone ? 16 : 0;
+          const stepPenalty = (stepSize - 1) * 4;
+          const costPenalty =
+            cost <= 500
+              ? 0
+              : cost <= 1000
+                ? 2
+                : 5;
 
-          const impactScore = round2(
-            best.score +
-              scarcityBonus +
-              exactStepUniquenessBonus +
-              completionBonus -
-              ubiquityPenalty -
-              largeStepPenalty -
-              costPenalty -
-              matchingPenalty -
-              memberContributions * 0.25
-          );
+          const ubiquityPenalty = Math.max(0, unitDistinctMemberCount - 6) * 0.8;
+          const contributionPenalty = Math.min(4, memberContributions * 0.08);
+
+          const rawImpactScore =
+            immediateValue +
+            completionBonus +
+            scarcityBonus +
+            exactStepUniquenessBonus +
+            broadMatchBonus -
+            stepPenalty -
+            costPenalty -
+            ubiquityPenalty -
+            contributionPenalty;
+
+          const impactScore = Math.max(1, round2(rawImpactScore));
 
           const primaryReason = getPrimaryReason({
             exactStepMemberCount,
@@ -420,11 +427,13 @@ export async function GET(
       const rescored = memberRecommendation.recommendations
         .map((recommendation) => {
           const usage = globalUnitUsage.get(recommendation.unitBaseId) ?? 0;
-          const diversityPenalty = round2(Math.log2(usage + 1) * 7);
+
+          // Nur fürs Ranking, nicht für die Anzeige.
+          const diversityPenalty = round2(Math.log2(usage + 1) * 2.5);
 
           const finalScore = round2(
             Math.max(
-              recommendation.impactScore * 0.45,
+              recommendation.impactScore * 0.55,
               recommendation.impactScore - diversityPenalty
             )
           );
@@ -455,7 +464,7 @@ export async function GET(
         if (seenUnits.has(recommendation.unitBaseId)) continue;
 
         const isLargeMetaStep =
-          recommendation.impactScore >= 35 &&
+          recommendation.impactScore >= 24 &&
           recommendation.toRelic - recommendation.fromRelic >= 2;
 
         if (isLargeMetaStep && hasLargeMetaStep) {
