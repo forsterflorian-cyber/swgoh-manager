@@ -17,27 +17,19 @@ type UpgradeRecommendation = {
   recommendedRelic: number;
   fromRelic: number;
   toRelic: number;
-
-  // Operativer Wert
-  slotsUnlocked: number; // realistisch sofort nutzbar
-  matchingOpenSlots: number; // theoretisch passende offene Gaps
-
+  slotsUnlocked: number;
+  matchingOpenSlots: number;
   affectedPhases: {
     phase: number;
     category: string;
     currentCoverage: number;
     newCoverage: number;
-    slotsAdded: number; // bewusst max. 1 pro Phase/Kategorie
+    slotsAdded: number;
   }[];
-
   estimatedCost: number;
-
-  // Ranking / UI
-  impactScore: number; // fachlicher Basis-Score für Anzeige
-  finalScore: number; // Score nach globaler Diversifizierung
-  priority: 'top' | 'good' | 'niche' | 'longterm';
-
-  // UI-Erklärung
+  impactScore: number;
+  finalScore: number;
+  priority: 'top' | 'good' | 'longterm';
   primaryReason:
     | 'unique_upgrade'
     | 'scarce_unit'
@@ -81,15 +73,15 @@ function determinePriority(
   primaryReason: UpgradeRecommendation['primaryReason']
 ): UpgradeRecommendation['priority'] {
   if (primaryReason === 'unique_upgrade' || primaryReason === 'scarce_unit') {
-    return upgradeScore >= 42 ? 'top' : upgradeScore >= 24 ? 'good' : 'niche';
+    return upgradeScore >= 42 ? 'top' : upgradeScore >= 24 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'good_tradeoff') {
-    return upgradeScore >= 36 ? 'top' : upgradeScore >= 22 ? 'good' : 'niche';
+    return upgradeScore >= 36 ? 'top' : upgradeScore >= 22 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'broad_match') {
-    return upgradeScore >= 38 ? 'top' : upgradeScore >= 20 ? 'good' : 'niche';
+    return upgradeScore >= 38 ? 'top' : upgradeScore >= 20 ? 'good' : 'longterm';
   }
 
   return upgradeScore >= 24 ? 'good' : 'longterm';
@@ -243,7 +235,6 @@ export async function GET(
               candidate.missingRarity === best.missingRarity
           );
 
-          // Operative Realität: pro Phase/Kategorie nur 1 sofort nutzbarer Zusatzslot.
           const affectedPhasesMap = new Map<string, number>();
           for (const candidate of exactStepMatches) {
             const key = `${candidate.phase}:${candidate.category}`;
@@ -287,9 +278,6 @@ export async function GET(
               `${unitBaseId}:${best.fromRelic}:${best.toRelic}`
             )?.size ?? 1;
 
-          // Guild-Kontext:
-          // - seltene / einzigartige Schritte stark belohnen
-          // - breite, aber überall verfügbare Meta-Schritte etwas dämpfen
           const scarcityRatio = unitOpenGapCount / Math.max(1, unitDistinctMemberCount);
           const scarcityBonus = Math.min(28, scarcityRatio * 8);
 
@@ -383,7 +371,6 @@ export async function GET(
       return a.playerName.localeCompare(b.playerName);
     });
 
-    // Globale Diversifizierung nur fürs Ranking, nicht für den sichtbaren Basis-Score.
     const globalUnitUsage = new Map<string, number>();
 
     for (const memberRecommendation of memberRecommendations) {
