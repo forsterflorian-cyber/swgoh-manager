@@ -17,18 +17,22 @@ type UpgradeRecommendation = {
   recommendedRelic: number;
   fromRelic: number;
   toRelic: number;
-  slotsUnlocked: number;
-  matchingOpenSlots: number;
+
+  // Operativ: ein Char kann genau einmal gesetzt werden.
+  slotsUnlocked: number; // immer 1 pro Recommendation
+  matchingOpenSlots: number; // wie viele offene Gaps dieser Step theoretisch matcht
+
   affectedPhases: {
     phase: number;
     category: string;
     currentCoverage: number;
     newCoverage: number;
-    slotsAdded: number;
+    slotsAdded: number; // immer 1
   }[];
+
   estimatedCost: number;
-  impactScore: number;
-  finalScore: number;
+  impactScore: number; // fachlicher Score für Anzeige
+  finalScore: number; // Ranking-Score nach globaler Diversifizierung
   priority: 'top' | 'good' | 'longterm';
   primaryReason:
     | 'unique_upgrade'
@@ -73,34 +77,31 @@ function determinePriority(
   primaryReason: UpgradeRecommendation['primaryReason']
 ): UpgradeRecommendation['priority'] {
   if (primaryReason === 'unique_upgrade' || primaryReason === 'scarce_unit') {
-    return upgradeScore >= 42 ? 'top' : upgradeScore >= 24 ? 'good' : 'longterm';
+    return upgradeScore >= 34 ? 'top' : upgradeScore >= 18 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'good_tradeoff') {
-    return upgradeScore >= 36 ? 'top' : upgradeScore >= 22 ? 'good' : 'longterm';
+    return upgradeScore >= 30 ? 'top' : upgradeScore >= 16 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'broad_match') {
-    return upgradeScore >= 38 ? 'top' : upgradeScore >= 20 ? 'good' : 'longterm';
+    return upgradeScore >= 32 ? 'top' : upgradeScore >= 17 ? 'good' : 'longterm';
   }
 
-  return upgradeScore >= 24 ? 'good' : 'longterm';
+  return upgradeScore >= 15 ? 'good' : 'longterm';
 }
 
 function getPrimaryReason(input: {
   exactStepMemberCount: number;
   unitDistinctMemberCount: number;
-  slotsUnlocked: number;
   matchingOpenSlots: number;
   stepSize: number;
   impactScore: number;
 }): UpgradeRecommendation['primaryReason'] {
   if (input.exactStepMemberCount === 1) return 'unique_upgrade';
   if (input.unitDistinctMemberCount <= 2) return 'scarce_unit';
-  if (input.stepSize === 1 && input.slotsUnlocked >= 1 && input.impactScore >= 24) {
-    return 'good_tradeoff';
-  }
-  if (input.matchingOpenSlots >= 3 || input.slotsUnlocked >= 2) return 'broad_match';
+  if (input.stepSize === 1 && input.impactScore >= 16) return 'good_tradeoff';
+  if (input.matchingOpenSlots >= 3) return 'broad_match';
   return 'longterm';
 }
 
@@ -112,6 +113,54 @@ function buildSetMap(values: Array<[string, string]>): Map<string, Set<string>> 
     map.set(key, existing);
   }
   return map;
+}
+
+function pickBestImmediateTarget(
+  matching: ReturnType<typeof computePlatoonMatching>,
+  candidates: Array<{
+    phase: number;
+    category: string;
+  }>
+) {
+  const uniqueKeys = new Set(candidates.map((c) => `${c.phase}:${c.category}`));
+
+  const phaseEntries = Array.from(uniqueKeys).map((key) => {
+    const [phaseRaw, category] = key.split(':');
+    const phase = parseInt(phaseRaw, 10);
+    const coverage = matching.coverage.find(
+      (c) => c.phase === phase && c.category === category
+    );
+
+    const currentCoverage = coverage?.coveragePercent || 0;
+    const requirementCount = coverage?.requirementCount || 0;
+    const assignedCount = coverage?.assignedCount || 0;
+    const openSlots = Math.max(0, requirementCount - assignedCount);
+    const newCoverage = coverage
+      ? Math.min(
+          100,
+          Math.round(((assignedCount + 1) / requirementCount) * 100)
+        )
+      : 0;
+
+    return {
+      phase,
+      category,
+      currentCoverage,
+      newCoverage,
+      openSlots,
+      completesZone: currentCoverage < 100 && newCoverage === 100,
+    };
+  });
+
+  phaseEntries.sort((a, b) => {
+    if (a.completesZone !== b.completesZone) return a.completesZone ? -1 : 1;
+    if (a.openSlots !== b.openSlots) return b.openSlots - a.openSlots;
+    if (a.currentCoverage !== b.currentCoverage) return a.currentCoverage - b.currentCoverage;
+    if (a.phase !== b.phase) return a.phase - b.phase;
+    return a.category.localeCompare(b.category);
+  });
+
+  return phaseEntries[0] ?? null;
 }
 
 export async function GET(
@@ -235,37 +284,29 @@ export async function GET(
               candidate.missingRarity === best.missingRarity
           );
 
-          const affectedPhasesMap = new Map<string, number>();
-          for (const candidate of exactStepMatches) {
-            const key = `${candidate.phase}:${candidate.category}`;
-            affectedPhasesMap.set(key, 1);
+          const bestImmediateTarget = pickBestImmediateTarget(
+            matching,
+            exactStepMatches.map((candidate) => ({
+              phase: candidate.phase,
+              category: candidate.category,
+            }))
+          );
+
+          if (!bestImmediateTarget) {
+            return null;
           }
 
-          const affectedPhases = Array.from(affectedPhasesMap.entries()).map(([key]) => {
-            const [phase, category] = key.split(':');
-            const phaseNum = parseInt(phase, 10);
-
-            const coverage = matching.coverage.find(
-              (c) => c.phase === phaseNum && c.category === category
-            );
-
-            return {
-              phase: phaseNum,
-              category,
-              currentCoverage: coverage?.coveragePercent || 0,
-              newCoverage: coverage
-                ? Math.min(
-                    100,
-                    Math.round(
-                      ((coverage.assignedCount + 1) / coverage.requirementCount) * 100
-                    )
-                  )
-                : 0,
+          const affectedPhases = [
+            {
+              phase: bestImmediateTarget.phase,
+              category: bestImmediateTarget.category,
+              currentCoverage: bestImmediateTarget.currentCoverage,
+              newCoverage: bestImmediateTarget.newCoverage,
               slotsAdded: 1,
-            };
-          });
+            },
+          ];
 
-          const slotsUnlocked = Math.max(1, affectedPhases.length);
+          const slotsUnlocked = 1;
           const matchingOpenSlots = exactStepMatches.length;
 
           const stepSize = Math.max(1, best.toRelic - best.fromRelic);
@@ -278,41 +319,44 @@ export async function GET(
               `${unitBaseId}:${best.fromRelic}:${best.toRelic}`
             )?.size ?? 1;
 
+          // Härterer Guild-Kontext:
+          // seltene / einzigartige Upgrades deutlich bevorzugen,
+          // überall verfügbare Standard-Units deutlich herunterstufen.
           const scarcityRatio = unitOpenGapCount / Math.max(1, unitDistinctMemberCount);
-          const scarcityBonus = Math.min(28, scarcityRatio * 8);
+          const scarcityBonus = Math.min(40, scarcityRatio * 12);
 
           const exactStepUniquenessBonus =
             exactStepMemberCount === 1
-              ? 20
-              : Math.max(0, 16 - (exactStepMemberCount - 1) * 2);
+              ? 30
+              : exactStepMemberCount === 2
+                ? 22
+                : exactStepMemberCount === 3
+                  ? 14
+                  : Math.max(0, 10 - (exactStepMemberCount - 4) * 2);
 
-          const ubiquityPenalty = Math.max(0, (unitDistinctMemberCount - 3) * 1.5);
-          const largeStepPenalty = (stepSize - 1) * 8;
-          const costPenalty = Math.max(0, cost / 180 - 2);
-          const flexibilityBonus = Math.max(0, (slotsUnlocked - 1) * 3);
+          const ubiquityPenalty = Math.max(0, (unitDistinctMemberCount - 2) * 3.5);
+          const largeStepPenalty = (stepSize - 1) * 10;
+          const costPenalty = Math.max(0, cost / 160 - 2);
+          const matchingPenalty = Math.max(0, (matchingOpenSlots - 2) * 0.8);
 
-          const completionBonus = affectedPhases.reduce((sum, phase) => {
-            if (phase.currentCoverage < 100 && phase.newCoverage === 100) {
-              return sum + 12;
-            }
-            return sum;
-          }, 0);
+          const completionBonus =
+            bestImmediateTarget.completesZone ? 16 : 0;
 
           const impactScore = round2(
             best.score +
               scarcityBonus +
               exactStepUniquenessBonus +
-              flexibilityBonus +
               completionBonus -
               ubiquityPenalty -
               largeStepPenalty -
-              costPenalty
+              costPenalty -
+              matchingPenalty -
+              memberContributions * 0.25
           );
 
           const primaryReason = getPrimaryReason({
             exactStepMemberCount,
             unitDistinctMemberCount,
-            slotsUnlocked,
             matchingOpenSlots,
             stepSize,
             impactScore,
@@ -335,8 +379,10 @@ export async function GET(
             primaryReason,
           };
         })
+        .filter((recommendation): recommendation is UpgradeRecommendation => recommendation !== null)
         .sort((a, b) => {
           if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+          if (b.impactScore !== a.impactScore) return b.impactScore - a.impactScore;
           if (a.toRelic - a.fromRelic !== b.toRelic - b.fromRelic) {
             return (a.toRelic - a.fromRelic) - (b.toRelic - b.fromRelic);
           }
@@ -353,10 +399,7 @@ export async function GET(
           allyCode: member.allyCode,
           recommendations,
           currentContributions: memberContributions,
-          potentialGain: recommendations.reduce(
-            (sum, recommendation) => sum + recommendation.slotsUnlocked,
-            0
-          ),
+          potentialGain: recommendations.length,
         },
       ];
     });
@@ -377,7 +420,7 @@ export async function GET(
       const rescored = memberRecommendation.recommendations
         .map((recommendation) => {
           const usage = globalUnitUsage.get(recommendation.unitBaseId) ?? 0;
-          const diversityPenalty = round2(Math.log2(usage + 1) * 5);
+          const diversityPenalty = round2(Math.log2(usage + 1) * 7);
 
           const finalScore = round2(
             Math.max(
@@ -412,7 +455,7 @@ export async function GET(
         if (seenUnits.has(recommendation.unitBaseId)) continue;
 
         const isLargeMetaStep =
-          recommendation.impactScore >= 45 &&
+          recommendation.impactScore >= 35 &&
           recommendation.toRelic - recommendation.fromRelic >= 2;
 
         if (isLargeMetaStep && hasLargeMetaStep) {
@@ -425,10 +468,7 @@ export async function GET(
       }
 
       memberRecommendation.recommendations = picked;
-      memberRecommendation.potentialGain = picked.reduce(
-        (sum, recommendation) => sum + recommendation.slotsUnlocked,
-        0
-      );
+      memberRecommendation.potentialGain = picked.length;
 
       for (const recommendation of picked) {
         globalUnitUsage.set(
