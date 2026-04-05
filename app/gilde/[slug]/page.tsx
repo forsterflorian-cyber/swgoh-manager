@@ -2,7 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
+import { AppShell } from '@/components/layout/AppShell';
+import { Button } from '@/components/ui/Button';
+import { Eyebrow, Surface } from '@/components/ui/Surface';
+import { StatCard } from '@/components/ui/StatCard';
 import { getAppBaseUrl } from '@/lib/utils/base-url';
+import { routes } from '@/lib/utils/routes';
 
 type PublicAssignment = {
   playerName: string;
@@ -143,7 +148,7 @@ export default async function PublicGuildPage({
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard
+            <StatCard
               title="Live board"
               value={activeTB ? activeTB.name : 'None'}
               detail={
@@ -151,9 +156,9 @@ export default async function PublicGuildPage({
                   ? `${activeTB.totalPhases} phases · ${formatStatus(activeTB.status)}`
                   : 'No live assignment board is published right now'
               }
-              tone={activeTB ? 'info' : 'neutral'}
+              tone={activeTB ? 'info' : 'default'}
             />
-            <SummaryCard
+            <StatCard
               title="Assignments"
               value={`${totalAssignments}`}
               detail={
@@ -161,9 +166,9 @@ export default async function PublicGuildPage({
                   ? 'Published assignments on the current board'
                   : 'No assignments published yet'
               }
-              tone={totalAssignments > 0 ? 'positive' : 'neutral'}
+              tone={totalAssignments > 0 ? 'success' : 'default'}
             />
-            <SummaryCard
+            <StatCard
               title="Assigned members"
               value={`${assignedMembers}`}
               detail={
@@ -171,9 +176,9 @@ export default async function PublicGuildPage({
                   ? 'Members currently placed in platoon slots'
                   : 'No members assigned yet'
               }
-              tone={assignedMembers > 0 ? 'positive' : 'neutral'}
+              tone={assignedMembers > 0 ? 'success' : 'default'}
             />
-            <SummaryCard
+            <StatCard
               title="Guild members"
               value={`${members.length}`}
               detail={
@@ -181,18 +186,16 @@ export default async function PublicGuildPage({
                   ? 'Members available in the public roster view'
                   : 'No guild members have been imported yet'
               }
-              tone={members.length > 0 ? 'neutral' : 'warning'}
+              tone={members.length > 0 ? 'default' : 'warning'}
             />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <AppShell width="6xl">
         <section className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Assignment board
-            </p>
+          <Surface>
+            <Eyebrow>Assignment board</Eyebrow>
             <h2 className="mt-3 text-2xl font-semibold text-white">
               {activeTB ? activeTB.name : 'No live assignment board'}
             </h2>
@@ -201,22 +204,20 @@ export default async function PublicGuildPage({
                 ? 'Assignments below are grouped by phase and zone so members can find their current platoon responsibility quickly.'
                 : 'Guild leadership has not published live platoon assignments yet. Strategic readiness planning may still be happening in the protected planner.'}
             </p>
-          </div>
+          </Surface>
 
-          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Member access
-            </p>
+          <Surface>
+            <Eyebrow>Member access</Eyebrow>
             <p className="mt-3 text-sm text-gray-400">
               Need to update assignments or manage the planner? Use the protected guild dashboard.
             </p>
             <Link
-              href="/login"
-              className="mt-5 inline-flex rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              href={routes.login()}
+              className="mt-5 inline-flex"
             >
-              Log in to manage
+              <Button>Log in to manage</Button>
             </Link>
-          </div>
+          </Surface>
         </section>
 
         {activeTB && phaseEntries.length > 0 ? (
@@ -384,14 +385,14 @@ export default async function PublicGuildPage({
             </div>
           )}
         </section>
-      </main>
+      </AppShell>
 
       <footer className="mt-12 border-t border-gray-800">
         <div className="mx-auto max-w-6xl px-4 py-6 text-center text-sm text-gray-500">
           <p>SWGOH guild assignment board</p>
           <p className="mt-1">
             Guild leadership can{' '}
-            <Link href="/login" className="text-blue-400 hover:underline">
+            <Link href={routes.login()} className="text-blue-400 hover:underline">
               log in
             </Link>{' '}
             to manage assignments.
@@ -441,7 +442,7 @@ function StatusPill({
   return <span className={`rounded-full border px-3 py-1 ${toneClasses[tone]}`}>{label}</span>;
 }
 
-function SummaryCard({
+function LegacySummaryCard({
   title,
   value,
   detail,

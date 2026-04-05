@@ -7,6 +7,7 @@ import { useSession } from 'next-auth/react';
 
 import { LogoutButton } from '@/components/auth/logout-button';
 import type { ApiEnvelope } from '@/lib/types/api';
+import { routes } from '@/lib/utils/routes';
 
 type NavContext = {
   adminGuild: {
@@ -84,18 +85,18 @@ export function Navbar() {
   }
 
   const adminLinks: NavLink[] = [
-    { href: '/dashboard', label: 'Dashboard' },
+    { href: routes.dashboard(), label: 'Dashboard' },
     ...(ctx?.adminGuild?.canManageGuild
-      ? [{ href: '/settings/guild', label: 'Guild Settings' }]
+      ? [{ href: routes.guildSettings(), label: 'Guild Settings' }]
       : []),
   ];
 
   const memberLinks: NavLink[] = ctx?.memberGuild
     ? [
-        { href: `/gilde/${ctx.memberGuild.slug}/registrieren`, label: 'Registration' },
-        { href: `/public/guild/${ctx.memberGuild.slug}/matching`, label: 'Matching' },
-        { href: `/public/guild/${ctx.memberGuild.slug}/simulator`, label: 'Planner' },
-        { href: `/gilde/${ctx.memberGuild.slug}/meine-zuweisungen`, label: 'My Assignments' },
+        { href: routes.guildRegistration(ctx.memberGuild.slug), label: 'Registration' },
+        { href: routes.publicMatching(ctx.memberGuild.slug), label: 'Matching' },
+        { href: routes.publicSimulator(ctx.memberGuild.slug), label: 'Planner' },
+        { href: routes.guildAssignments(ctx.memberGuild.slug), label: 'My Assignments' },
       ]
     : [];
 
@@ -109,7 +110,7 @@ export function Navbar() {
         {/* Left: brand + nav areas */}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-5">
           <Link
-            href="/dashboard"
+            href={routes.dashboard()}
             className="shrink-0 text-sm font-semibold uppercase tracking-[0.2em] text-blue-300"
           >
             SWGOH Manager
@@ -137,7 +138,7 @@ export function Navbar() {
             <span className="text-sm font-medium text-gray-200">{displayName}</span>
             {guildName && guildSlug && (
               <Link
-                href={`/gilde/${guildSlug}`}
+                href={routes.publicGuildBoard(guildSlug)}
                 className="text-xs text-gray-500 hover:text-gray-400"
               >
                 {guildName}
