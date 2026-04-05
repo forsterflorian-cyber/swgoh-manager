@@ -258,7 +258,31 @@ export async function GET(
           return a.unitName.localeCompare(b.unitName);
         });
 
-      const topRecommendations = recommendations.slice(0, 3);
+const topRecommendations: UpgradeRecommendation[] = [];
+const seenUnitsForMember = new Set<string>();
+
+for (const recommendation of recommendations) {
+  if (topRecommendations.length >= 3) break;
+
+  // Nicht dieselbe Unit doppelt
+  if (seenUnitsForMember.has(recommendation.unitBaseId)) continue;
+
+  // Nur eine harte Meta-Empfehlung mit großem Schritt in die Top 3
+  const isLargeMetaStep =
+    recommendation.impactScore >= 40 &&
+    recommendation.toRelic - recommendation.fromRelic >= 2;
+
+  const alreadyHasLargeMetaStep = topRecommendations.some(
+    (rec) => rec.impactScore >= 40 && rec.toRelic - rec.fromRelic >= 2
+  );
+
+  if (isLargeMetaStep && alreadyHasLargeMetaStep) {
+    continue;
+  }
+
+  seenUnitsForMember.add(recommendation.unitBaseId);
+  topRecommendations.push(recommendation);
+}
       const potentialGain = topRecommendations.reduce(
         (sum, recommendation) => sum + recommendation.slotsUnlocked,
         0
@@ -275,7 +299,58 @@ export async function GET(
         },
       ];
     });
+    memberRecommendations.sort((a, b) => {
+  if (b.potentialGain !== a.potentialGain) {
+    return b.potentialGain - a.potentialGain;
+  }
 
+  if (a.currentContributions !== b.currentContributions) {
+    return a.currentContributions - b.currentContributions;
+  }
+
+  return a.playerName.localeCompare(b.playerName);
+});
+const globalUnitUsage = new Map<string, number>();
+
+for (const memberRecommendation of memberRecommendations) {
+  const rescored = memberRecommendation.recommendations
+    .map((recommendation) => {
+      const usage = globalUnitUsage.get(recommendation.unitBaseId) ?? 0;
+      const diversityPenalty = usage * 12;
+
+const rescoredImpact = Math.max(0, recommendation.impactScore - diversityPenalty);
+
+return {
+  ...recommendation,
+  impactScore: rescoredImpact,
+  priority: determinePriority(rescoredImpact),
+};
+    })
+    .sort((a, b) => {
+      if (b.impactScore !== a.impactScore) return b.impactScore - a.impactScore;
+
+      const aStep = a.toRelic - a.fromRelic;
+      const bStep = b.toRelic - b.fromRelic;
+      if (aStep !== bStep) return aStep - bStep;
+
+      if (a.estimatedCost !== b.estimatedCost) return a.estimatedCost - b.estimatedCost;
+
+      return a.unitName.localeCompare(b.unitName);
+    });
+
+  memberRecommendation.recommendations = rescored.slice(0, 3);
+
+for (const recommendation of memberRecommendation.recommendations) {
+  globalUnitUsage.set(
+    recommendation.unitBaseId,
+    (globalUnitUsage.get(recommendation.unitBaseId) ?? 0) + 1
+  );
+}
+  memberRecommendation.potentialGain = memberRecommendation.recommendations.reduce(
+    (sum, recommendation) => sum + recommendation.slotsUnlocked,
+    0
+  );
+}
     memberRecommendations.sort((a, b) => {
       if (b.potentialGain !== a.potentialGain) {
         return b.potentialGain - a.potentialGain;
