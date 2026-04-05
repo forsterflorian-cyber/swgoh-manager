@@ -17,8 +17,11 @@ type UpgradeRecommendation = {
   recommendedRelic: number;
   fromRelic: number;
   toRelic: number;
-  slotsUnlocked: number; // realistisch nutzbare zusätzliche Slots (max. 1 pro Phase/Kategorie)
-  matchingOpenSlots: number; // wie viele offene Gaps dieser Step grundsätzlich matchen würde
+
+  // Operativer Wert
+  slotsUnlocked: number; // realistisch sofort nutzbar
+  matchingOpenSlots: number; // theoretisch passende offene Gaps
+
   affectedPhases: {
     phase: number;
     category: string;
@@ -26,10 +29,21 @@ type UpgradeRecommendation = {
     newCoverage: number;
     slotsAdded: number; // bewusst max. 1 pro Phase/Kategorie
   }[];
+
   estimatedCost: number;
-  impactScore: number; // fachlicher Score für Anzeige
-  finalScore: number; // Ranking-Score inkl. globaler Diversifizierung
-  priority: 'top' | 'good' | 'longterm';
+
+  // Ranking / UI
+  impactScore: number; // fachlicher Basis-Score für Anzeige
+  finalScore: number; // Score nach globaler Diversifizierung
+  priority: 'top' | 'good' | 'niche' | 'longterm';
+
+  // UI-Erklärung
+  primaryReason:
+    | 'unique_upgrade'
+    | 'scarce_unit'
+    | 'good_tradeoff'
+    | 'broad_match'
+    | 'longterm';
 };
 
 type MemberRecommendation = {
@@ -58,14 +72,44 @@ type UpgradeRecommendationsResponse = {
   };
 };
 
-function determinePriority(upgradeScore: number): 'top' | 'good' | 'longterm' {
-  if (upgradeScore >= 55) return 'top';
-  if (upgradeScore >= 28) return 'good';
-  return 'longterm';
-}
-
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function determinePriority(
+  upgradeScore: number,
+  primaryReason: UpgradeRecommendation['primaryReason']
+): UpgradeRecommendation['priority'] {
+  if (primaryReason === 'unique_upgrade' || primaryReason === 'scarce_unit') {
+    return upgradeScore >= 42 ? 'top' : upgradeScore >= 24 ? 'good' : 'niche';
+  }
+
+  if (primaryReason === 'good_tradeoff') {
+    return upgradeScore >= 36 ? 'top' : upgradeScore >= 22 ? 'good' : 'niche';
+  }
+
+  if (primaryReason === 'broad_match') {
+    return upgradeScore >= 38 ? 'top' : upgradeScore >= 20 ? 'good' : 'niche';
+  }
+
+  return upgradeScore >= 24 ? 'good' : 'longterm';
+}
+
+function getPrimaryReason(input: {
+  exactStepMemberCount: number;
+  unitDistinctMemberCount: number;
+  slotsUnlocked: number;
+  matchingOpenSlots: number;
+  stepSize: number;
+  impactScore: number;
+}): UpgradeRecommendation['primaryReason'] {
+  if (input.exactStepMemberCount === 1) return 'unique_upgrade';
+  if (input.unitDistinctMemberCount <= 2) return 'scarce_unit';
+  if (input.stepSize === 1 && input.slotsUnlocked >= 1 && input.impactScore >= 24) {
+    return 'good_tradeoff';
+  }
+  if (input.matchingOpenSlots >= 3 || input.slotsUnlocked >= 2) return 'broad_match';
+  return 'longterm';
 }
 
 function buildSetMap(values: Array<[string, string]>): Map<string, Set<string>> {
@@ -134,7 +178,6 @@ export async function GET(
       contributionCountByMemberId,
     });
 
-    // Für echte Upgrade-Empfehlungen nur Upgrade-Kandidaten betrachten.
     let relevantCandidates = allGapCandidates.filter(
       (candidate) => candidate.actionType === 'upgrade'
     );
@@ -182,7 +225,6 @@ export async function GET(
 
       const recommendations: UpgradeRecommendation[] = Array.from(groupedByUnit.entries())
         .map(([unitBaseId, candidates]) => {
-          // Kleinster sinnvoller nächster Schritt zuerst.
           candidates.sort(
             (a, b) =>
               a.missingRelicTiers - b.missingRelicTiers ||
@@ -201,7 +243,7 @@ export async function GET(
               candidate.missingRarity === best.missingRarity
           );
 
-          // Realistische Nutzbarkeit: max. 1 Slot pro Phase/Kategorie.
+          // Operative Realität: pro Phase/Kategorie nur 1 sofort nutzbarer Zusatzslot.
           const affectedPhasesMap = new Map<string, number>();
           for (const candidate of exactStepMatches) {
             const key = `${candidate.phase}:${candidate.category}`;
@@ -245,8 +287,9 @@ export async function GET(
               `${unitBaseId}:${best.fromRelic}:${best.toRelic}`
             )?.size ?? 1;
 
-          // Wenn wenige Members diese Unit / genau diesen Step liefern können,
-          // steigt die Priorität deutlich.
+          // Guild-Kontext:
+          // - seltene / einzigartige Schritte stark belohnen
+          // - breite, aber überall verfügbare Meta-Schritte etwas dämpfen
           const scarcityRatio = unitOpenGapCount / Math.max(1, unitDistinctMemberCount);
           const scarcityBonus = Math.min(28, scarcityRatio * 8);
 
@@ -278,6 +321,15 @@ export async function GET(
               costPenalty
           );
 
+          const primaryReason = getPrimaryReason({
+            exactStepMemberCount,
+            unitDistinctMemberCount,
+            slotsUnlocked,
+            matchingOpenSlots,
+            stepSize,
+            impactScore,
+          });
+
           return {
             unitBaseId,
             unitName: best.unitName,
@@ -291,7 +343,8 @@ export async function GET(
             estimatedCost: cost,
             impactScore,
             finalScore: impactScore,
-            priority: determinePriority(impactScore),
+            priority: determinePriority(impactScore, primaryReason),
+            primaryReason,
           };
         })
         .sort((a, b) => {
@@ -320,7 +373,6 @@ export async function GET(
       ];
     });
 
-    // Erst Members grob nach Potenzial vorsortieren.
     memberRecommendations.sort((a, b) => {
       if (b.potentialGain !== a.potentialGain) {
         return b.potentialGain - a.potentialGain;
@@ -331,8 +383,7 @@ export async function GET(
       return a.playerName.localeCompare(b.playerName);
     });
 
-    // Danach globale Diversifizierung:
-    // häufig bereits vergebene Units verlieren nur fürs Ranking etwas an Gewicht.
+    // Globale Diversifizierung nur fürs Ranking, nicht für den sichtbaren Basis-Score.
     const globalUnitUsage = new Map<string, number>();
 
     for (const memberRecommendation of memberRecommendations) {
