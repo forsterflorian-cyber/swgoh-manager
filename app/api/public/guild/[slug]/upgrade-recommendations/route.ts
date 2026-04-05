@@ -72,8 +72,8 @@ function determinePriority(
   upgradeScore: number,
   _primaryReason: UpgradeRecommendation['primaryReason']
 ): UpgradeRecommendation['priority'] {
-  if (upgradeScore >= 18) return 'top';
-  if (upgradeScore >= 12) return 'good';
+  if (upgradeScore >= 16) return 'top';
+  if (upgradeScore >= 11) return 'good';
   return 'longterm';
 }
 
@@ -352,7 +352,7 @@ const flexibilityBonus =
 const ubiquityPenalty =
   unitDistinctMemberCount <= 4
     ? 0
-    : Math.min(6, Math.round((unitDistinctMemberCount - 4) * 0.6));
+    : Math.min(7, Math.round((unitDistinctMemberCount - 4) * 0.75));
 
 const scarcityScore =
   exactStepScarcity +
