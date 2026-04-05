@@ -8,4 +8,5 @@ export const routes = {
   guildAssignments: (slug: string) => `/gilde/${slug}/meine-zuweisungen`,
   publicMatching: (slug: string) => `/public/guild/${slug}/matching`,
   publicSimulator: (slug: string) => `/public/guild/${slug}/simulator`,
+  livePlanner: (instanceId: string, phase = 1) => `/tb/${instanceId}/phase/${phase}`,
 } as const;
