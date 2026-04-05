@@ -73,18 +73,18 @@ function determinePriority(
   primaryReason: UpgradeRecommendation['primaryReason']
 ): UpgradeRecommendation['priority'] {
   if (primaryReason === 'unique_upgrade' || primaryReason === 'scarce_unit') {
-    return upgradeScore >= 20 ? 'top' : upgradeScore >= 11 ? 'good' : 'longterm';
+    return upgradeScore >= 10 ? 'top' : upgradeScore >= 6 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'good_tradeoff') {
-    return upgradeScore >= 17 ? 'top' : upgradeScore >= 10 ? 'good' : 'longterm';
+    return upgradeScore >= 9 ? 'top' : upgradeScore >= 6 ? 'good' : 'longterm';
   }
 
   if (primaryReason === 'broad_match') {
-    return upgradeScore >= 16 ? 'top' : upgradeScore >= 9 ? 'good' : 'longterm';
+    return upgradeScore >= 9 ? 'top' : upgradeScore >= 6 ? 'good' : 'longterm';
   }
 
-  return upgradeScore >= 8 ? 'good' : 'longterm';
+  return upgradeScore >= 6 ? 'good' : 'longterm';
 }
 
 function getPrimaryReason(input: {
@@ -96,7 +96,7 @@ function getPrimaryReason(input: {
 }): UpgradeRecommendation['primaryReason'] {
   if (input.exactStepMemberCount === 1) return 'unique_upgrade';
   if (input.unitDistinctMemberCount <= 2) return 'scarce_unit';
-  if (input.stepSize === 1 && input.impactScore >= 10) return 'good_tradeoff';
+  if (input.stepSize === 1 && input.impactScore >= 6) return 'good_tradeoff';
   if (input.matchingOpenSlots >= 3) return 'broad_match';
   return 'longterm';
 }
@@ -315,8 +315,8 @@ export async function GET(
               `${unitBaseId}:${best.fromRelic}:${best.toRelic}`
             )?.size ?? 1;
 
-          const immediateValue = 8;
-          const efficientStepBonus = stepSize === 1 ? 5 : stepSize === 2 ? 2 : 0;
+          const immediateValue = 7;
+          const efficientStepBonus = stepSize === 1 ? 7 : stepSize === 2 ? 1 : 0;
           const completionBonus = bestImmediateTarget.completesZone ? 7 : 0;
           const openSlotsBonus = Math.min(4, bestImmediateTarget.openSlots);
 
@@ -325,27 +325,27 @@ export async function GET(
 
           const exactStepUniquenessBonus =
             exactStepMemberCount === 1
-              ? 9
+              ? 11
               : exactStepMemberCount === 2
-                ? 6
+                ? 7
                 : exactStepMemberCount === 3
                   ? 3
                   : 0;
 
           const broadMatchBonus = Math.min(2, Math.max(0, matchingOpenSlots - 1) * 0.8);
 
-          const stepPenalty = Math.max(0, stepSize - 1) * 2.5;
+          const stepPenalty = Math.max(0, stepSize - 1) * 3.5;
 
           const costPenalty =
             cost <= 500
               ? 0
               : cost <= 1000
-                ? 1
+                ? 1.5
                 : cost <= 1400
-                  ? 2.5
-                  : 4;
+                  ? 3.5
+                  : 6;
 
-          const ubiquityPenalty = Math.max(0, unitDistinctMemberCount - 8) * 0.35;
+          const ubiquityPenalty = Math.max(0, unitDistinctMemberCount - 6) * 0.7;
           const contributionPenalty = Math.min(1.5, memberContributions * 0.04);
 
           const rawImpactScore =
@@ -464,7 +464,7 @@ export async function GET(
         if (seenUnits.has(recommendation.unitBaseId)) continue;
 
         const isLargeMetaStep =
-          recommendation.impactScore >= 18 &&
+          recommendation.impactScore >= 14 &&
           recommendation.toRelic - recommendation.fromRelic >= 2;
 
         if (isLargeMetaStep && hasLargeMetaStep) {
