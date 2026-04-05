@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 
+import { Button } from '@/components/ui/Button';
 import { buildPublicGuildTargetsUrl } from '@/lib/utils/base-url';
 
 type ApiEnvelope<T> =
@@ -23,6 +24,15 @@ type GuildSettingsFormProps = {
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+function SectionTitle({ title, body }: { title: string; body: string }) {
+  return (
+    <div>
+      <div className="text-sm font-medium text-white">{title}</div>
+      <div className="mt-1 text-sm text-slate-400">{body}</div>
+    </div>
+  );
+}
+
 export function GuildSettingsForm({
   appBaseUrl,
   initialGuildId,
@@ -38,9 +48,7 @@ export function GuildSettingsForm({
   const [rosterSyncState, setRosterSyncState] = useState<SyncState>('idle');
   const [rosterSyncMessage, setRosterSyncMessage] = useState<string | null>(null);
   const trimmedSavedSlug = savedSlug.trim();
-  const publicUrl = trimmedSavedSlug
-    ? buildPublicGuildTargetsUrl(trimmedSavedSlug, appBaseUrl)
-    : null;
+  const publicUrl = trimmedSavedSlug ? buildPublicGuildTargetsUrl(trimmedSavedSlug, appBaseUrl) : null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,18 +57,12 @@ export function GuildSettingsForm({
     const trimmedSlug = slug.trim();
 
     if (!trimmedGuildId) {
-      setNotice({
-        tone: 'error',
-        message: 'Guild ID is required.',
-      });
+      setNotice({ tone: 'error', message: 'Guild ID is required.' });
       return;
     }
 
     if (!SLUG_PATTERN.test(trimmedSlug)) {
-      setNotice({
-        tone: 'error',
-        message: 'Guild slug must use lowercase letters, numbers, and hyphens only.',
-      });
+      setNotice({ tone: 'error', message: 'Guild slug must use lowercase letters, numbers, and hyphens only.' });
       return;
     }
 
@@ -70,18 +72,10 @@ export function GuildSettingsForm({
     try {
       const response = await fetch('/api/guild/update', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          guildId: trimmedGuildId,
-          slug: trimmedSlug,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId: trimmedGuildId, slug: trimmedSlug }),
       });
-      const payload = (await response.json()) as ApiEnvelope<{
-        guildId: string;
-        slug: string;
-      }>;
+      const payload = (await response.json()) as ApiEnvelope<{ guildId: string; slug: string }>;
 
       if (!response.ok || !payload.ok) {
         throw new Error(payload.ok ? 'Guild settings could not be saved.' : payload.error);
@@ -90,15 +84,11 @@ export function GuildSettingsForm({
       setGuildId(payload.data.guildId);
       setSlug(payload.data.slug);
       setSavedSlug(payload.data.slug);
-      setNotice({
-        tone: 'success',
-        message: 'Guild settings saved.',
-      });
+      setNotice({ tone: 'success', message: 'Guild settings saved.' });
     } catch (error: unknown) {
       setNotice({
         tone: 'error',
-        message:
-          error instanceof Error ? error.message : 'Guild settings could not be saved.',
+        message: error instanceof Error ? error.message : 'Guild settings could not be saved.',
       });
     } finally {
       setSaving(false);
@@ -111,12 +101,7 @@ export function GuildSettingsForm({
 
     try {
       const response = await fetch('/api/guild/sync', { method: 'POST' });
-      const payload = (await response.json()) as ApiEnvelope<{
-        success: boolean;
-        inserted: number;
-        updated: number;
-        skipped: number;
-      }>;
+      const payload = (await response.json()) as ApiEnvelope<{ success: boolean; inserted: number; updated: number; skipped: number }>;
 
       if (!response.ok || !payload.ok) {
         throw new Error(payload.ok ? 'Guild sync failed.' : payload.error);
@@ -145,10 +130,7 @@ export function GuildSettingsForm({
       while (true) {
         setRosterSyncMessage(`Syncing rosters… ${offset} / ${totalMembers || '?'} members processed`);
 
-        const response = await fetch(
-          `/api/guild/roster-sync?limit=${BATCH_LIMIT}&offset=${offset}`,
-          { method: 'POST' }
-        );
+        const response = await fetch(`/api/guild/roster-sync?limit=${BATCH_LIMIT}&offset=${offset}`, { method: 'POST' });
         const payload = (await response.json()) as ApiEnvelope<{
           processedMembers: number;
           totalEligibleMembers: number;
@@ -171,9 +153,7 @@ export function GuildSettingsForm({
       }
 
       setRosterSyncState('success');
-      setRosterSyncMessage(
-        `Roster sync complete — ${totalMembers} members, ${totalUpserts} rows upserted.`
-      );
+      setRosterSyncMessage(`Roster sync complete — ${totalMembers} members, ${totalUpserts} rows upserted.`);
       window.location.reload();
     } catch (error: unknown) {
       setRosterSyncState('error');
@@ -182,115 +162,96 @@ export function GuildSettingsForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div>
-        <label htmlFor="guild-id" className="block text-sm font-medium text-gray-200">
-          Guild ID
-        </label>
-        <input
-          id="guild-id"
-          value={guildId}
-          onChange={(event) => setGuildId(event.target.value)}
-          className="mt-2 w-full rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-blue-500"
-          placeholder="phoenix-reborn-123"
-          autoComplete="off"
-        />
-      </div>
+    <form onSubmit={handleSubmit} className="space-y-8">
+      <section className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+        <SectionTitle title="Guild identity" body="These values define the connected guild inside the app and the public slug members will share." />
 
-      <div>
-        <label htmlFor="guild-slug" className="block text-sm font-medium text-gray-200">
-          Guild Slug
-        </label>
-        <input
-          id="guild-slug"
-          value={slug}
-          onChange={(event) => setSlug(event.target.value)}
-          className="mt-2 w-full rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-blue-500"
-          placeholder="phoenix-reborn"
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-        />
-      </div>
+        <div className="mt-5 grid gap-5 md:grid-cols-2">
+          <div>
+            <label htmlFor="guild-id" className="block text-sm font-medium text-slate-300">Guild ID</label>
+            <input
+              id="guild-id"
+              value={guildId}
+              onChange={(event) => setGuildId(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              placeholder="phoenix-reborn-123"
+              autoComplete="off"
+            />
+          </div>
 
-      <p className="rounded-2xl border border-amber-900 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
-        Changing the guild ID may require re-syncing roster data.
-      </p>
+          <div>
+            <label htmlFor="guild-slug" className="block text-sm font-medium text-slate-300">Public slug</label>
+            <input
+              id="guild-slug"
+              value={slug}
+              onChange={(event) => setSlug(event.target.value)}
+              className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              placeholder="phoenix-reborn"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </div>
+        </div>
 
-      <div className="flex flex-wrap items-start gap-3">
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-xl border border-blue-500 bg-blue-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:border-gray-700 disabled:bg-gray-800 disabled:text-gray-500"
-        >
-          {saving ? 'Saving...' : 'Save'}
-        </button>
-      </div>
+        <div className="mt-5 rounded-2xl border border-amber-900/70 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
+          Changing the guild ID can invalidate existing member and roster sync results.
+        </div>
 
-      {notice && (
-        <p
-          className={`text-sm ${
-            notice.tone === 'success' ? 'text-emerald-300' : 'text-red-300'
-          }`}
-        >
-          {notice.message}
-        </p>
-      )}
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <Button type="submit" size="lg" isLoading={saving}>Save guild settings</Button>
+          {publicUrl ? (
+            <a href={publicUrl} target="_blank" rel="noreferrer">
+              <Button variant="secondary" size="lg">Open public board</Button>
+            </a>
+          ) : null}
+        </div>
 
-      <hr className="border-gray-800" />
+        {notice ? (
+          <div className={notice.tone === 'success' ? 'mt-4 text-sm text-emerald-300' : 'mt-4 text-sm text-rose-300'}>
+            {notice.message}
+          </div>
+        ) : null}
+      </section>
 
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-gray-200">Guild Members</p>
-        <p className="text-xs text-gray-500">
-          Pull the current member list from Comlink and sync it into the local database.
-        </p>
-        <button
-          type="button"
-          onClick={handleSync}
-          disabled={syncState === 'loading'}
-          className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-700 disabled:cursor-not-allowed disabled:border-gray-800 disabled:bg-gray-900 disabled:text-gray-600"
-        >
-          {syncState === 'loading' ? 'Syncing…' : 'Sync guild members'}
-        </button>
+      <section className="grid gap-5 lg:grid-cols-2">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+          <SectionTitle title="Guild member sync" body="Pull the current member list from Comlink into the local database before checking registrations or assignments." />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button type="button" variant="secondary" size="lg" isLoading={syncState === 'loading'} onClick={handleSync}>
+              Sync guild members
+            </Button>
+          </div>
+          {syncMessage ? (
+            <div className={syncState === 'success' ? 'mt-4 text-sm text-emerald-300' : 'mt-4 text-sm text-rose-300'}>
+              {syncMessage}
+            </div>
+          ) : null}
+        </div>
 
-        {syncMessage && (
-          <p
-            className={`text-sm ${
-              syncState === 'success' ? 'text-emerald-300' : 'text-red-300'
-            }`}
-          >
-            {syncMessage}
-          </p>
-        )}
-      </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+          <SectionTitle title="Roster sync" body="Fetch roster rows in batches. This powers relic checks, member views and upgrade guidance." />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button type="button" variant="secondary" size="lg" isLoading={rosterSyncState === 'loading'} onClick={handleRosterSync}>
+              Sync roster data
+            </Button>
+          </div>
+          {rosterSyncMessage ? (
+            <div className={rosterSyncState === 'success' ? 'mt-4 text-sm text-emerald-300' : 'mt-4 text-sm text-rose-300'}>
+              {rosterSyncMessage}
+            </div>
+          ) : null}
+        </div>
+      </section>
 
-      <hr className="border-gray-800" />
-
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-gray-200">Player Rosters</p>
-        <p className="text-xs text-gray-500">
-          Fetch each member&apos;s full unit roster from Comlink and store it for strategic
-          planning. Run after guild member sync.
-        </p>
-        <button
-          type="button"
-          onClick={handleRosterSync}
-          disabled={rosterSyncState === 'loading'}
-          className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-3 text-sm font-medium text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-700 disabled:cursor-not-allowed disabled:border-gray-800 disabled:bg-gray-900 disabled:text-gray-600"
-        >
-          {rosterSyncState === 'loading' ? 'Syncing rosters…' : 'Sync player rosters'}
-        </button>
-
-        {rosterSyncMessage && (
-          <p
-            className={`text-sm ${
-              rosterSyncState === 'success' ? 'text-emerald-300' : 'text-red-300'
-            }`}
-          >
-            {rosterSyncMessage}
-          </p>
-        )}
-      </div>
+      {publicUrl ? (
+        <section className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+          <SectionTitle title="Member-facing URL" body="This is the primary entry point for members. Keep it stable and share it instead of internal officer routes." />
+          <div className="mt-4 break-all rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-300">
+            {publicUrl}
+          </div>
+        </section>
+      ) : null}
     </form>
   );
 }

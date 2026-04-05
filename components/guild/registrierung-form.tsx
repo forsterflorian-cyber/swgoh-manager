@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSession } from 'next-auth/react';
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { useSession } from 'next-auth/react';
 
 import { Button } from '@/components/ui/Button';
+import { routes } from '@/lib/utils/routes';
 import type { ApiEnvelope } from '@/lib/types/api';
+
 
 type Registration = {
   id: string;
@@ -23,6 +25,36 @@ type Props = {
   guildName: string;
   guildSlug: string;
 };
+
+function Notice({ tone, message }: { tone: 'error' | 'success'; message: string }) {
+  return (
+    <div
+      className={
+        tone === 'success'
+          ? 'rounded-2xl border border-emerald-900/70 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200'
+          : 'rounded-2xl border border-rose-900/70 bg-rose-950/30 px-4 py-3 text-sm text-rose-200'
+      }
+    >
+      {message}
+    </div>
+  );
+}
+
+function StepCard({ index, title, body }: { index: number; title: string; body: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
+          {index}
+        </div>
+        <div>
+          <div className="text-sm font-medium text-white">{title}</div>
+          <div className="mt-1 text-sm text-slate-400">{body}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function RegistrierungForm({ guildId, guildName, guildSlug }: Props) {
   const { status: sessionStatus } = useSession();
@@ -57,6 +89,16 @@ export function RegistrierungForm({ guildId, guildName, guildSlug }: Props) {
     void loadRegistration();
   }, [guildId, sessionStatus]);
 
+  const normalizedAllyCode = useMemo(
+    () => allyCode.replace(/[^0-9]/g, '').slice(0, 9),
+    [allyCode],
+  );
+
+  const formattedAllyCode = useMemo(() => {
+    if (!normalizedAllyCode) return '';
+    return normalizedAllyCode.replace(/(\d{3})(?=\d)/g, '$1-');
+  }, [normalizedAllyCode]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -67,7 +109,7 @@ export function RegistrierungForm({ guildId, guildName, guildSlug }: Props) {
       const res = await fetch(`/api/guild/${guildId}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allyCode }),
+        body: JSON.stringify({ allyCode: normalizedAllyCode }),
       });
       const payload = (await res.json()) as ApiEnvelope<{ registration: Registration }>;
 
@@ -78,7 +120,7 @@ export function RegistrierungForm({ guildId, guildName, guildSlug }: Props) {
 
       setRegistration(payload.data.registration);
       setAllyCode('');
-      setSuccess('Successfully registered.');
+      setSuccess('Registration complete. Your member workspace is ready.');
     } catch {
       setError('Network error. Please try again.');
     } finally {
@@ -111,82 +153,96 @@ export function RegistrierungForm({ guildId, guildName, guildSlug }: Props) {
 
   if (sessionStatus === 'loading' || loading) {
     return (
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-8 text-center text-sm text-gray-400">
-        Loading...
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-8 text-center text-sm text-slate-400">
+        Loading member profile…
       </div>
     );
   }
 
   if (sessionStatus !== 'authenticated') {
     return (
-      <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-8">
-        <p className="text-sm text-gray-400">
-          You need to log in with Discord to register as a guild member.
-        </p>
-        <Link
-          href={`/login?callbackUrl=/gilde/${guildSlug}/registrieren`}
-          className="mt-5 inline-flex rounded-xl border border-indigo-600 bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
-        >
-          Log in with Discord
-        </Link>
+      <div className="space-y-5">
+        <Notice tone="error" message="Sign in first so the guild can link your Discord account to your SWGOH roster." />
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+          <div className="text-sm text-slate-300">You are opening the member workspace for {guildName}.</div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link href={`/login?callbackUrl=${routes.guildRegistration(guildSlug)}`}>
+              <Button>Log in</Button>
+            </Link>
+            <Link href={routes.publicGuildBoard(guildSlug)}>
+              <Button variant="secondary">Back to guild board</Button>
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="rounded-xl border border-rose-800 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="rounded-xl border border-emerald-800 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-200">
-          {success}
-        </div>
-      )}
+      {error ? <Notice tone="error" message={error} /> : null}
+      {success ? <Notice tone="success" message={success} /> : null}
 
       {registration ? (
-        <div className="rounded-2xl border border-emerald-800 bg-emerald-950/20 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
-            Registered
-          </p>
-          <p className="mt-3 text-lg font-semibold text-white">{guildName}</p>
-          <div className="mt-4 grid gap-2 text-sm">
-            <div className="flex gap-3">
-              <span className="w-28 text-gray-500">Ally code</span>
-              <span className="font-mono text-gray-200">{registration.ally_code}</span>
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-emerald-900/70 bg-emerald-950/20 p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-400">Member linked</div>
+                <div className="mt-3 text-2xl font-semibold text-white">{guildName}</div>
+                <div className="mt-2 text-sm text-slate-300">Your account is connected and ready for assignments.</div>
+              </div>
+              <Link href={routes.guildAssignments(guildSlug)}>
+                <Button size="lg">Open my assignments</Button>
+              </Link>
             </div>
-            <div className="flex gap-3">
-              <span className="w-28 text-gray-500">Registered</span>
-              <span className="text-gray-200">
-                {new Date(registration.registered_at).toLocaleDateString()}
-              </span>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-emerald-900/50 bg-slate-950/40 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Ally code</div>
+                <div className="mt-3 font-mono text-lg text-white">{registration.ally_code}</div>
+              </div>
+              <div className="rounded-2xl border border-emerald-900/50 bg-slate-950/40 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Registered</div>
+                <div className="mt-3 text-lg text-white">{new Date(registration.registered_at).toLocaleDateString()}</div>
+              </div>
             </div>
           </div>
-          <div className="mt-6 border-t border-gray-800 pt-5">
-            <p className="mb-4 text-sm text-gray-400">
-              To change your ally code, remove your registration and re-register.
-            </p>
-            <Button variant="danger" size="sm" isLoading={deleting} onClick={handleDelete}>
-              Remove registration
-            </Button>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
+            <div className="space-y-3">
+              <StepCard index={1} title="Assignments" body="Open your personal assignment view to see current platoon placements." />
+              <StepCard index={2} title="Matching" body="Use the member board to understand missing units and where your roster helps." />
+              <StepCard index={3} title="Planner" body="Use the public planner for broader placement context without officer-only controls." />
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+              <div className="text-sm font-medium text-white">Need to change ally code?</div>
+              <div className="mt-2 text-sm text-slate-400">Remove this registration and register again with the correct synced roster.</div>
+              <div className="mt-5">
+                <Button variant="danger" size="sm" isLoading={deleting} onClick={handleDelete}>
+                  Remove registration
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
-        <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-            Register
-          </p>
-          <p className="mt-3 text-sm text-gray-400">
-            Enter your SWGOH ally code to link your Discord account to your player profile in{' '}
-            <span className="text-white">{guildName}</span>. Your ally code must match a synced
-            guild member.
-          </p>
+        <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StepCard index={1} title="Sign in" body="Your Discord identity is used as the stable member key." />
+            <StepCard index={2} title="Enter ally code" body="Use the roster synced for this guild, not a secondary account." />
+            <StepCard index={3} title="Open member workspace" body="Assignments and guidance stay attached to this one setup." />
+          </div>
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <div>
-              <label htmlFor="ally-code" className="mb-2 block text-sm font-medium text-gray-300">
+          <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
+            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Registration</div>
+            <div className="mt-3 text-base font-medium text-white">Link your account to {guildName}</div>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Enter the ally code that belongs to your synced guild roster. The format is accepted with or without dashes.
+            </p>
+
+            <div className="mt-6 space-y-2">
+              <label htmlFor="ally-code" className="block text-sm font-medium text-slate-300">
                 Ally code
               </label>
               <input
@@ -194,14 +250,21 @@ export function RegistrierungForm({ guildId, guildName, guildSlug }: Props) {
                 type="text"
                 inputMode="numeric"
                 placeholder="123-456-789"
-                value={allyCode}
+                value={formattedAllyCode}
                 onChange={(e) => setAllyCode(e.target.value)}
-                className="w-full rounded-xl border border-gray-700 bg-gray-800 px-4 py-2.5 font-mono text-sm text-white placeholder-gray-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 font-mono text-lg tracking-[0.12em] text-white placeholder-slate-600 outline-none transition-colors focus:border-indigo-500"
               />
+              <div className="text-xs text-slate-500">Only digits are stored. Example: 123456789.</div>
             </div>
-            <Button type="submit" isLoading={submitting} disabled={!allyCode.trim()}>
-              Register
-            </Button>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Button type="submit" size="lg" isLoading={submitting} disabled={normalizedAllyCode.length !== 9}>
+                Register member profile
+              </Button>
+              <Link href={routes.guildAssignments(guildSlug)}>
+                <Button variant="secondary" size="lg">Open assignments</Button>
+              </Link>
+            </div>
           </form>
         </div>
       )}

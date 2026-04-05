@@ -2,12 +2,14 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { Navbar } from '@/components/layout/Navbar';
+import { AppShell } from '@/components/layout/AppShell';
 import { GuildSettingsForm } from '@/components/guild/guild-settings-form';
 import { CopyDiscordButton } from '@/components/guild/copy-discord-button';
 import { IgnoreMemberButton } from '@/components/guild/ignore-member-button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { WorkspaceHeader } from '@/components/workspace/WorkspaceHeader';
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import {
   getPrimaryGuildSettingsForUser,
@@ -156,24 +158,23 @@ export default async function GuildSettingsPage() {
   return (
     <div className="min-h-screen">
       <Navbar />
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        {/* Header */}
-        <header className="mb-8 animate-fade-in">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-accent-blue)]">
-              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm text-[var(--color-text-muted)]">Guild Settings</p>
-              <h1 className="mt-1 text-2xl font-bold tracking-tight">
-                Guild Settings · {guild.name}
-              </h1>
-            </div>
-          </div>
-        </header>
+      <WorkspaceHeader
+        eyebrow="Officer workspace"
+        title={`Guild settings · ${guild.name}`}
+        description="Configure the connected guild, keep sync status trustworthy and manage the public surfaces members actually use."
+        chips={
+          <>
+            <span className="rounded-full border border-indigo-900/70 bg-indigo-950/30 px-3 py-1 text-xs font-medium text-indigo-300">Officer setup</span>
+            <span className="rounded-full border border-slate-800 bg-slate-900/70 px-3 py-1 text-xs font-medium text-slate-300">Public slug: {guild.slug || 'not set'}</span>
+          </>
+        }
+        tabs={[
+          { href: '/dashboard', label: 'Overview' },
+          { href: '/settings/guild', label: 'Guild settings', active: true },
+          ...(guild.slug ? [{ href: `/gilde/${guild.slug}`, label: 'Guild board' }] : []),
+        ]}
+      />
+      <AppShell width="6xl" className="py-8">
 
         {/* Guild Configuration */}
         <Card className="mb-8 animate-fade-in">
@@ -390,7 +391,7 @@ export default async function GuildSettingsPage() {
             <Button variant="danger">Delete guild</Button>
           </form>
         </Card>
-      </div>
+      </AppShell>
     </div>
   );
 }
