@@ -6,6 +6,12 @@ import { Badge } from '@/components/ui/Badge';
 import { WorkingOverlay } from '@/components/ui/WorkingOverlay';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
 import {
+  buildBestGapCandidateMap,
+  buildGapRecommendationCandidates,
+  formatGapRecommendationLabel,
+  getGapRecommendationKey,
+} from '@/lib/services/platoon-gap-recommendations';
+import {
   formatIgnoredMatchingScopeLabel,
   getIgnoredMatchingScopeKey,
   getMatchingCategoryLabel,
@@ -132,32 +138,18 @@ function formatPlatoonScopeTitle(section: MatchingPlatoonSection, fallbackIndex?
   })}`;
 }
 
-function formatBestNextAction(gap: PlatoonMatchingGap) {
-  const source = gap.possibleSources[0];
-
-  if (gap.recommendedAction === 'use_unused' && source) {
-    return `Assign ${source.playerName}`;
-  }
-
-  if (gap.recommendedAction === 'upgrade' && source) {
-    const parts: string[] = [];
-
-    if (source.missingRelicTiers > 0) parts.push(`+${source.missingRelicTiers} relic`);
-    if (source.missingRarity > 0) parts.push(`+${source.missingRarity} star`);
-
-    return `Upgrade ${source.playerName}${parts.length > 0 ? ` (${parts.join(', ')})` : ''}`;
-  }
-
-  if (gap.recommendedAction === 'reassign' && source) {
-    return `Reassign ${source.playerName}`;
-  }
-
-  return 'Acquire or unlock unit';
+function formatBestNextAction(
+  gap: PlatoonMatchingGap,
+  bestGapCandidateByKey: Map<string, ReturnType<typeof buildGapRecommendationCandidates>[number]>,
+) {
+  const candidate = bestGapCandidateByKey.get(getGapRecommendationKey(gap));
+  return formatGapRecommendationLabel(candidate);
 }
 
 function buildMatchingPlatoonSections(
   assignments: PlatoonMatchingResult['assignments'],
   gaps: PlatoonMatchingResult['gaps'],
+  bestGapCandidateByKey: Map<string, ReturnType<typeof buildGapRecommendationCandidates>[number]>,
 ): MatchingPlatoonSection[] {
   const sections = new Map<string, MatchingPlatoonSection>();
 
@@ -199,7 +191,7 @@ function buildMatchingPlatoonSections(
       requirementId: gap.requirementId,
       slotNumber: gap.slotNumber,
       unitName: gap.unitName ?? gap.unitBaseId,
-      action: formatBestNextAction(gap),
+      action: formatBestNextAction(gap, bestGapCandidateByKey),
     };
 
     if (existing) {
@@ -417,15 +409,16 @@ function buildScopeDiscordExport(params: {
   isBonus: boolean;
   assignments: PlatoonMatchingResult['assignments'];
   gaps: PlatoonMatchingResult['gaps'];
+  bestGapCandidateByKey: Map<string, ReturnType<typeof buildGapRecommendationCandidates>[number]>;
 }) {
-  const { phase, category, isBonus, assignments, gaps } = params;
+  const { phase, category, isBonus, assignments, gaps, bestGapCandidateByKey } = params;
   const scopedAssignments = assignments.filter(
     (assignment) => assignment.phase === phase && assignment.planetCategory === category,
   );
   const scopedGaps = gaps.filter(
     (gap) => gap.phase === phase && gap.planetCategory === category,
   );
-  const sections = buildMatchingPlatoonSections(scopedAssignments, scopedGaps);
+  const sections = buildMatchingPlatoonSections(scopedAssignments, scopedGaps, bestGapCandidateByKey);
   const assignedCount = scopedAssignments.length;
   const requirementCount = scopedAssignments.length + scopedGaps.length;
 
@@ -498,6 +491,49 @@ export default function PublicGuildMatchingBoard({
     [activeMatching.coverage],
   );
 
+  const rosterByMemberUnit = useMemo(
+    () =>
+      new Map(
+        matchingInput.roster.map((r) => [
+          `${r.memberId}:${r.unitBaseId}`,
+          { relicTier: r.relicTier, rarity: r.rarity },
+        ]),
+      ),
+    [matchingInput.roster],
+  );
+
+  const allyCodeByMemberId = useMemo(
+    () =>
+      new Map(
+        matchingInput.members.map((m) => [m.memberId, m.allyCode ?? '']),
+      ),
+    [matchingInput.members],
+  );
+
+  const contributionCountByMemberId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const assignment of activeMatching.assignments) {
+      map.set(assignment.memberId, (map.get(assignment.memberId) ?? 0) + 1);
+    }
+    return map;
+  }, [activeMatching.assignments]);
+
+  const gapCandidates = useMemo(
+    () =>
+      buildGapRecommendationCandidates({
+        matching: activeMatching,
+        allyCodeByMemberId,
+        rosterByMemberUnit,
+        contributionCountByMemberId,
+      }),
+    [activeMatching, allyCodeByMemberId, rosterByMemberUnit, contributionCountByMemberId],
+  );
+
+  const bestGapCandidateByKey = useMemo(
+    () => buildBestGapCandidateMap(gapCandidates),
+    [gapCandidates],
+  );
+
   const ignoredScopeLabels = useMemo(
     () => ignoredScopes.map((scope) => formatIgnoredMatchingScopeLabel(scope)),
     [ignoredScopes],
@@ -539,6 +575,7 @@ export default function PublicGuildMatchingBoard({
       isBonus: entry.isBonus,
       assignments: activeMatching.assignments,
       gaps: activeMatching.gaps,
+      bestGapCandidateByKey,
     });
     await copyTextToClipboard(text);
     markCopied(`scope:${entry.phase}:${entry.category}`);
@@ -630,8 +667,8 @@ export default function PublicGuildMatchingBoard({
         if (categoryFilter !== 'all' && gapCategory !== categoryFilter) return false;
 
         if (memberFilter !== 'all') {
-          const preferredSource = gap.possibleSources[0];
-          if (!preferredSource || preferredSource.playerName !== memberFilter) {
+          const preferredCandidate = bestGapCandidateByKey.get(getGapRecommendationKey(gap));
+          if (!preferredCandidate || preferredCandidate.playerName !== memberFilter) {
             return false;
           }
         }
@@ -644,11 +681,11 @@ export default function PublicGuildMatchingBoard({
 
         return true;
       });
-  }, [activeMatching.gaps, phaseFilter, categoryFilter, memberFilter, unitQuery]);
+  }, [activeMatching.gaps, phaseFilter, categoryFilter, memberFilter, unitQuery, bestGapCandidateByKey]);
 
   const availablePlatoons = useMemo(
-    () => buildMatchingPlatoonSections(baseFilteredAssignments, baseFilteredGaps),
-    [baseFilteredAssignments, baseFilteredGaps],
+    () => buildMatchingPlatoonSections(baseFilteredAssignments, baseFilteredGaps, bestGapCandidateByKey),
+    [baseFilteredAssignments, baseFilteredGaps, bestGapCandidateByKey],
   );
 
   const effectivePlatoonFilter =
@@ -746,8 +783,8 @@ export default function PublicGuildMatchingBoard({
   }, [sortedGaps, statusFilter]);
 
   const platoonDetailSections = useMemo(
-    () => buildMatchingPlatoonSections(platoonDetailAssignments, platoonDetailGaps),
-    [platoonDetailAssignments, platoonDetailGaps],
+    () => buildMatchingPlatoonSections(platoonDetailAssignments, platoonDetailGaps, bestGapCandidateByKey),
+    [platoonDetailAssignments, platoonDetailGaps, bestGapCandidateByKey],
   );
 
   const visibleAssignments = platoonDetailAssignments;

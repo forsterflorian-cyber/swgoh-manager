@@ -7,6 +7,12 @@ import { useSearchParams } from 'next/navigation';
 import { Navbar } from '@/components/layout/Navbar';
 import { WorkingOverlay } from '@/components/ui/WorkingOverlay';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+import {
+  buildBestGapCandidateMap,
+  buildGapRecommendationCandidates,
+  formatGapRecommendationLabel,
+  getGapRecommendationKey,
+} from '@/lib/services/platoon-gap-recommendations';
 import { formatDateTime } from '@/lib/utils/format-date';
 import {
   formatIgnoredMatchingScopeLabel,
@@ -1746,7 +1752,8 @@ function GapCard({ gap }: { gap: PlatoonMatchingGap }) {
 
 function buildMatchingPlatoonSections(
   assignments: PlatoonMatchingResult['assignments'],
-  gaps: PlatoonMatchingGap[]
+  gaps: PlatoonMatchingGap[],
+  bestGapCandidateByKey: Map<string, ReturnType<typeof buildGapRecommendationCandidates>[number]>,
 ): MatchingPlatoonSection[] {
   const sections = new Map<string, MatchingPlatoonSection>();
 
@@ -1785,7 +1792,7 @@ function buildMatchingPlatoonSections(
       requirementId: gap.requirementId,
       slotNumber: gap.slotNumber,
       unitName: gap.unitName ?? gap.unitBaseId,
-      action: formatBestNextAction(gap),
+      action: formatBestNextAction(gap, bestGapCandidateByKey),
     };
 
     if (existing) {
@@ -1869,6 +1876,49 @@ function MatchingView({
     return computePlatoonMatching(matchingInput, { ignoredScopes: sanitizedIgnoredScopes });
   }, [baselineMatching, sanitizedIgnoredScopes, matchingInput]);
 
+  const rosterByMemberUnit = useMemo(
+    () =>
+      new Map(
+        (matchingInput?.roster ?? []).map((r) => [
+          `${r.memberId}:${r.unitBaseId}`,
+          { relicTier: r.relicTier, rarity: r.rarity },
+        ]),
+      ),
+    [matchingInput?.roster],
+  );
+
+  const allyCodeByMemberId = useMemo(
+    () =>
+      new Map(
+        (matchingInput?.members ?? []).map((m) => [m.memberId, m.allyCode ?? '']),
+      ),
+    [matchingInput?.members],
+  );
+
+  const contributionCountByMemberId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const assignment of activeMatching.assignments) {
+      map.set(assignment.memberId, (map.get(assignment.memberId) ?? 0) + 1);
+    }
+    return map;
+  }, [activeMatching.assignments]);
+
+  const gapCandidates = useMemo(
+    () =>
+      buildGapRecommendationCandidates({
+        matching: activeMatching,
+        allyCodeByMemberId,
+        rosterByMemberUnit,
+        contributionCountByMemberId,
+      }),
+    [activeMatching, allyCodeByMemberId, rosterByMemberUnit, contributionCountByMemberId],
+  );
+
+  const bestGapCandidateByKey = useMemo(
+    () => buildBestGapCandidateMap(gapCandidates),
+    [gapCandidates],
+  );
+
   const activeSelectedCoverageCell =
     selectedCoverageCell &&
     !isIgnoredMatchingScope(sanitizedIgnoredScopes, selectedCoverageCell) &&
@@ -1903,7 +1953,11 @@ function MatchingView({
           gap.planetCategory === activeSelectedCoverageCell.category
       )
     : [];
-  const availableSelectedPlatoons = buildMatchingPlatoonSections(selectedAssignments, selectedGaps);
+  const availableSelectedPlatoons = buildMatchingPlatoonSections(
+    selectedAssignments,
+    selectedGaps,
+    bestGapCandidateByKey,
+  );
   const effectiveSelectedPlatoonKey =
     selectedPlatoonKey !== 'all' &&
     !availableSelectedPlatoons.some((platoon) => platoon.platoonKey === selectedPlatoonKey)
@@ -1921,7 +1975,8 @@ function MatchingView({
       : selectedGaps.filter((gap) => gap.platoonKey === effectiveSelectedPlatoonKey);
   const visibleSelectedPlatoons = buildMatchingPlatoonSections(
     filteredSelectedAssignments,
-    filteredSelectedGaps
+    filteredSelectedGaps,
+    bestGapCandidateByKey,
   );
   const selectedScopeRequiredCount = visibleSelectedPlatoons.reduce(
     (count, platoon) => count + platoon.totalCount,
@@ -2461,25 +2516,12 @@ function MatchingView({
   );
 }
 
-function formatBestNextAction(gap: PlatoonMatchingGap) {
-  const source = gap.possibleSources?.[0];
-
-  if (gap.recommendedAction === 'use_unused' && source) {
-    return `Assign ${source.playerName}`;
-  }
-
-  if (gap.recommendedAction === 'upgrade' && source) {
-    const parts: string[] = [];
-    if (source.missingRelicTiers > 0) parts.push(`+${source.missingRelicTiers} relic`);
-    if (source.missingRarity > 0) parts.push(`+${source.missingRarity} star`);
-    return `Upgrade ${source.playerName}${parts.length ? ` (${parts.join(', ')})` : ''}`;
-  }
-
-  if (gap.recommendedAction === 'reassign' && source) {
-    return `Reassign ${source.playerName}`;
-  }
-
-  return 'Acquire or unlock unit';
+function formatBestNextAction(
+  gap: PlatoonMatchingGap,
+  bestGapCandidateByKey: Map<string, ReturnType<typeof buildGapRecommendationCandidates>[number]>,
+) {
+  const candidate = bestGapCandidateByKey.get(getGapRecommendationKey(gap));
+  return formatGapRecommendationLabel(candidate);
 }
 
 function MemberTargetsView({
