@@ -11,6 +11,8 @@ type UpgradeRecommendation = {
   unitName: string;
   currentRelic: number;
   recommendedRelic: number;
+  fromRelic: number;
+  toRelic: number;
   slotsUnlocked: number;
   affectedPhases: {
     phase: number;
@@ -70,7 +72,7 @@ function calculateRelicCost(fromRelic: number, toRelic: number): number {
   return totalCost;
 }
 
-function calculateUpgradeImpact(
+function calculateRelicStepRecommendations(
   memberRelic: number,
   memberRarity: number,
   openSlots: Array<{
@@ -80,31 +82,52 @@ function calculateUpgradeImpact(
     requiredRarity: number;
     hasEligibleOwner: boolean;
   }>,
-): { maxRelic: number; slotsByPhase: Map<string, number> } {
-  const slotsByPhase = new Map<string, number>();
-  let maxRelic = memberRelic;
+): Array<{
+  fromRelic: number;
+  toRelic: number;
+  slotsByPhase: Map<string, number>;
+}> {
+  const eligibleSlots = openSlots.filter(
+    slot =>
+      memberRarity >= slot.requiredRarity &&
+      slot.requiredRelic > memberRelic &&
+      slot.requiredRelic <= 8
+  );
 
-  for (const slot of openSlots) {
-    // Nur Rarity prüfen
-    if (memberRarity < slot.requiredRarity) continue;
-    
-    // Zähle Slots die der Member bereits füllen kann
-    // (auch wenn ein anderer Member eligible ist, ist der Slot vielleicht nicht zugewiesen)
-    if (memberRelic >= slot.requiredRelic) {
-      const key = `${slot.phase}:${slot.category}`;
-      slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
+  const targetRelics = [...new Set(eligibleSlots.map(slot => slot.requiredRelic))].sort(
+    (a, b) => a - b
+  );
+
+  const steps: Array<{
+    fromRelic: number;
+    toRelic: number;
+    slotsByPhase: Map<string, number>;
+  }> = [];
+
+  let previousRelic = memberRelic;
+
+  for (const targetRelic of targetRelics) {
+    const slotsByPhase = new Map<string, number>();
+
+    for (const slot of eligibleSlots) {
+      if (slot.requiredRelic > previousRelic && slot.requiredRelic <= targetRelic) {
+        const key = `${slot.phase}:${slot.category}`;
+        slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
+      }
     }
-    
-    // Upgrade empfehlen wenn Member Relic niedriger ist als benötigt
-    // Auch wenn bereits ein eligible Owner existiert (da dieser vielleicht nicht zugewiesen ist)
-    if (memberRelic < slot.requiredRelic && slot.requiredRelic <= 8) {
-      maxRelic = Math.max(maxRelic, slot.requiredRelic);
-      const key = `${slot.phase}:${slot.category}`;
-      slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
+
+    if (slotsByPhase.size > 0) {
+      steps.push({
+        fromRelic: previousRelic,
+        toRelic: targetRelic,
+        slotsByPhase,
+      });
     }
+
+    previousRelic = targetRelic;
   }
 
-  return { maxRelic, slotsByPhase };
+  return steps;
 }
 
 /**
@@ -226,48 +249,50 @@ export async function GET(
     const activeMembers = dataset.members;
 
     // Erstelle Member-Empfehlungen
-    const memberRecommendations: MemberRecommendation[] = activeMembers.map(member => {
-      const memberRoster = dataset.roster.filter(r => r.memberId === member.memberId);
-      const recommendations: UpgradeRecommendation[] = [];
-      const memberContributions = matching.assignments.filter(
-        a => a.memberId === member.memberId
-      ).length;
+const memberRecommendations: MemberRecommendation[] = activeMembers
+  .flatMap(member => {
+    const memberRoster = dataset.roster.filter(r => r.memberId === member.memberId);
+    const recommendations: UpgradeRecommendation[] = [];
+    const memberContributions = matching.assignments.filter(
+      a => a.memberId === member.memberId
+    ).length;
 
-      // Sammle ALLE Units mit Gaps (auch die, die der Member nicht hat)
-      const allUnitsWithGaps = new Set(gapsByUnit.keys());
+    // Sammle ALLE Units mit Gaps (auch die, die der Member nicht hat)
+    const allUnitsWithGaps = new Set(gapsByUnit.keys());
 
-      // Empfehlungen für Units, die der Member bereits hat
-      for (const unit of memberRoster) {
-        const gaps = gapsByUnit.get(unit.unitBaseId) || [];
-        if (gaps.length === 0) continue;
+    // Empfehlungen für Units, die der Member bereits hat
+    for (const unit of memberRoster) {
+      const gaps = gapsByUnit.get(unit.unitBaseId) || [];
+      if (gaps.length === 0) continue;
 
-        const openSlotsForUnit = gaps
-          .map(g => ({
-            phase: g.phase,
-            category: g.planetCategory || 'MIX',
-            requiredRelic: g.minRelic,
-            requiredRarity: g.minRarity,
-            hasEligibleOwner: g.possibleSources.some(s => s.kind === 'eligible'),
-          }));
+      const openSlotsForUnit = gaps.map(g => ({
+        phase: g.phase,
+        category: g.planetCategory || 'MIX',
+        requiredRelic: g.minRelic,
+        requiredRarity: g.minRarity,
+        hasEligibleOwner: g.possibleSources.some(s => s.kind === 'eligible'),
+      }));
 
-        if (openSlotsForUnit.length === 0) continue;
+      if (openSlotsForUnit.length === 0) continue;
 
-        const { maxRelic, slotsByPhase } = calculateUpgradeImpact(
-          unit.relicTier,
-          unit.rarity,
-          openSlotsForUnit
-        );
+      const stepRecommendations = calculateRelicStepRecommendations(
+        unit.relicTier,
+        unit.rarity,
+        openSlotsForUnit
+      );
 
-        if (maxRelic <= unit.relicTier) continue;
+      for (const step of stepRecommendations) {
+        const slotsUnlocked = Array.from(step.slotsByPhase.values()).reduce((a, b) => a + b, 0);
+        if (slotsUnlocked === 0) continue;
 
-        const slotsUnlocked = Array.from(slotsByPhase.values()).reduce((a, b) => a + b, 0);
-        const cost = calculateRelicCost(unit.relicTier, maxRelic);
+        const cost = calculateRelicCost(step.fromRelic, step.toRelic);
 
-        const affectedPhases = Array.from(slotsByPhase.entries()).map(([key, count]) => {
+        const affectedPhases = Array.from(step.slotsByPhase.entries()).map(([key, count]) => {
           const [phase, category] = key.split(':');
           const coverage = matching.coverage.find(
             c => c.phase === parseInt(phase) && c.category === category
           );
+
           return {
             phase: parseInt(phase),
             category,
@@ -281,20 +306,29 @@ export async function GET(
           };
         });
 
-        // Verwende die neue Upgrade-Kennzahl
+        const totalCoverageGain = affectedPhases.reduce(
+          (sum, phase) => sum + (phase.newCoverage - phase.currentCoverage),
+          0
+        );
+
+        if (totalCoverageGain <= 0) continue;
+
         const impactScore = calculateUpgradeScore(
           slotsUnlocked,
-          unit.relicTier,
-          maxRelic,
+          step.fromRelic,
+          step.toRelic,
           affectedPhases
         );
+
         const priority = determinePriority(impactScore);
 
         recommendations.push({
           unitBaseId: unit.unitBaseId,
           unitName: unit.unitName,
           currentRelic: unit.relicTier,
-          recommendedRelic: maxRelic,
+          recommendedRelic: step.toRelic,
+          fromRelic: step.fromRelic,
+          toRelic: step.toRelic,
           slotsUnlocked,
           affectedPhases,
           estimatedCost: cost,
@@ -302,130 +336,159 @@ export async function GET(
           priority,
         });
       }
+    }
 
-      // Empfehlungen für Units, die der Member NICHT hat (acquire)
-      for (const unitBaseId of allUnitsWithGaps) {
-        // Überspringe Units, die der Member bereits hat
-        if (memberRoster.some(u => u.unitBaseId === unitBaseId)) continue;
+    // Empfehlungen für Units, die der Member NICHT hat (acquire)
+    for (const unitBaseId of allUnitsWithGaps) {
+      // Überspringe Units, die der Member bereits hat
+      if (memberRoster.some(u => u.unitBaseId === unitBaseId)) continue;
 
-        const gaps = gapsByUnit.get(unitBaseId) || [];
-        if (gaps.length === 0) continue;
+      const gaps = gapsByUnit.get(unitBaseId) || [];
+      if (gaps.length === 0) continue;
 
-        // Finde die Unit-Informationen aus den Gaps
-        const firstGap = gaps[0];
-        const unitName = firstGap.unitName || unitBaseId;
+      const firstGap = gaps[0];
+      const unitName = firstGap.unitName || unitBaseId;
 
-        const openSlotsForUnit = gaps
-          .map(g => ({
-            phase: g.phase,
-            category: g.planetCategory || 'MIX',
-            requiredRelic: g.minRelic,
-            requiredRarity: g.minRarity,
-            hasEligibleOwner: g.possibleSources.some(s => s.kind === 'eligible'),
-          }));
+      const openSlotsForUnit = gaps.map(g => ({
+        phase: g.phase,
+        category: g.planetCategory || 'MIX',
+        requiredRelic: g.minRelic,
+        requiredRarity: g.minRarity,
+        hasEligibleOwner: g.possibleSources.some(s => s.kind === 'eligible'),
+      }));
 
-        if (openSlotsForUnit.length === 0) continue;
+      if (openSlotsForUnit.length === 0) continue;
 
-        // Finde das höchste benötigte Relic
-        const maxRelic = Math.max(...openSlotsForUnit.map(s => s.requiredRelic));
-        const maxRarity = Math.max(...openSlotsForUnit.map(s => s.requiredRarity));
+      const maxRelic = Math.max(...openSlotsForUnit.map(s => s.requiredRelic));
+      const maxRarity = Math.max(...openSlotsForUnit.map(s => s.requiredRarity));
 
-        // Berechne die Anzahl der Slots, die freigeschaltet würden
-        const slotsByPhase = new Map<string, number>();
-        for (const slot of openSlotsForUnit) {
-          if (maxRarity >= slot.requiredRarity && maxRelic >= slot.requiredRelic) {
-            const key = `${slot.phase}:${slot.category}`;
-            slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
-          }
+      const slotsByPhase = new Map<string, number>();
+      for (const slot of openSlotsForUnit) {
+        if (maxRarity >= slot.requiredRarity && maxRelic >= slot.requiredRelic) {
+          const key = `${slot.phase}:${slot.category}`;
+          slotsByPhase.set(key, (slotsByPhase.get(key) || 0) + 1);
         }
-
-        const slotsUnlocked = Array.from(slotsByPhase.values()).reduce((a, b) => a + b, 0);
-        if (slotsUnlocked === 0) continue;
-
-        const cost = calculateRelicCost(0, maxRelic);
-
-        const affectedPhases = Array.from(slotsByPhase.entries()).map(([key, count]) => {
-          const [phase, category] = key.split(':');
-          const coverage = matching.coverage.find(
-            c => c.phase === parseInt(phase) && c.category === category
-          );
-          return {
-            phase: parseInt(phase),
-            category,
-            currentCoverage: coverage?.coveragePercent || 0,
-            newCoverage: coverage
-              ? Math.round(
-                  ((coverage.assignedCount + count) / coverage.requirementCount) * 100
-                )
-              : 0,
-            slotsAdded: count,
-          };
-        });
-
-        // Verwende die neue Upgrade-Kennzahl
-        const impactScore = calculateUpgradeScore(
-          slotsUnlocked,
-          0,
-          maxRelic,
-          affectedPhases
-        );
-        const priority = determinePriority(impactScore);
-
-        recommendations.push({
-          unitBaseId,
-          unitName,
-          currentRelic: 0,
-          recommendedRelic: maxRelic,
-          slotsUnlocked,
-          affectedPhases,
-          estimatedCost: cost,
-          impactScore,
-          priority,
-        });
       }
 
-      // Sortiere nach Impact
-      recommendations.sort((a, b) => b.impactScore - a.impactScore);
+      const slotsUnlocked = Array.from(slotsByPhase.values()).reduce((a, b) => a + b, 0);
+      if (slotsUnlocked === 0) continue;
 
-      // Filtere nach unvollständigen Phasen
-      let filteredRecommendations = recommendations.filter(rec => {
-        return rec.affectedPhases.some(phase => phase.currentCoverage < 100);
+      const cost = calculateRelicCost(0, maxRelic);
+
+      const affectedPhases = Array.from(slotsByPhase.entries()).map(([key, count]) => {
+        const [phase, category] = key.split(':');
+        const coverage = matching.coverage.find(
+          c => c.phase === parseInt(phase) && c.category === category
+        );
+
+        return {
+          phase: parseInt(phase),
+          category,
+          currentCoverage: coverage?.coveragePercent || 0,
+          newCoverage: coverage
+            ? Math.round(
+                ((coverage.assignedCount + count) / coverage.requirementCount) * 100
+              )
+            : 0,
+          slotsAdded: count,
+        };
       });
 
-      // Filtere nach spezifischer Phase/Category wenn Query-Parameter gesetzt sind
-      if (phaseFilter && categoryFilter) {
-        const phaseNum = parseInt(phaseFilter);
-        filteredRecommendations = filteredRecommendations
-          .map(rec => {
-            // Filtere affectedPhases auf die ausgewählte Phase/Category
-            const matchingPhases = rec.affectedPhases.filter(
-              p => p.phase === phaseNum && p.category === categoryFilter
-            );
-            if (matchingPhases.length === 0) return null;
-            
-            // Berechne slotsUnlocked nur für die gefilterte Phase
-            const slotsUnlockedForFilter = matchingPhases.reduce((sum, p) => sum + p.slotsAdded, 0);
-            
-            return {
-              ...rec,
-              slotsUnlocked: slotsUnlockedForFilter,
-              affectedPhases: matchingPhases,
-            };
-          })
-          .filter((rec): rec is NonNullable<typeof rec> => rec !== null);
+      const totalCoverageGain = affectedPhases.reduce(
+        (sum, phase) => sum + (phase.newCoverage - phase.currentCoverage),
+        0
+      );
+
+      if (totalCoverageGain <= 0) continue;
+
+      const impactScore = calculateUpgradeScore(
+        slotsUnlocked,
+        0,
+        maxRelic,
+        affectedPhases
+      );
+
+      const priority = determinePriority(impactScore);
+
+      recommendations.push({
+        unitBaseId,
+        unitName,
+        currentRelic: 0,
+        recommendedRelic: maxRelic,
+        fromRelic: 0,
+        toRelic: maxRelic,
+        slotsUnlocked,
+        affectedPhases,
+        estimatedCost: cost,
+        impactScore,
+        priority,
+      });
+    }
+
+    // Sortiere nach Impact
+    recommendations.sort((a, b) => b.impactScore - a.impactScore);
+
+    // Pro Unit nur die beste Recommendation behalten
+    const bestRecommendationByUnit = new Map<string, UpgradeRecommendation>();
+    for (const rec of recommendations) {
+      const existing = bestRecommendationByUnit.get(rec.unitBaseId);
+      if (!existing || rec.impactScore > existing.impactScore) {
+        bestRecommendationByUnit.set(rec.unitBaseId, rec);
       }
+    }
 
-      const potentialGain = filteredRecommendations.reduce((sum, r) => sum + r.slotsUnlocked, 0);
+    const dedupedRecommendations = Array.from(bestRecommendationByUnit.values());
+    dedupedRecommendations.sort((a, b) => b.impactScore - a.impactScore);
 
-      return {
-        memberId: member.memberId,
-        playerName: member.playerName,
-        allyCode: member.allyCode,
-        recommendations: filteredRecommendations.slice(0, 3), // Top 3 nächste Schritte
-        currentContributions: memberContributions,
-        potentialGain,
-      };
-    });
+    // Nur Recommendations für unvollständige Coverage behalten
+    let filteredRecommendations = dedupedRecommendations.filter(rec =>
+      rec.affectedPhases.some(phase => phase.currentCoverage < 100)
+    );
+
+    // Optional auf konkrete Phase/Category filtern
+    if (phaseFilter && categoryFilter) {
+      const phaseNum = parseInt(phaseFilter);
+
+      filteredRecommendations = filteredRecommendations
+        .map(rec => {
+          const matchingPhases = rec.affectedPhases.filter(
+            p => p.phase === phaseNum && p.category === categoryFilter
+          );
+
+          if (matchingPhases.length === 0) return null;
+
+          const slotsUnlockedForFilter = matchingPhases.reduce(
+            (sum, p) => sum + p.slotsAdded,
+            0
+          );
+
+          return {
+            ...rec,
+            slotsUnlocked: slotsUnlockedForFilter,
+            affectedPhases: matchingPhases,
+          };
+        })
+        .filter((rec): rec is UpgradeRecommendation => rec !== null);
+    }
+
+    if (filteredRecommendations.length === 0) {
+      return [];
+    }
+
+    const potentialGain = filteredRecommendations.reduce(
+      (sum, r) => sum + r.slotsUnlocked,
+      0
+    );
+
+    return [{
+      memberId: member.memberId,
+      playerName: member.playerName,
+      allyCode: member.allyCode,
+      recommendations: filteredRecommendations.slice(0, 3),
+      currentContributions: memberContributions,
+      potentialGain,
+    }];
+  });
 
     // Sortiere Member nach Potenzial
     memberRecommendations.sort((a, b) => b.potentialGain - a.potentialGain);
