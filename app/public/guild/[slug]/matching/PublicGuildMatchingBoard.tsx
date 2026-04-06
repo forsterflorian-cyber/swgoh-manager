@@ -19,7 +19,7 @@ import {
   normalizeIgnoredMatchingScopes,
 } from '@/lib/utils/matching-scopes';
 import { useWorkingOverlay } from '@/lib/utils/use-working-overlay';
-import UpgradeRecommendations from './UpgradeRecommendations';
+import UpgradeRecommendations, { type UpgradeRecommendationsData } from './UpgradeRecommendations';
 import type {
   IgnoredMatchingScope,
   PlatoonMatchingGap,
@@ -31,6 +31,7 @@ type Props = {
   slug: string;
   guildName: string;
   tbKey: string;
+  initialUpgradeData?: UpgradeRecommendationsData | null;
   matchingInput: StrategicPlannerMatchingInput;
   matching: PlatoonMatchingResult;
 };
@@ -455,8 +456,9 @@ export default function PublicGuildMatchingBoard({
   tbKey,
   matchingInput,
   matching,
+  initialUpgradeData = null,
 }: Props) {
-  const [mode, setMode] = useState<ViewMode>('officer');
+  const [mode, setMode] = useState<ViewMode>('member');
   const [phaseFilter, setPhaseFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [memberFilter, setMemberFilter] = useState<string>('all');
@@ -791,6 +793,17 @@ export default function PublicGuildMatchingBoard({
 
   const visibleGaps = platoonDetailGaps;
 
+  const showOfficerFilters = mode === 'officer';
+  const showMemberFilters = mode === 'member';
+  const showUpgradeFilters = mode === 'upgrades';
+
+  const modeSummary =
+    mode === 'officer'
+      ? 'Run scenario planning, inspect incomplete scopes, and export fill instructions for officers.'
+      : mode === 'member'
+        ? 'Focus one player at a time: see current placements, likely gaps, and where a roster can still help.'
+        : 'Upgrade advisory stays separate from live matching so recommendations read like a planning queue, not solver output.';
+
   return (
     <main className="min-h-screen">
       <div className="relative mx-auto max-w-7xl px-6 py-8">
@@ -886,9 +899,9 @@ export default function PublicGuildMatchingBoard({
           {/* View Mode Tabs */}
           <div className="mb-6 flex flex-wrap gap-3">
             {[
-              { key: 'officer', label: 'Officer view', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
-              { key: 'member', label: 'Member view', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
-              { key: 'upgrades', label: '🎯 Upgrade-Empfehlungen', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+              { key: 'officer', label: 'Coverage board', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+              { key: 'member', label: 'Member focus', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+              { key: 'upgrades', label: 'Upgrade advisory', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
             ].map((view) => (
               <button
                 key={view.key}
@@ -907,6 +920,10 @@ export default function PublicGuildMatchingBoard({
             ))}
           </div>
 
+          <div className="mb-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-secondary)]/60 px-4 py-3 text-sm text-[var(--color-text-muted)]">
+            {modeSummary}
+          </div>
+
           {/* Filters */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
             <FilterSelect value={phaseFilter} onChange={setPhaseFilter}>
@@ -919,7 +936,7 @@ export default function PublicGuildMatchingBoard({
               <option value="6">P6</option>
             </FilterSelect>
 
-              <FilterSelect
+            <FilterSelect
               value={categoryFilter}
               onChange={(value) => setCategoryFilter(value as CategoryFilter)}
             >
@@ -930,61 +947,71 @@ export default function PublicGuildMatchingBoard({
               <option value="BONUS">Bonus</option>
             </FilterSelect>
 
-            <FilterSelect value={memberFilter} onChange={setMemberFilter}>
-              <option value="all">All members</option>
-              {uniqueMembers.map((member) => (
-                <option key={member} value={member}>
-                  {member}
-                </option>
-              ))}
-            </FilterSelect>
+            {!showUpgradeFilters && (
+              <FilterSelect value={memberFilter} onChange={setMemberFilter}>
+                <option value="all">All members</option>
+                {uniqueMembers.map((member) => (
+                  <option key={member} value={member}>
+                    {member}
+                  </option>
+                ))}
+              </FilterSelect>
+            )}
 
-            <FilterSelect value={effectivePlatoonFilter} onChange={setPlatoonFilter}>
-              <option value="all">All platoons</option>
-              {availablePlatoons.map((platoon, index) => (
-                <option key={platoon.platoonKey} value={platoon.platoonKey}>
-                  {formatPlatoonTitle({
-                    platoonNumber: platoon.platoonNumber,
-                    platoonKey: platoon.platoonKey,
-                    fallbackIndex: index,
-                  })}
-                </option>
-              ))}
-            </FilterSelect>
+            {showOfficerFilters && (
+              <FilterSelect value={effectivePlatoonFilter} onChange={setPlatoonFilter}>
+                <option value="all">All platoons</option>
+                {availablePlatoons.map((platoon, index) => (
+                  <option key={platoon.platoonKey} value={platoon.platoonKey}>
+                    {formatPlatoonTitle({
+                      platoonNumber: platoon.platoonNumber,
+                      platoonKey: platoon.platoonKey,
+                      fallbackIndex: index,
+                    })}
+                  </option>
+                ))}
+              </FilterSelect>
+            )}
 
-            <FilterSelect
-              value={statusFilter}
-              onChange={(value) => setStatusFilter(value as StatusFilter)}
-            >
-              <option value="all">All status</option>
-              <option value="gaps_only">Gaps only</option>
-              <option value="assigned_only">Assigned only</option>
-              <option value="placeable_only">Placeable gaps only</option>
-              <option value="unresolved_only">Unresolved gaps only</option>
-            </FilterSelect>
+            {!showUpgradeFilters && (
+              <FilterSelect
+                value={statusFilter}
+                onChange={(value) => setStatusFilter(value as StatusFilter)}
+              >
+                <option value="all">All status</option>
+                <option value="gaps_only">Gaps only</option>
+                <option value="assigned_only">Assigned only</option>
+                <option value="placeable_only">Placeable gaps only</option>
+                <option value="unresolved_only">Unresolved gaps only</option>
+              </FilterSelect>
+            )}
 
-            <FilterSelect
-              value={coverageStatusFilter}
-              onChange={(value) => setCoverageStatusFilter(value as CoverageStatusFilter)}
-            >
-              <option value="all">All coverage</option>
-              <option value="full">100%</option>
-              <option value="partial">Partial</option>
-              <option value="empty">Empty</option>
-            </FilterSelect>
+            {showOfficerFilters && (
+              <FilterSelect
+                value={coverageStatusFilter}
+                onChange={(value) => setCoverageStatusFilter(value as CoverageStatusFilter)}
+              >
+                <option value="all">All coverage</option>
+                <option value="full">100%</option>
+                <option value="partial">Partial</option>
+                <option value="empty">Empty</option>
+              </FilterSelect>
+            )}
 
-            <input
-              value={unitQuery}
-              onChange={(e) => setUnitQuery(e.target.value)}
-              placeholder="Search unit"
-              className="input"
-            />
+            {!showUpgradeFilters && (
+              <input
+                value={unitQuery}
+                onChange={(e) => setUnitQuery(e.target.value)}
+                placeholder={showMemberFilters ? 'Search unit for one member' : 'Search unit'}
+                className="input"
+              />
+            )}
           </div>
         </section>
 
         {/* Content based on mode */}
         {mode === 'upgrades' ? (
-          <UpgradeRecommendations slug={slug} />
+          <UpgradeRecommendations slug={slug} initialData={initialUpgradeData} />
         ) : (
           <>
             {ignoredScopes.length > 0 && (

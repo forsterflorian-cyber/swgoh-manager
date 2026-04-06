@@ -458,7 +458,7 @@ const finalScore = round2(Math.max(0, recommendation.impactScore - diversityPena
       let hasLargeMetaStep = false;
 
       for (const recommendation of rescored) {
-        if (picked.length >= 3) break;
+        if (picked.length >= 5) break;
         if (seenUnits.has(recommendation.unitBaseId)) continue;
 
         const isLargeMetaStep =

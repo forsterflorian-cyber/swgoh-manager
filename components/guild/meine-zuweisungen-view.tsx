@@ -1,47 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { AlertTriangle, ArrowRight, CheckCircle2, LogIn, Sparkles } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
 import type { ApiEnvelope } from '@/lib/types/api';
+import type { MyAssignmentsData, PlatoonAssignment, UpgradeRecommendation } from '@/lib/services/my-assignments';
 import { routes } from '@/lib/utils/routes';
-
-type PlatoonAssignment = {
-  phase: number;
-  zoneName: string;
-  platoonNumber: number;
-  slotNumber: number;
-  unitName: string | null;
-  unitBaseId: string;
-  currentRelicTier: number | null;
-};
-
-type UpgradeRecommendation = {
-  unitBaseId: string;
-  unitName: string;
-  currentRelic: number;
-  recommendedRelic: number;
-  slotsUnlocked: number;
-  priority: 'top' | 'good' | 'longterm';
-  affectedPhases: { phase: number; category: string; slotsAdded: number }[];
-};
-
-type MyAssignmentsData = {
-  playerName: string | null;
-  guildName: string;
-  guildSlug: string;
-  hasRosterData: boolean;
-  platoonAssignments: PlatoonAssignment[];
-  upgradeAdvisory: UpgradeRecommendation[];
-};
-
 type Props = {
   guildId: string;
   guildName: string;
   guildSlug: string;
+  initialSessionState?: 'authenticated' | 'unauthenticated';
+  initialData?: MyAssignmentsData | null;
+  initialError?: string | null;
 };
 
 function RelicBadge({ tier }: { tier: number | null }) {
@@ -135,30 +108,38 @@ function AdvisoryCard({ rec }: { rec: UpgradeRecommendation }) {
   );
 }
 
-export function MeineZuweisungenView({ guildId, guildName, guildSlug }: Props) {
-  const { status: sessionStatus } = useSession();
-  const [data, setData] = useState<MyAssignmentsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function MeineZuweisungenView({
+  guildId,
+  guildName,
+  guildSlug,
+  initialSessionState = 'unauthenticated',
+  initialData = null,
+  initialError = null,
+}: Props) {
+  const [sessionState, setSessionState] = useState<'authenticated' | 'unauthenticated'>(initialSessionState);
+  const [data, setData] = useState<MyAssignmentsData | null>(initialData);
+  const [loading, setLoading] = useState(initialSessionState === 'authenticated' && !initialData && !initialError);
+  const [error, setError] = useState<string | null>(initialError);
 
   useEffect(() => {
-    if (sessionStatus !== 'authenticated') {
-      setLoading(false);
+    if (initialData || initialError || initialSessionState !== 'authenticated') {
       return;
     }
 
     async function load() {
       try {
-        const res = await fetch(`/api/guild/${guildId}/my-assignments`);
+        const res = await fetch(`/api/guild/${guildId}/my-assignments`, { cache: 'no-store' });
         const payload = (await res.json()) as ApiEnvelope<MyAssignmentsData>;
 
         if (!res.ok || !payload.ok) {
-          if (res.status === 403) setError('not_registered');
+          if (res.status === 401) setSessionState('unauthenticated');
+          else if (res.status === 403) setError('not_registered');
           else if (res.status === 422) setError('relogin');
           else setError(!payload.ok ? payload.error : 'Failed to load assignments');
           return;
         }
 
+        setSessionState('authenticated');
         setData(payload.data);
       } catch {
         setError('Network error. Please try again.');
@@ -168,13 +149,13 @@ export function MeineZuweisungenView({ guildId, guildName, guildSlug }: Props) {
     }
 
     void load();
-  }, [guildId, sessionStatus]);
+  }, [guildId, initialData, initialError, initialSessionState]);
 
-  if (sessionStatus === 'loading' || loading) {
+  if (loading) {
     return <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-slate-400">Loading your workspace…</div>;
   }
 
-  if (sessionStatus !== 'authenticated') {
+  if (sessionState !== 'authenticated') {
     return (
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
         <div className="flex items-start gap-3">

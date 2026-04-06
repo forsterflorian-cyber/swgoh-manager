@@ -4,9 +4,10 @@ import { sql } from '@vercel/postgres';
 import { AppContainer, AppShell } from '@/components/app/AppShell';
 import { MeineZuweisungenView } from '@/components/guild/meine-zuweisungen-view';
 import { Navbar } from '@/components/layout/Navbar';
-import { WorkspaceHeader, WorkspaceTabs } from '@/components/workspace/WorkspacePrimitives';
+import { WorkspaceHeader } from '@/components/workspace/WorkspacePrimitives';
 import { Badge } from '@/components/ui/Badge';
-import { routes } from '@/lib/utils/routes';
+import { getAuthenticatedUser } from '@/lib/api/auth';
+import { loadMyAssignmentsForGuild } from '@/lib/services/my-assignments';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +20,24 @@ export default async function MeineZuweisungenPage({ params }: { params: Promise
   }
 
   const guild = result.rows[0];
+  const user = await getAuthenticatedUser();
+
+  let initialSessionState: 'authenticated' | 'unauthenticated' = user ? 'authenticated' : 'unauthenticated';
+  let initialData = null;
+  let initialError: string | null = null;
+
+  if (user) {
+    const loadResult = await loadMyAssignmentsForGuild(user.id, guild.id);
+    if (loadResult.ok) {
+      initialData = loadResult.data;
+    } else if (loadResult.status === 403) {
+      initialError = 'not_registered';
+    } else if (loadResult.status === 422) {
+      initialError = 'relogin';
+    } else {
+      initialError = loadResult.error;
+    }
+  }
 
   return (
     <AppShell>
@@ -28,21 +47,19 @@ export default async function MeineZuweisungenPage({ params }: { params: Promise
           <WorkspaceHeader
             eyebrow="Member workspace"
             title={`My assignments · ${guild.name}`}
-            description="This page should answer one question quickly: what am I expected to contribute right now? Registration, assignments and upgrade advice stay in the same member flow."
+            description="This page should answer one question quickly: what am I expected to contribute right now? Assignments stay primary, upgrade targets stay complete, and navigation stays out of the way."
             badges={<><Badge variant="success">Task workspace</Badge><Badge>Personal view</Badge></>}
           />
 
-          <WorkspaceTabs
-            currentPath={routes.assignments(slug)}
-            tabs={[
-              { href: routes.registration(slug), label: 'Registration', hint: 'Identity and ally code' },
-              { href: routes.assignments(slug), label: 'My assignments', hint: 'Current platoon work' },
-              { href: routes.publicGuild(slug), label: 'Guild board', hint: 'Shared read-only view' },
-            ]}
-          />
-
           <div className="rounded-[24px] border border-white/10 bg-slate-950/70 p-5 shadow-xl shadow-black/20">
-            <MeineZuweisungenView guildId={guild.id} guildName={guild.name} guildSlug={slug} />
+            <MeineZuweisungenView
+              guildId={guild.id}
+              guildName={guild.name}
+              guildSlug={slug}
+              initialSessionState={initialSessionState}
+              initialData={initialData}
+              initialError={initialError}
+            />
           </div>
         </div>
       </AppContainer>

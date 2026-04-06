@@ -32,7 +32,7 @@ type MemberRecommendation = {
   potentialGain: number;
 };
 
-type UpgradeRecommendationsData = {
+export type UpgradeRecommendationsData = {
   guildName: string;
   incompletePhases: {
     phase: number;
@@ -51,8 +51,8 @@ type UpgradeRecommendationsData = {
 
 type Props = {
   slug: string;
+  initialData?: UpgradeRecommendationsData | null;
 };
-
 const PRIORITY_CONFIG = {
   top: {
     label: 'Top Empfehlung',
@@ -209,9 +209,9 @@ function PhaseOverview({
   );
 }
 
-export default function UpgradeRecommendations({ slug }: Props) {
-  const [data, setData] = useState<UpgradeRecommendationsData | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function UpgradeRecommendations({ slug, initialData = null }: Props) {
+  const [data, setData] = useState<UpgradeRecommendationsData | null>(initialData);
+  const [loading, setLoading] = useState(initialData === null);
   const [error, setError] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [phaseCategoryFilter, setPhaseCategoryFilter] = useState<string>('all');
@@ -260,23 +260,29 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
   };
 
   useEffect(() => {
+    if (initialData && phaseCategoryFilter === 'all') {
+      setData(initialData);
+      setLoading(false);
+      return;
+    }
+
     async function loadData() {
       try {
         setLoading(true);
-        // Baue Query-Parameter basierend auf Filter
+        setError(null);
         const params = new URLSearchParams();
         if (phaseCategoryFilter !== 'all') {
           const [phase, category] = phaseCategoryFilter.split('-');
           params.set('phase', phase);
           params.set('category', category);
         }
-        
+
         const queryString = params.toString();
         const url = `/api/public/guild/${slug}/upgrade-recommendations${queryString ? `?${queryString}` : ''}`;
-        
-        const res = await fetch(url);
+
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error('Failed to load recommendations');
-        const json = await res.json();
+        const json = (await res.json()) as UpgradeRecommendationsData;
         setData(json);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -284,8 +290,8 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
         setLoading(false);
       }
     }
-    loadData();
-  }, [slug, phaseCategoryFilter]);
+    void loadData();
+  }, [slug, phaseCategoryFilter, initialData]);
 
   const filteredMembers = useMemo(() => {
     if (!data) return [];
@@ -330,7 +336,7 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
               🎯 Upgrade-Empfehlungen
             </h2>
             <p className="mt-2 text-gray-300">
-              Die 3 nächsten besten Schritte für jedes Mitglied. Gilde schafft aktuell{' '}
+              Die wichtigsten Upgrade-Schritte pro Mitglied, ohne künstliche Drei-Item-Grenze. Gilde schafft aktuell{' '}
               <span className="font-semibold text-white">
                 {data.summary.currentGuildCoverage}%
               </span>
