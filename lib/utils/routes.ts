@@ -14,6 +14,8 @@ export const routes = {
   matching: (slug: string) => `/public/guild/${slug}/matching`,
   publicMatching: (slug: string) => `/public/guild/${slug}/matching`,
   simulator: (slug: string) => `/public/guild/${slug}/simulator`,
+  publicSimulator: (slug: string) => `/public/guild/${slug}/simulator`,
   targets: (slug: string) => `/public/guild/${slug}/targets`,
+  publicGuildBoard: (slug: string) => `/gilde/${slug}`,
   livePlanner: (instanceId: string, phase = 1) => `/tb/${instanceId}/phase/${phase}`,
 };

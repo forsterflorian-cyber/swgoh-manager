@@ -8,6 +8,20 @@ export type SelectedCoverageCell = {
   category: PlanetCategory;
 } | null;
 
+export type Notice = {
+  tone: 'success' | 'error';
+  message: string;
+};
+
+export type ProgressionBucket = 'actionable_now' | 'next_up' | 'later';
+
+export const BUCKET_ORDER: ProgressionBucket[] = [
+  'actionable_now',
+  'next_up',
+  'later',
+];
+
+
 export type PlannerPlatoonCardData = {
   phase: number;
   zoneKey: string;
@@ -96,4 +110,9 @@ export function buildPlannerViewHref(view: PlannerViewKey, fixture: string | nul
 
   const query = params.toString();
   return query ? `/planning/platoons?${query}` : '/planning/platoons';
+}
+
+
+export function isPlannerViewKey(value: string): value is PlannerViewKey {
+  return value === 'overview' || value === 'priorities' || value === 'targets' || value === 'matching';
 }

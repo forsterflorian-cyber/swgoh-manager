@@ -590,9 +590,14 @@ export function PrioritiesView({
         return db.blockedPlatoonsInScope - da.blockedPlatoonsInScope;
       return b.impactScore - a.impactScore;
     }
-    const bucketDiff =
-      BUCKET_ORDER[getUnitEarliestBucket(a.unitBaseId, slotSummaries)] -
-      BUCKET_ORDER[getUnitEarliestBucket(b.unitBaseId, slotSummaries)];
+    const BUCKET_RANK: Record<ProgressionBucket, number> = {
+  actionable_now: 0,
+  next_up: 1,
+  later: 2,
+};
+const bucketDiff =
+  BUCKET_RANK[getUnitEarliestBucket(a.unitBaseId, slotSummaries)] -
+  BUCKET_RANK[getUnitEarliestBucket(b.unitBaseId, slotSummaries)];
     if (bucketDiff !== 0) return bucketDiff;
     return (
       getUnitProgressionScore(a.unitBaseId, slotSummaries, zoneProgressionOrder) -

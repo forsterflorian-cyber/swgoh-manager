@@ -1,17 +1,17 @@
 'use client';
 
+import { Suspense, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ShieldCheck, UserRound } from 'lucide-react';
 import { signIn, useSession } from 'next-auth/react';
-import { useEffect } from 'react';
 
 import { AppContainer, AppSection, AppShell } from '@/components/app/AppShell';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { routes } from '@/lib/utils/routes';
 
-export default function LoginPage() {
+function LoginPageContent() {
   const { status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -101,5 +101,23 @@ export default function LoginPage() {
         </div>
       </AppContainer>
     </AppShell>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <AppShell>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      </div>
+    </AppShell>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

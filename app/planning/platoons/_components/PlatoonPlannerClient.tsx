@@ -16,8 +16,8 @@ import type {
 import {
   buildPlannerViewHref,
   isPlannerViewKey,
-  type Notice,
   type SelectedCoverageCell,
+  type Notice,
 } from '../_lib/planner-types';
 import {
   MatchingView,
@@ -31,12 +31,14 @@ import {
   HeaderPill,
 } from './PlatoonPlannerViews';
 
+
+
 export function PlatoonPlannerClient() {
   const [selectedCoverageCell, setSelectedCoverageCell] = useState<SelectedCoverageCell>(null);
   const searchParams = useSearchParams();
   const fixture = searchParams.get('fixture');
-  const requestedView = searchParams.get('view');
-  const plannerView = isPlannerViewKey(requestedView) ? requestedView : 'overview';
+const requestedView = searchParams.get('view');
+const plannerView = requestedView && isPlannerViewKey(requestedView) ? requestedView : 'overview';
   const [data, setData] = useState<StrategicPlannerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
