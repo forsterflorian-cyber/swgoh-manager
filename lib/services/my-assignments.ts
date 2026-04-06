@@ -6,6 +6,7 @@ import {
 } from '@/lib/api/auth';
 import { loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
 import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+import { buildUpgradeAdvisory } from '@/lib/services/upgrade-advisory';
 
 export type PlatoonAssignment = {
   phase: number;
@@ -25,6 +26,8 @@ export type UpgradeRecommendation = {
   slotsUnlocked: number;
   priority: 'top' | 'good' | 'longterm';
   affectedPhases: { phase: number; category: string; slotsAdded: number }[];
+  estimatedCost?: number;
+  impactScore?: number;
 };
 
 export type MyAssignmentsData = {
@@ -161,73 +164,27 @@ export async function loadMyAssignmentsForGuild(
       currentRelicTier: rosterByUnit.get(a.unitBaseId)?.relicTier ?? null,
     }));
 
-  const upgradeAdvisory: UpgradeRecommendation[] = [];
+  let upgradeAdvisory: UpgradeRecommendation[] = [];
 
   if (matching) {
-    const gapsByUnit = new Map<string, typeof matching.gaps>();
-    for (const gap of matching.gaps) {
-      const existing = gapsByUnit.get(gap.unitBaseId) ?? [];
-      existing.push(gap);
-      gapsByUnit.set(gap.unitBaseId, existing);
-    }
+    const advisory = buildUpgradeAdvisory({
+      dataset,
+      matching,
+      memberId: registration.guildMemberId,
+      maxPerMember: null,
+    });
 
-    const memberRoster = dataset.roster.filter((r) => r.memberId === registration.guildMemberId);
-    const candidates: (UpgradeRecommendation & { impactScore: number })[] = [];
-
-    for (const unit of memberRoster) {
-      const gaps = gapsByUnit.get(unit.unitBaseId);
-      if (!gaps || gaps.length === 0) continue;
-
-      const openSlots = gaps.map((g) => ({
-        phase: g.phase,
-        category: g.planetCategory ?? 'MIX',
-        requiredRelic: g.minRelic,
-        requiredRarity: g.minRarity,
-      }));
-
-      const { maxRelic, slotsByPhase } = calculateUpgradeImpact(unit.relicTier, unit.rarity, openSlots);
-      if (maxRelic <= unit.relicTier) continue;
-
-      const slotsUnlocked = Array.from(slotsByPhase.values()).reduce((a, b) => a + b, 0);
-
-      const affectedPhasesWithCoverage = Array.from(slotsByPhase.entries()).map(([key, count]) => {
-        const [phaseStr, category] = key.split(':');
-        const phase = parseInt(phaseStr, 10);
-        const coverage = matching.coverage.find((c) => c.phase === phase && c.category === category);
-        return {
-          phase,
-          category,
-          currentCoverage: coverage?.coveragePercent ?? 0,
-          newCoverage: coverage
-            ? Math.round(((coverage.assignedCount + count) / coverage.requirementCount) * 100)
-            : 0,
-          slotsAdded: count,
-        };
-      });
-
-      const impactScore = calculateUpgradeScore(slotsUnlocked, unit.relicTier, maxRelic, affectedPhasesWithCoverage);
-      const priority = determinePriority(impactScore);
-
-      candidates.push({
-        unitBaseId: unit.unitBaseId,
-        unitName: unit.unitName,
-        currentRelic: unit.relicTier,
-        recommendedRelic: maxRelic,
-        slotsUnlocked,
-        priority,
-        affectedPhases: affectedPhasesWithCoverage.map(({ phase, category, slotsAdded }) => ({
-          phase,
-          category,
-          slotsAdded,
-        })),
-        impactScore,
-      });
-    }
-
-    candidates.sort((a, b) => b.impactScore - a.impactScore);
-    for (const { impactScore: _score, ...rec } of candidates.slice(0, 5)) {
-      upgradeAdvisory.push(rec);
-    }
+    upgradeAdvisory = advisory.memberRecommendations[0]?.recommendations.map((rec) => ({
+      unitBaseId: rec.unitBaseId,
+      unitName: rec.unitName,
+      currentRelic: rec.currentRelic,
+      recommendedRelic: rec.recommendedRelic,
+      slotsUnlocked: rec.slotsUnlocked,
+      priority: rec.priority,
+      affectedPhases: rec.affectedPhases.map(({ phase, category, slotsAdded }) => ({ phase, category, slotsAdded })),
+      estimatedCost: rec.estimatedCost,
+      impactScore: rec.impactScore,
+    })) ?? [];
   }
 
   return {

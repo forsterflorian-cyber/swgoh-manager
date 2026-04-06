@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle, ArrowRight, CheckCircle2, LogIn, Sparkles } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
+import { UpgradeAdvisoryCard } from '@/components/guild/UpgradeAdvisoryCard';
 import type { ApiEnvelope } from '@/lib/types/api';
 import type { MyAssignmentsData, PlatoonAssignment, UpgradeRecommendation } from '@/lib/services/my-assignments';
 import { routes } from '@/lib/utils/routes';
@@ -20,16 +21,6 @@ type Props = {
 function RelicBadge({ tier }: { tier: number | null }) {
   if (tier == null) return <span className="text-xs text-slate-500">—</span>;
   return <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-xs text-slate-300">R{tier}</span>;
-}
-
-function PriorityBadge({ priority }: { priority: 'top' | 'good' | 'longterm' }) {
-  const styles = {
-    top: 'border-amber-700 bg-amber-950/40 text-amber-200',
-    good: 'border-blue-700 bg-blue-950/40 text-blue-200',
-    longterm: 'border-white/10 bg-white/[0.03] text-slate-300',
-  } as const;
-  const labels = { top: 'Top priority', good: 'Good target', longterm: 'Long-term' };
-  return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${styles[priority]}`}>{labels[priority]}</span>;
 }
 
 function ExpandIcon({ open }: { open: boolean }) {
@@ -84,26 +75,6 @@ function PhaseBox({ phase, assignments }: { phase: number; assignments: PlatoonA
           ))}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function AdvisoryCard({ rec }: { rec: UpgradeRecommendation }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold text-white">{rec.unitName}</div>
-          <div className="mt-1 text-xs text-slate-500">R{rec.currentRelic} → R{rec.recommendedRelic}</div>
-        </div>
-        <PriorityBadge priority={rec.priority} />
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
-        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1">+{rec.slotsUnlocked} slots unlocked</span>
-        {rec.affectedPhases.map((phase, index) => (
-          <span key={index} className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1">P{phase.phase} {phase.category} +{phase.slotsAdded}</span>
-        ))}
-      </div>
     </div>
   );
 }
@@ -251,7 +222,7 @@ export function MeineZuweisungenView({
               <h2 className="mt-2 text-xl font-semibold">Targets worth considering</h2>
             </div>
             <div className="space-y-3">
-              {data.upgradeAdvisory.length > 0 ? data.upgradeAdvisory.map((rec, index) => <AdvisoryCard key={`${rec.unitBaseId}-${index}`} rec={rec} />) : <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">No upgrade targets are currently recommended.</div>}
+              {data.upgradeAdvisory.length > 0 ? data.upgradeAdvisory.map((rec, index) => <UpgradeAdvisoryCard key={`${rec.unitBaseId}-${index}`} unitName={rec.unitName} currentRelic={rec.currentRelic} recommendedRelic={rec.recommendedRelic} priority={rec.priority} slotsUnlocked={rec.slotsUnlocked} affectedPhases={rec.affectedPhases} estimatedCost={rec.estimatedCost} impactScore={rec.impactScore} />) : <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">No upgrade targets are currently recommended.</div>}
             </div>
           </section>
         </div>

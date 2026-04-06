@@ -216,7 +216,7 @@ function OverviewView({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                Biggest Blockers
+                Main blockers
               </p>
               <h3 className="mt-2 text-2xl font-semibold text-white">
                 The units worth leadership attention first
@@ -345,10 +345,10 @@ function OverviewView({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Top Blocked Zones
+              Most constrained zones
             </p>
             <h3 className="mt-2 text-2xl font-semibold text-white">
-              Where readiness breaks first
+              Where open slots stay concentrated
             </h3>
           </div>
           <Link

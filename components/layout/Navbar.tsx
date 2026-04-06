@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { LayoutDashboard, Settings, UserRound, Swords, ClipboardList, ArrowUpRight } from 'lucide-react';
+import { LayoutDashboard, Settings, UserRound, Swords, ClipboardList, ArrowUpRight, Sparkles } from 'lucide-react';
 
 import { LogoutButton } from '@/components/auth/logout-button';
 import { WorkspaceSwitcher, type WorkspaceMode, type WorkspaceOption } from '@/components/layout/WorkspaceSwitcher';
@@ -112,6 +112,12 @@ export function Navbar() {
             hint: 'Member-facing matching view',
             icon: <ArrowUpRight className="h-4 w-4" />,
           },
+          {
+            href: routes.simulator(ctx.adminGuild.slug),
+            label: 'Simulator',
+            hint: 'Sandbox and exports',
+            icon: <Sparkles className="h-4 w-4" />,
+          },
         ]
       : []),
   ];
@@ -135,6 +141,12 @@ export function Navbar() {
           label: 'Guild board',
           hint: 'Read-only planning view',
           icon: <Swords className="h-4 w-4" />,
+        },
+        {
+          href: routes.simulator(ctx.memberGuild.slug),
+          label: 'Simulator',
+          hint: 'Sandbox and exports',
+          icon: <Sparkles className="h-4 w-4" />,
         },
       ]
     : [];

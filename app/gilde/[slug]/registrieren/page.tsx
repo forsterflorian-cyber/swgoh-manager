@@ -5,7 +5,7 @@ import { sql } from '@vercel/postgres';
 import { AppContainer, AppShell } from '@/components/app/AppShell';
 import { Navbar } from '@/components/layout/Navbar';
 import { RegistrierungForm } from '@/components/guild/registrierung-form';
-import { WorkspaceHeader, WorkspaceTabs } from '@/components/workspace/WorkspacePrimitives';
+import { WorkspaceHeader } from '@/components/workspace/WorkspacePrimitives';
 import { Badge } from '@/components/ui/Badge';
 import { routes } from '@/lib/utils/routes';
 
@@ -31,15 +31,6 @@ export default async function RegistrierungPage({ params }: { params: Promise<{ 
             title={`Register for ${guild.name}`}
             description="Link your Discord identity to the correct ally code once. After that, your personal assignment view and upgrade hints can resolve against your synced roster."
             badges={<><Badge variant="info">Guild slug: {slug}</Badge><Badge>Identity step</Badge></>}
-          />
-
-          <WorkspaceTabs
-            currentPath={routes.registration(slug)}
-            tabs={[
-              { href: routes.registration(slug), label: 'Registration', hint: 'Link your ally code' },
-              { href: routes.assignments(slug), label: 'My assignments', hint: 'View personal tasks' },
-              { href: routes.publicGuild(slug), label: 'Guild board', hint: 'Read-only public overview' },
-            ]}
           />
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">

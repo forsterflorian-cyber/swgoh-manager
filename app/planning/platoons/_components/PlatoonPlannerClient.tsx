@@ -17,8 +17,13 @@ import {
   buildPlannerViewHref,
   isPlannerViewKey,
   type SelectedCoverageCell,
-  type Notice,
 } from '../_lib/planner-types';
+
+type Notice = {
+  tone: 'success' | 'error';
+  message: string;
+};
+
 import {
   MatchingView,
   MemberTargetsView,

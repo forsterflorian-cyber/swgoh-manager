@@ -7,12 +7,6 @@ export type SelectedCoverageCell = {
   phase: number;
   category: PlanetCategory;
 } | null;
-
-export type Notice = {
-  tone: 'success' | 'error';
-  message: string;
-};
-
 export type ProgressionBucket = 'actionable_now' | 'next_up' | 'later';
 
 export const BUCKET_ORDER: ProgressionBucket[] = [
@@ -20,8 +14,6 @@ export const BUCKET_ORDER: ProgressionBucket[] = [
   'next_up',
   'later',
 ];
-
-
 export type PlannerPlatoonCardData = {
   phase: number;
   zoneKey: string;

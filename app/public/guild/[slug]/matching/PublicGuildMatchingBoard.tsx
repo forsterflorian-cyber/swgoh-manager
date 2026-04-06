@@ -69,6 +69,19 @@ type MatchingPlatoonSection = {
   totalCount: number;
 };
 
+
+const CATEGORY_SORT_ORDER: Record<string, number> = {
+  DS: 0,
+  LS: 1,
+  MIX: 2,
+  SPECIAL: 3,
+};
+
+function getCategorySortValue(category: string | null, isBonus: boolean) {
+  if (isBonus) return CATEGORY_SORT_ORDER.SPECIAL;
+  return CATEGORY_SORT_ORDER[category ?? 'MIX'] ?? 99;
+}
+
 const GAP_ACTION_META: Record<
   PlatoonMatchingGap['recommendedAction'],
   { label: string; variant: 'success' | 'warning' | 'danger' | 'info' }
@@ -222,10 +235,10 @@ function buildMatchingPlatoonSections(
       rows: section.rows.toSorted((left, right) => left.slotNumber - right.slotNumber),
     }))
     .toSorted((left, right) => {
-      if (left.platoonNumber !== right.platoonNumber) {
-        return left.platoonNumber - right.platoonNumber;
-      }
-
+      if (left.phase !== right.phase) return left.phase - right.phase;
+      const categoryDiff = getCategorySortValue(left.category, left.isBonus) - getCategorySortValue(right.category, right.isBonus);
+      if (categoryDiff !== 0) return categoryDiff;
+      if (left.platoonNumber !== right.platoonNumber) return left.platoonNumber - right.platoonNumber;
       return left.platoonKey.localeCompare(right.platoonKey);
     });
 }
@@ -839,7 +852,7 @@ export default function PublicGuildMatchingBoard({
                   <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
-                  Next Full Platoon Simulator
+                  Open simulator
                 </button>
               </Link>
             </div>

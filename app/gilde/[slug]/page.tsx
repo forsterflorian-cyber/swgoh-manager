@@ -173,6 +173,11 @@ export default async function PublicGuildPage({ params }: { params: Promise<{ sl
                   <p className="mt-1 text-sm text-slate-400">Go directly to the personal member workspace after registration.</p>
                   <div className="mt-4"><Link href={routes.assignments(slug)}><Button fullWidth variant="secondary">Open personal view</Button></Link></div>
                 </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="text-sm font-medium text-white">Simulator</div>
+                  <p className="mt-1 text-sm text-slate-400">Open the public simulator when you need a planning sandbox or Discord-ready exports.</p>
+                  <div className="mt-4"><Link href={routes.simulator(slug)}><Button fullWidth variant="secondary">Open simulator</Button></Link></div>
+                </div>
                 <div className="rounded-2xl border border-blue-900/60 bg-blue-950/20 p-4">
                   <div className="text-sm font-medium text-white">Officer-only actions</div>
                   <p className="mt-1 text-sm text-slate-400">Guild setup, sync, publishing and live board management remain protected.</p>

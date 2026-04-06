@@ -9,7 +9,7 @@ import { IgnoreMemberButton } from '@/components/guild/ignore-member-button';
 import { Navbar } from '@/components/layout/Navbar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { WorkspaceHeader, WorkspaceTabs } from '@/components/workspace/WorkspacePrimitives';
+import { WorkspaceHeader } from '@/components/workspace/WorkspacePrimitives';
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import {
   getGuildMemberList,
@@ -54,14 +54,6 @@ export default async function GuildSettingsPage() {
               title="Set up your guild workspace"
               description="Start with the guild ID and public slug. After that, the rest of the app has a stable identity for sync, public links and member-facing routes."
               badges={<><Badge variant="info">Setup flow</Badge><Badge>Step 1 of 3</Badge></>}
-            />
-
-            <WorkspaceTabs
-              currentPath={routes.guildSettings()}
-              tabs={[
-                { href: routes.dashboard(), label: 'Overview', hint: 'Guild status and sync health' },
-                { href: routes.guildSettings(), label: 'Guild setup', hint: 'Identity and links' },
-              ]}
             />
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
@@ -124,15 +116,6 @@ export default async function GuildSettingsPage() {
             title={`Guild setup · ${guild.name}`}
             description="This is the administrative surface. Keep identity, sync and sharing actions here so members do not need to wade through setup controls."
             badges={<><Badge variant="success">Officer access</Badge>{guild.slug ? <Badge>{guild.slug}</Badge> : null}</>}
-          />
-
-          <WorkspaceTabs
-            currentPath={routes.guildSettings()}
-            tabs={[
-              { href: routes.dashboard(), label: 'Overview', hint: 'Guild status and sync health' },
-              { href: routes.guildSettings(), label: 'Guild setup', hint: 'Identity and publishing' },
-              ...(guild.slug ? [{ href: routes.publicGuild(guild.slug), label: 'Guild board', hint: 'Open public view' }] : []),
-            ]}
           />
 
           <div className="grid gap-4 md:grid-cols-3">
