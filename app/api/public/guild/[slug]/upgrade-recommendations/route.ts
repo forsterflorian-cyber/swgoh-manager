@@ -56,6 +56,9 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const phaseFilter = searchParams.get('phase');
     const categoryFilter = searchParams.get('category');
+    const memberId = searchParams.get('memberId');
+    const limitParam = searchParams.get('limit');
+    const maxPerMember = limitParam === 'all' ? null : limitParam ? parseInt(limitParam, 10) : 5;
 
     const dataset = await loadStrategicPlannerDatasetForGuildSlug(slug);
 
@@ -69,7 +72,8 @@ export async function GET(
       matching,
       phaseFilter: phaseFilter ? parseInt(phaseFilter, 10) : null,
       categoryFilter,
-      maxPerMember: 5,
+      memberId,
+      maxPerMember: memberId ? null : maxPerMember,
     });
 
     const response: UpgradeRecommendationsResponse = {

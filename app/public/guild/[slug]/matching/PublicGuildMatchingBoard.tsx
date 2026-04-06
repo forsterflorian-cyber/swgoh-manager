@@ -152,6 +152,20 @@ function formatPlatoonScopeTitle(section: MatchingPlatoonSection, fallbackIndex?
   })}`;
 }
 
+
+function getPlatoonSortNumber(platoonNumber?: number | null, platoonKey?: string | null) {
+  if (typeof platoonNumber === 'number' && platoonNumber > 0) {
+    return platoonNumber;
+  }
+
+  const match = platoonKey?.match(/(?:platoon|pl)-?(\d+)/i);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+}
+
 function formatBestNextAction(
   gap: PlatoonMatchingGap,
   bestGapCandidateByKey: Map<string, ReturnType<typeof buildGapRecommendationCandidates>[number]>,
@@ -735,6 +749,17 @@ export default function PublicGuildMatchingBoard({
 
         if (a.phase !== b.phase) return a.phase - b.phase;
 
+        const categoryDiff =
+  getCategorySortValue(a.planetCategory, a.isBonus ?? false) -
+  getCategorySortValue(b.planetCategory, b.isBonus ?? false);
+        if (categoryDiff !== 0) return categoryDiff;
+
+        const leftPlatoonNumber = getPlatoonSortNumber(a.platoonNumber, a.platoonKey);
+        const rightPlatoonNumber = getPlatoonSortNumber(b.platoonNumber, b.platoonKey);
+        if (leftPlatoonNumber !== rightPlatoonNumber) {
+          return leftPlatoonNumber - rightPlatoonNumber;
+        }
+
         const leftPlatoonKey = a.platoonKey ?? '';
         const rightPlatoonKey = b.platoonKey ?? '';
         if (leftPlatoonKey !== rightPlatoonKey) {
@@ -766,6 +791,15 @@ export default function PublicGuildMatchingBoard({
         }
 
         if (a.phase !== b.phase) return a.phase - b.phase;
+
+        const categoryDiff = getCategorySortValue(a.planetCategory, a.isBonus) - getCategorySortValue(b.planetCategory, b.isBonus);
+        if (categoryDiff !== 0) return categoryDiff;
+
+        const leftPlatoonNumber = getPlatoonSortNumber(a.platoonNumber, a.platoonKey);
+        const rightPlatoonNumber = getPlatoonSortNumber(b.platoonNumber, b.platoonKey);
+        if (leftPlatoonNumber !== rightPlatoonNumber) {
+          return leftPlatoonNumber - rightPlatoonNumber;
+        }
 
         const leftPlatoonKey = a.platoonKey ?? '';
         const rightPlatoonKey = b.platoonKey ?? '';

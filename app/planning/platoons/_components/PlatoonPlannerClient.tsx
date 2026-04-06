@@ -28,13 +28,13 @@ import {
   MatchingView,
   MemberTargetsView,
   OverviewView,
-  PlannerLoadingShell,
-  PlannerViewNavigation,
   PrioritiesView,
-  groupZonesByPhase,
   Banner,
   HeaderPill,
-} from './PlatoonPlannerViews';
+  PlannerLoadingShell,
+  PlannerViewNavigation,
+  groupZonesByPhase,
+} from './PlannerViews';
 
 
 

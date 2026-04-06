@@ -320,6 +320,7 @@ export interface PlatoonMatchingAssignment {
   planetCategory: PlanetCategory | null;
   memberId: string;
   playerName: string;
+  isBonus?: boolean;
 }
 
 /** Coverage summary for one (phase, planetCategory) group. */

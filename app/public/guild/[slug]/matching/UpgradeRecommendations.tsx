@@ -168,7 +168,7 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
   };
 
   useEffect(() => {
-    if (initialData && phaseCategoryFilter === 'all') {
+    if (initialData && phaseCategoryFilter === 'all' && selectedMember === null) {
       setData(initialData);
       setLoading(false);
       return;
@@ -183,6 +183,10 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
           const [phase, category] = phaseCategoryFilter.split('-');
           params.set('phase', phase);
           params.set('category', category);
+        }
+        if (selectedMember) {
+          params.set('memberId', selectedMember);
+          params.set('limit', 'all');
         }
 
         const queryString = params.toString();
@@ -199,21 +203,22 @@ ${completedPhases.length > 0 ? `✅ **Vollständige Phasen:** ${completedPhases.
       }
     }
     void loadData();
-  }, [slug, phaseCategoryFilter, initialData]);
+  }, [slug, phaseCategoryFilter, selectedMember, initialData]);
 
   const filteredMembers = useMemo(() => {
     if (!data) return [];
     
     let members = data.memberRecommendations;
-    
+
     if (selectedMember) {
-      members = members.filter(m => m.memberId === selectedMember);
+      members = members.filter((member) => member.memberId === selectedMember);
     }
-    
-    // Filterung erfolgt bereits serverseitig über Query-Parameter
-    // Hier nur noch clientseitiger Filter für den ausgewählten Member
-    
-    return members;
+
+    return [...members].sort((left, right) => {
+      if (right.potentialGain !== left.potentialGain) return right.potentialGain - left.potentialGain;
+      if (right.currentContributions !== left.currentContributions) return right.currentContributions - left.currentContributions;
+      return left.playerName.localeCompare(right.playerName);
+    });
   }, [data, selectedMember]);
 
   if (loading) {

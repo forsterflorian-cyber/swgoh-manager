@@ -492,13 +492,13 @@ export default function DashboardPage() {
 
                 <div className="grid gap-6 xl:grid-cols-2">
                   <AppSection>
-                    <SectionHeader eyebrow="Planner signal" title="Main blockers" description="A quick read on what currently limits platoon completion the most." />
+                    <SectionHeader eyebrow="Planner signal" title="Most open units" description="Counts below come from the same live matching coverage as the public board cards." />
                     <div className="mt-6 space-y-3">
                       {(strategicReadiness?.topMissingUnits?.length ? strategicReadiness.topMissingUnits.slice(0, 5) : []).map((unit) => (
                         <div key={unit.unitName} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
                             <div className="font-medium text-white">{unit.unitName}</div>
-                            <Badge variant="warning">{unit.missingSlots} missing slots</Badge>
+                            <Badge variant="warning">{unit.missingSlots} open slots</Badge>
                           </div>
                           {unit.reasonSummary ? <div className="mt-2 text-sm text-slate-400">{unit.reasonSummary}</div> : null}
                         </div>
@@ -508,14 +508,14 @@ export default function DashboardPage() {
                   </AppSection>
 
                   <AppSection>
-                    <SectionHeader eyebrow="Planner signal" title="Most constrained zones" description="Use this as an at-a-glance view before opening the deeper planner pages." />
+                    <SectionHeader eyebrow="Planner signal" title="Most open scopes" description="These open-slot counts now match the live coverage cards on the public board." />
                     <div className="mt-6 space-y-3">
                       {(strategicReadiness?.zones?.length ? strategicReadiness.zones.slice(0, 4) : []).map((zone) => (
                         <div key={`${zone.phase}-${zone.zoneName}`} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <div className="font-medium text-white">Phase {zone.phase} · {zone.zoneName}</div>
-                              <div className="mt-1 text-sm text-slate-400">{zone.blockers?.length ? `Blockers: ${zone.blockers.join(', ')}` : 'No blockers listed yet'}</div>
+                              <div className="mt-1 text-sm text-slate-400">{zone.blockers?.length ? `Top blockers: ${zone.blockers.join(', ')}` : 'No repeated blocker yet'}</div>
                             </div>
                             <Badge variant="warning">{zone.missingSlots} open slots</Badge>
                           </div>

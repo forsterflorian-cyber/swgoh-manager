@@ -2,10 +2,105 @@ import { sql } from '@vercel/postgres';
 
 import { getAuthenticatedUser } from '@/lib/api/auth';
 import { jsonError, jsonOk } from '@/lib/api/responses';
-import { PlatoonReadinessService } from '@/lib/services/platoon-readiness';
+import { PlatoonReadinessService, loadStrategicPlannerDatasetForGuildSlug } from '@/lib/services/platoon-readiness';
+import { computePlatoonMatching } from '@/lib/services/platoon-matching';
+import type { PlatoonMatchingGap, PlanetCategory } from '@/lib/types/platoon-readiness';
 import { getPrimaryGuildSettingsForUser } from '@/lib/services/guild-settings';
 
 export const runtime = 'nodejs';
+
+
+function formatCategoryLabel(category: PlanetCategory): string {
+  return category === 'SPECIAL' ? 'Bonus' : category;
+}
+
+function summarizeGapReason(gaps: PlatoonMatchingGap[]): string {
+  const freeEligible = new Set<string>();
+  const nearMiss = new Set<string>();
+  const capacityBlocked = new Set<string>();
+
+  for (const gap of gaps) {
+    for (const source of gap.possibleSources) {
+      if (source.kind === 'eligible') {
+        freeEligible.add(source.memberId);
+      } else if ((source.missingRelicTiers ?? 0) <= 2 && (source.missingRarity ?? 0) <= 1) {
+        nearMiss.add(source.memberId);
+      } else {
+        capacityBlocked.add(source.memberId);
+      }
+    }
+  }
+
+  const parts: string[] = [];
+  if (freeEligible.size > 0) parts.push(`${freeEligible.size} member${freeEligible.size === 1 ? '' : 's'} qualify now`);
+  if (nearMiss.size > 0) parts.push(`${nearMiss.size} near miss${nearMiss.size === 1 ? '' : 'es'} need small upgrades`);
+  if (capacityBlocked.size > 0) parts.push(`${capacityBlocked.size} owned copies are tied up elsewhere`);
+
+  return parts.length > 0 ? parts.join(' · ') : 'Open slots remain with no immediately eligible copy in the current matching state.';
+}
+
+async function buildCoverageSignals(guildSlug: string) {
+  const dataset = await loadStrategicPlannerDatasetForGuildSlug(guildSlug);
+  if (!dataset.guild || !dataset.reference) {
+    return null;
+  }
+
+  const matching = computePlatoonMatching(dataset);
+
+  const topMissingUnits = Array.from(
+    matching.gaps.reduce((map, gap) => {
+      const key = gap.unitBaseId;
+      const existing = map.get(key) ?? {
+        unitName: gap.unitName ?? gap.unitBaseId,
+        missingSlots: 0,
+        gaps: [] as PlatoonMatchingGap[],
+      };
+      existing.missingSlots += 1;
+      existing.gaps.push(gap);
+      map.set(key, existing);
+      return map;
+    }, new Map<string, { unitName: string; missingSlots: number; gaps: PlatoonMatchingGap[] }>())
+      .values()
+  )
+    .sort((left, right) => right.missingSlots - left.missingSlots || left.unitName.localeCompare(right.unitName))
+    .slice(0, 5)
+    .map((entry) => ({
+      unitName: entry.unitName,
+      missingSlots: entry.missingSlots,
+      reasonSummary: summarizeGapReason(entry.gaps),
+    }));
+
+  const blockersByScope = matching.gaps.reduce((map, gap) => {
+    const key = `${gap.phase}:${gap.planetCategory ?? 'MIX'}`;
+    const counts = map.get(key) ?? new Map<string, { unitName: string; count: number }>();
+    const blockerKey = gap.unitBaseId;
+    const existing = counts.get(blockerKey) ?? { unitName: gap.unitName ?? gap.unitBaseId, count: 0 };
+    existing.count += 1;
+    counts.set(blockerKey, existing);
+    map.set(key, counts);
+    return map;
+  }, new Map<string, Map<string, { unitName: string; count: number }>>());
+
+  const zones = [...matching.coverage]
+    .map((entry) => {
+      const key = `${entry.phase}:${entry.category}`;
+      const blockers = Array.from((blockersByScope.get(key) ?? new Map()).values())
+        .sort((left, right) => right.count - left.count || left.unitName.localeCompare(right.unitName))
+        .slice(0, 2)
+        .map((blocker) => blocker.unitName);
+
+      return {
+        phase: entry.phase,
+        zoneName: formatCategoryLabel(entry.category),
+        missingSlots: Math.max(entry.requirementCount - entry.assignedCount, 0),
+        blockers,
+      };
+    })
+    .sort((left, right) => right.missingSlots - left.missingSlots || left.phase - right.phase)
+    .slice(0, 4);
+
+  return { topMissingUnits, zones };
+}
 
 export async function GET() {
   try {
@@ -74,64 +169,55 @@ export async function GET() {
             }
           : null,
       lastRosterSync: guild.lastRosterSync,
-      strategicReadiness:
-        planning.summary && planning.reference
-          ? {
-              reference: {
+      strategicReadiness: await (async () => {
+        const matchingSignals = guild.slug ? await buildCoverageSignals(guild.slug) : null;
+
+        if (planning.summary && planning.reference) {
+          return {
+            reference: {
+              name: planning.reference.name,
+              tbKey: planning.reference.tbKey,
+            },
+            summary: planning.summary,
+            topMissingUnits: matchingSignals?.topMissingUnits ?? planning.topMissingUnits.slice(0, 5).map((unit) => ({
+              unitName: unit.unitName,
+              missingSlots: unit.missingSlots,
+              reasonSummary: unit.reasonSummary,
+            })),
+            zones: matchingSignals?.zones ?? [...planning.zones]
+              .sort((left, right) => {
+                if (right.missingSlots !== left.missingSlots) {
+                  return right.missingSlots - left.missingSlots;
+                }
+
+                return left.phase - right.phase;
+              })
+              .slice(0, 4)
+              .map((zone) => ({
+                phase: zone.phase,
+                zoneName: zone.zoneName,
+                missingSlots: zone.missingSlots,
+                blockers: zone.blockers.slice(0, 2).map((blocker) => blocker.unitName),
+              })),
+            recommendedActions: planning.recommendedActions,
+            dataState: planning.dataState,
+          };
+        }
+
+        return {
+          reference: planning.reference
+            ? {
                 name: planning.reference.name,
                 tbKey: planning.reference.tbKey,
-              },
-              summary: planning.summary,
-              topMissingUnits: planning.topMissingUnits.slice(0, 5).map((unit) => ({
-                unitName: unit.unitName,
-                missingSlots: unit.missingSlots,
-                blockedSlots: unit.blockedSlots,
-                blockedZones: unit.blockedZones,
-                blockedPlatoons: unit.blockedPlatoons,
-                limitingZones: unit.limitingZones,
-                limitingPlatoons: unit.limitingPlatoons,
-                nearMissOwners: unit.nearMissOwners,
-                nearMissSlots: unit.nearMissSlots,
-                hardMissingSlots: unit.hardMissingSlots,
-                estimatedUnlockSlots: unit.estimatedUnlockSlots,
-                primaryConstraint: unit.primaryConstraint,
-                reasonSummary: unit.reasonSummary,
-                impactScore: unit.impactScore,
-              })),
-              zones: [...planning.zones]
-                .sort((left, right) => {
-                  if (right.missingSlots !== left.missingSlots) {
-                    return right.missingSlots - left.missingSlots;
-                  }
-
-                  return left.phase - right.phase;
-                })
-                .slice(0, 4)
-                .map((zone) => ({
-                  phase: zone.phase,
-                  zoneName: zone.zoneName,
-                  missingSlots: zone.missingSlots,
-                  status: zone.status,
-                  estimatedCoverablePlatoons: zone.estimatedCoverablePlatoons,
-                  totalPlatoons: zone.totalPlatoons,
-                  blockers: zone.blockers.slice(0, 2).map((blocker) => blocker.unitName),
-                })),
-              recommendedActions: planning.recommendedActions,
-              dataState: planning.dataState,
-            }
-          : {
-              reference: planning.reference
-                ? {
-                    name: planning.reference.name,
-                    tbKey: planning.reference.tbKey,
-                  }
-                : null,
-              summary: null,
-              topMissingUnits: [],
-              zones: [],
-              recommendedActions: planning.recommendedActions,
-              dataState: planning.dataState,
-            },
+              }
+            : null,
+          summary: null,
+          topMissingUnits: matchingSignals?.topMissingUnits ?? [],
+          zones: matchingSignals?.zones ?? [],
+          recommendedActions: planning.recommendedActions,
+          dataState: planning.dataState,
+        };
+      })(),
       permissions: {
         canManageGuild: planning.permissions.canManageTargets,
       },
