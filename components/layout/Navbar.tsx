@@ -7,7 +7,7 @@ import { useSession } from 'next-auth/react';
 import { LayoutDashboard, Settings, UserRound, Swords, ClipboardList, ArrowUpRight } from 'lucide-react';
 
 import { LogoutButton } from '@/components/auth/logout-button';
-import { WorkspaceSwitcher, type WorkspaceMode } from '@/components/layout/WorkspaceSwitcher';
+import { WorkspaceSwitcher, type WorkspaceMode, type WorkspaceOption } from '@/components/layout/WorkspaceSwitcher';
 import type { ApiEnvelope } from '@/lib/types/api';
 import { cn } from '@/lib/utils/cn';
 import { routes } from '@/lib/utils/routes';
@@ -154,10 +154,10 @@ export function Navbar() {
               </Link>
               {availableModes.length > 1 ? (
                 <WorkspaceSwitcher
-                  options={[
+                  options={([
                     { id: 'officer', label: 'Officer workspace', description: 'Setup, sync and publishing' },
                     { id: 'member', label: 'Member workspace', description: 'Registration and assignments' },
-                  ].filter((option) => availableModes.includes(option.id))}
+                  ] as WorkspaceOption[]).filter((option) => availableModes.includes(option.id))}
                   defaultMode={availableModes.includes('officer') ? 'officer' : 'member'}
                   onChange={setWorkspaceMode}
                 />

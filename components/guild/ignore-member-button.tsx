@@ -6,13 +6,14 @@ import { Button } from '@/components/ui/Button';
 type Props = {
   guildId: string;
   memberId: string;
-  memberName: string;
-  isIgnored: boolean;
+  memberName?: string;
+  isIgnored?: boolean;
+  initiallyIgnored?: boolean;
 };
 
-export function IgnoreMemberButton({ guildId, memberId, memberName, isIgnored }: Props) {
+export function IgnoreMemberButton({ guildId, memberId, memberName = 'this member', isIgnored, initiallyIgnored }: Props) {
   const [loading, setLoading] = useState(false);
-  const [ignored, setIgnored] = useState(isIgnored);
+  const [ignored, setIgnored] = useState(Boolean(initiallyIgnored ?? isIgnored));
 
   async function handleToggle() {
     if (loading) return;

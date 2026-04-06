@@ -1,20 +1,7 @@
 import type {
   PlanetCategory,
-  StrategicMemberAssignmentLoad,
-  StrategicPlannerData,
-  StrategicPlannerSummary,
   StrategicRequirementSummary,
-  StrategicTargetAssignment,
-  StrategicTargetCandidate,
-  StrategicUnitImpact,
-  StrategicZoneReadiness,
-  PlatoonMatchingGap,
 } from '@/lib/types/platoon-readiness';
-
-export type Notice = {
-  tone: 'success' | 'error';
-  message: string;
-};
 
 export type SelectedCoverageCell = {
   phase: number;
@@ -96,15 +83,6 @@ export const PLANNER_VIEW_ITEMS: Array<{
   },
 ];
 
-export function isPlannerViewKey(value: string | null): value is PlannerViewKey {
-  return (
-    value === 'overview' ||
-    value === 'priorities' ||
-    value === 'targets' ||
-    value === 'matching'
-  );
-}
-
 export function buildPlannerViewHref(view: PlannerViewKey, fixture: string | null) {
   const params = new URLSearchParams();
 
@@ -119,11 +97,3 @@ export function buildPlannerViewHref(view: PlannerViewKey, fixture: string | nul
   const query = params.toString();
   return query ? `/planning/platoons?${query}` : '/planning/platoons';
 }
-
-export type ProgressionBucket = 'actionable_now' | 'next_up' | 'later';
-
-export const BUCKET_ORDER: Record<ProgressionBucket, number> = {
-  actionable_now: 0,
-  next_up: 1,
-  later: 2,
-};

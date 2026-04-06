@@ -4,10 +4,10 @@ import { getAuthenticatedUser } from '@/lib/api/auth';
 import { PlatoonReadinessService } from '@/lib/services/platoon-readiness';
 import type { StrategicPlannerData } from '@/lib/types/platoon-readiness';
 
+import type { PlannerViewKey } from './_lib/planner-types';
+
 export const runtime = 'nodejs';
 export const revalidate = 0;
-
-type PlannerViewKey = 'overview' | 'priorities' | 'targets' | 'matching';
 
 type PageProps = {
   searchParams: Promise<{
