@@ -1,0 +1,39 @@
+name: SWGOH weekly roster snapshot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 5'
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launch independent SWGOH Comlink
+        run: |
+          docker run -d --name comlink -p 127.0.0.1:3000:3000 \
+            -e APP_NAME=swgoh-weekly-snapshot \
+            -e PORT=3000 \
+            ghcr.io/swgoh-utils/swgoh-comlink:latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch and validate both accounts
+        run: node scripts/swgoh-weekly-snapshot.mjs
+      - name: Publish dated and latest snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/swgoh-weekly
+          if ! git diff --cached --quiet; then
+            git commit -m "Update verified SWGOH snapshots"
+            git push
+          fi
+      - name: Show logs if collection fails
+        if: failure()
+        run: docker logs --tail 120 comlink || true
