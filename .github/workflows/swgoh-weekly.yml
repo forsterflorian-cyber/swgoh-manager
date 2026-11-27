@@ -40,3 +40,5 @@ jobs:
       - name: Show logs if collection fails
         if: failure()
         run: docker logs --tail 120 comlink || true
+
+# Recheck roster after in-game upgrades.
