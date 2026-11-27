@@ -1,0 +1,120 @@
+name: SWGOH weekly player snapshot
+
+on:
+  schedule:
+    # Friday 05:30 UTC, before the 08:00 Europe/Berlin review.
+    - cron: "30 5 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: swgoh-weekly-snapshot
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Comlink
+        run: |
+          docker run -d --name swgoh-comlink \
+            -p 127.0.0.1:3200:3000 \
+            -e APP_NAME=swgoh-manager-weekly-snapshot \
+            ghcr.io/swgoh-utils/swgoh-comlink:latest
+      - name: Read and validate both accounts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import pathlib
+          import time
+          import urllib.error
+          import urllib.request
+
+          BASE = "http://127.0.0.1:3200"
+          PLAYERS = {"Cutie": "112572244", "Eri": "473975423"}
+
+          def post(path, payload, timeout=40):
+              data = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(
+                  BASE + path, data=data,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  return json.load(response)
+
+          # The service starts asynchronously, so retry startup failures.
+          for attempt in range(24):
+              try:
+                  post("/metadata", {"payload": {}, "enums": False}, timeout=8)
+                  break
+              except (urllib.error.URLError, TimeoutError, ValueError):
+                  if attempt == 23:
+                      raise RuntimeError("Comlink did not become ready")
+                  time.sleep(3)
+
+          now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          result = {
+              "source": "SWGOH Comlink public player endpoint",
+              "captured_at_utc": now,
+              "relic_conversion": "actual_relic_level = relic.currentTier - 2",
+              "players": {},
+          }
+          for name, ally in PLAYERS.items():
+              player = post("/player", {
+                  "payload": {"allyCode": ally},
+                  "enums": False,
+              })
+              if str(player.get("allyCode", "")).replace("-", "") != ally:
+                  raise RuntimeError(f"{name}: ally-code mismatch or empty response")
+              roster = player.get("rosterUnit")
+              datacrons = player.get("datacron")
+              if not isinstance(roster, list) or len(roster) < 100:
+                  raise RuntimeError(f"{name}: invalid or incomplete roster")
+              if not isinstance(datacrons, list):
+                  raise RuntimeError(f"{name}: datacron list missing")
+              normalized = []
+              for unit in roster:
+                  relic = unit.get("relic")
+                  tier = relic.get("currentTier") if isinstance(relic, dict) else None
+                  normalized.append({
+                      "definitionId": unit.get("definitionId"),
+                      "currentTier": unit.get("currentTier"),
+                      "currentRarity": unit.get("currentRarity"),
+                      "relicTierEnum": tier,
+                      "relicLevel": tier - 2 if isinstance(tier, int) and tier >= 2 else None,
+                      "skills": unit.get("skill", []),
+                  })
+              result["players"][name] = {
+                  "allyCode": ally,
+                  "name": player.get("name"),
+                  "lastActivityTime": player.get("lastActivityTime"),
+                  "playerRating": player.get("playerRating"),
+                  "seasonStatus": player.get("seasonStatus", []),
+                  "roster": normalized,
+                  "datacrons": datacrons,
+                  "rosterCount": len(normalized),
+              }
+
+          output = pathlib.Path("public-data/swgoh/latest.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+          print(f"Captured {', '.join(PLAYERS)} at {now}; validated both rosters.")
+          PY
+      - name: Commit only successfully validated snapshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public-data/swgoh/latest.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "data: refresh SWGOH Comlink player snapshots"
+            git push
+          fi
