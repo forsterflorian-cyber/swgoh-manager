@@ -1,0 +1,30 @@
+{
+  "checkedAt": "2026-11-27T07:48:43.804Z",
+  "source": "Public SWGOH.GG GAC history",
+  "accounts": {
+    "Cutie": {
+      "allyCode": "112572244",
+      "url": "https://swgoh.gg/p/112572244/gac-history/",
+      "status": "unavailable",
+      "pages": [],
+      "errors": [
+        {
+          "url": "https://swgoh.gg/p/112572244/gac-history/",
+          "error": "HTTP 403"
+        }
+      ]
+    },
+    "Eri": {
+      "allyCode": "473975423",
+      "url": "https://swgoh.gg/p/473975423/gac-history/",
+      "status": "unavailable",
+      "pages": [],
+      "errors": [
+        {
+          "url": "https://swgoh.gg/p/473975423/gac-history/",
+          "error": "HTTP 403"
+        }
+      ]
+    }
+  }
+}
