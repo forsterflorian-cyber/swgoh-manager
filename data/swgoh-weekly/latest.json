@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-11-27T07:43:44.310Z",
+  "checkedAt": "2026-11-27T07:46:13.813Z",
   "source": "SWGOH Comlink /player (live game API)",
   "sourceMethod": "GitHub Actions service container",
   "notes": "Relic tier is relic.currentTier - 2; 3v3/5v5 and datacron expiry are not independently validated by this snapshot; game API results can lag in-game upgrades.",
