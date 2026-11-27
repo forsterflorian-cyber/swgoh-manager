@@ -1,6 +1,9 @@
 name: SWGOH weekly roster snapshot
 
 on:
+  push:
+    paths:
+      - '.github/workflows/swgoh-weekly.yml'
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * 5'
