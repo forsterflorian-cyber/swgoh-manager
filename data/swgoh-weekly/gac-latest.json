@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-11-27T07:48:43.804Z",
+  "checkedAt": "2026-11-27T08:10:16.967Z",
   "source": "Public SWGOH.GG GAC history",
   "accounts": {
     "Cutie": {
@@ -26,5 +26,6 @@
         }
       ]
     }
-  }
+  },
+  "authentication": "login_http_403"
 }
